@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.feelbachelor.app.core.model.AnomalyAlert
+import com.feelbachelor.app.core.model.TriageStatus
 import com.feelbachelor.app.core.settings.EndpointConfig
 
 @Composable
@@ -34,12 +35,17 @@ fun MainScreen(
     onSaveBackendUrl: (String) -> Unit,
     onSaveApiToken: (String) -> Unit,
     onToggleExport: (Boolean) -> Unit,
+    onSaveThresholds: (Double, Double) -> Unit,
+    onSyncPolicy: () -> Unit,
     onStartCapture: () -> Unit,
     onStopCapture: () -> Unit,
-    onPurgeData: () -> Unit
+    onPurgeData: () -> Unit,
+    onUpdateTriage: (String, TriageStatus) -> Unit
 ) {
     var backendUrl by remember(config.backendUrl) { mutableStateOf(config.backendUrl) }
     var apiToken by remember(config.apiToken) { mutableStateOf(config.apiToken) }
+    var mediumThreshold by remember(config.mediumThreshold) { mutableStateOf(config.mediumThreshold.toString()) }
+    var highThreshold by remember(config.highThreshold) { mutableStateOf(config.highThreshold.toString()) }
 
     Column(
         modifier = Modifier
@@ -48,12 +54,13 @@ fun MainScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text("Feel Endpoint Prototype", style = MaterialTheme.typography.headlineSmall)
+        Text("Policy version: ${config.policyVersion}")
 
         OutlinedTextField(
             value = backendUrl,
             onValueChange = { backendUrl = it },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Backend URL (HTTPS)") }
+            label = { Text("Backend Base URL (HTTPS)") }
         )
         Button(onClick = { onSaveBackendUrl(backendUrl) }) {
             Text("Save backend URL")
@@ -79,6 +86,34 @@ fun MainScreen(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = mediumThreshold,
+                onValueChange = { mediumThreshold = it },
+                label = { Text("Medium threshold") },
+                modifier = Modifier.weight(1f)
+            )
+            OutlinedTextField(
+                value = highThreshold,
+                onValueChange = { highThreshold = it },
+                label = { Text("High threshold") },
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = {
+                val medium = mediumThreshold.toDoubleOrNull() ?: config.mediumThreshold
+                val high = highThreshold.toDoubleOrNull() ?: config.highThreshold
+                onSaveThresholds(medium, high)
+            }) {
+                Text("Save thresholds")
+            }
+            Button(onClick = onSyncPolicy) {
+                Text("Sync policy")
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = onStartCapture) { Text("Start capture") }
             Button(onClick = onStopCapture) { Text("Stop capture") }
             Button(onClick = onPurgeData) { Text("Purge local data") }
@@ -89,20 +124,36 @@ fun MainScreen(
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(alerts) { alert ->
-                AlertCard(alert)
+                AlertCard(
+                    alert = alert,
+                    onUpdateTriage = { status -> onUpdateTriage(alert.id, status) }
+                )
             }
         }
     }
 }
 
 @Composable
-private fun AlertCard(alert: AnomalyAlert) {
+private fun AlertCard(
+    alert: AnomalyAlert,
+    onUpdateTriage: (TriageStatus) -> Unit
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("App: ${alert.appId}", style = MaterialTheme.typography.titleSmall)
             Text("Severity: ${alert.severity}  Score: ${"%.3f".format(alert.anomalyScore)}")
+            Text("Model: ${alert.sourceModel}")
             Text("Top features: ${alert.topFeatures.joinToString(", ")}")
+            Text("Explanation: ${alert.explanation}")
+            Text("Triage: ${alert.triageStatus}")
             Text("Timestamp: ${alert.createdAtMillis}")
+
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Button(onClick = { onUpdateTriage(TriageStatus.OPEN) }) { Text("Open") }
+                Button(onClick = { onUpdateTriage(TriageStatus.INVESTIGATING) }) { Text("Investigating") }
+                Button(onClick = { onUpdateTriage(TriageStatus.RESOLVED) }) { Text("Resolved") }
+                Button(onClick = { onUpdateTriage(TriageStatus.FALSE_POSITIVE) }) { Text("False +") }
+            }
         }
     }
 }

@@ -43,7 +43,6 @@ class FlowVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var packetReader: TunPacketReader? = null
     private var flowAggregator: FlowAggregator? = null
-    private var appResolver: AppAttributionResolver? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -91,7 +90,6 @@ class FlowVpnService : VpnService() {
         val resolver = AppAttributionResolver(this)
         val aggregator = FlowAggregator()
         val parser = TunPacketParser()
-        appResolver = resolver
         flowAggregator = aggregator
 
         packetReader = TunPacketReader(parser) { packet ->
@@ -128,7 +126,6 @@ class FlowVpnService : VpnService() {
             }
         }
         flowAggregator = null
-        appResolver = null
 
         vpnInterface?.close()
         vpnInterface = null

@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.feelbachelor.app.core.model.AnomalyAlert
+import com.feelbachelor.app.core.model.TriageStatus
+import com.feelbachelor.app.core.model.ThresholdProfile
 import com.feelbachelor.app.core.settings.EndpointConfig
 import com.feelbachelor.app.di.AppContainer
 import kotlinx.coroutines.delay
@@ -22,7 +24,7 @@ class MainViewModel(
     init {
         viewModelScope.launch {
             while (true) {
-                _alerts.value = container.repository.latestAlerts(limit = 25)
+                _alerts.value = container.repository.latestAlerts(limit = 50)
                 delay(5_000)
             }
         }
@@ -42,6 +44,23 @@ class MainViewModel(
 
     fun setCaptureEnabled(enabled: Boolean) {
         container.settingsStore.setCaptureEnabled(enabled)
+    }
+
+    fun setBaseThresholds(medium: Double, high: Double) {
+        container.settingsStore.setBaseThresholds(ThresholdProfile(medium, high))
+    }
+
+    fun syncPolicy() {
+        viewModelScope.launch {
+            container.repository.syncRemotePolicy(container.eventClient)
+        }
+    }
+
+    fun updateAlertTriage(alertId: String, status: TriageStatus, note: String = "") {
+        viewModelScope.launch {
+            container.repository.updateAlertTriage(alertId = alertId, status = status, note = note)
+            _alerts.value = container.repository.latestAlerts(limit = 50)
+        }
     }
 
     fun purgeLocalData() {

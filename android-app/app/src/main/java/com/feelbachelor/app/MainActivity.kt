@@ -43,9 +43,12 @@ class MainActivity : ComponentActivity() {
                 onSaveBackendUrl = viewModel::setBackendUrl,
                 onSaveApiToken = viewModel::setApiToken,
                 onToggleExport = viewModel::setExportEnabled,
+                onSaveThresholds = viewModel::setBaseThresholds,
+                onSyncPolicy = viewModel::syncPolicy,
                 onStartCapture = ::requestOrStartCapture,
                 onStopCapture = ::stopCaptureService,
-                onPurgeData = viewModel::purgeLocalData
+                onPurgeData = viewModel::purgeLocalData,
+                onUpdateTriage = { alertId, status -> viewModel.updateAlertTriage(alertId, status) }
             )
         }
     }
