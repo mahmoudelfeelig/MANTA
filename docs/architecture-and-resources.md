@@ -11,6 +11,12 @@
 - SIEM/Wazuh backend
 - Offline training and analysis pipeline
 
+## Implemented repository layout
+- `android-app/`: Android endpoint scaffold.
+- `backend-adapter/`: secure ingest and Wazuh forwarding adapter.
+- `ml-pipeline/`: feature engineering, training, evaluation, TFLite export.
+- `THIRD_PARTY_NOTICES.md`: license and reuse tracking.
+
 ## Android endpoint design
 
 ## VPN capture
@@ -65,6 +71,13 @@
 - HTTPS client with token/API-key auth.
 - Reliable delivery with queue and retry backoff.
 - Optionally dead-letter queue for failed events.
+
+## Implemented secure defaults
+- Android exporter rejects non-HTTPS backend URLs.
+- Cleartext traffic disabled in Android network security config.
+- Endpoint secrets stored via encrypted shared preferences.
+- Adapter requires token auth and validates payload size.
+- Adapter stores failed forwarding attempts and moves exhausted retries to dead-letter.
 
 ## SIEM/Wazuh side
 - Ingestion endpoint or adapter to normalize event schema.

@@ -68,6 +68,26 @@ Target completion for core thesis results: May 2026.
 - Consent, metadata-only privacy mode, export toggle, and purge controls.
 - Reproducible experiment pipeline and metric reporting.
 
+## Implementation status (scaffold)
+Current status as of February 7, 2026:
+
+| P0 area | Status | Implementation location |
+|---|---|---|
+| VPN lifecycle manager | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/service/FlowVpnService.kt` |
+| Packet-to-flow converter | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/service/TunPacketParser.kt` |
+| App attribution | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/domain/flow/AppAttributionResolver.kt` |
+| Local flow storage | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/data/db/` |
+| Retention policy | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/worker/RetentionCleanupWorker.kt` |
+| Export queue with retry | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/data/FlowRepository.kt` |
+| Feature window builder | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/domain/flow/FeatureWindowBuilder.kt` |
+| Statistical baseline detector | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/domain/detection/StatisticalAnomalyDetector.kt` |
+| Offline training pipeline | Implemented scaffold | `ml-pipeline/src/ml_pipeline/train_baseline.py` |
+| TFLite integration path | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/domain/detection/TfliteAnomalyScorer.kt`, `ml-pipeline/src/ml_pipeline/export_tflite.py` |
+| Backend API client | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/core/net/OkHttpEventClient.kt` |
+| Wazuh-compatible ingestion adapter | Implemented scaffold | `backend-adapter/app/main.py` |
+| Dashboard starter artifact | Implemented scaffold | `backend-adapter/dashboards/wazuh-mobile-anomaly-dashboard.ndjson` |
+| Privacy controls + purge + export toggle | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/ui/` |
+
 ## Out of scope for MVP
 - Payload DPI.
 - Federated training on-device.
@@ -84,11 +104,11 @@ Target completion for core thesis results: May 2026.
 
 ## Research focus
 - `RQ1`: Can app-level network metadata captured via Android `VpnService` detect anomalous behavior with useful accuracy?
-- `RQ2`: What privacy/utility trade-off appears when restricting to metadata-only features?
+- `RQ3`: What privacy/utility trade-off appears when restricting to metadata-only features?
 
 ## Hypotheses
 - `H1`: Metadata-only features can achieve meaningful anomaly detection performance above simple statistical baselines.
-- `H2`: Privacy-preserving feature selection can retain most detection value while reducing sensitive exposure.
+- `H3`: Privacy-preserving feature selection can retain most detection value while reducing sensitive exposure.
 
 ## Data strategy
 - Controlled traces from prototype app:
