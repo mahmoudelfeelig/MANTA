@@ -5,6 +5,7 @@ import time
 import uuid
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
+from starlette.responses import Response
 
 from .config import load_settings
 from .models import (
@@ -34,6 +35,16 @@ wazuh_client = WazuhClient(
 )
 storage.initialize()
 app = FastAPI(title="Feel Backend Adapter", version="0.2.0")
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response: Response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def auth_dependency(
@@ -86,9 +97,14 @@ def _process_pending_item(item: QueueItem) -> None:
 
 @app.get("/health")
 def health() -> dict:
+    config_warnings: list[str] = []
+    if len(settings.shared_token) < 16:
+        config_warnings.append("ADAPTER_SHARED_TOKEN is shorter than recommended minimum length (16)")
+
     return {
         "status": "ok",
         "wazuh_configured": wazuh_client.configured(),
+        "config_warnings": config_warnings,
         "queue": storage.stats(),
     }
 

@@ -9,6 +9,7 @@ Secure ingest service for Android mobile flow events with optional Wazuh forward
 - Optional forwarding to Wazuh/SIEM over HTTPS.
 - Alert triage lifecycle storage and update endpoints.
 - Device policy sync endpoints for adaptive thresholds and retention/export controls.
+- Security hardening middleware headers and payload shape limits.
 
 ## Run
 ```bash

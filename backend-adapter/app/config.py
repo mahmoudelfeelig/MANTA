@@ -25,13 +25,19 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    shared_token = os.getenv("ADAPTER_SHARED_TOKEN", "").strip()
+    max_event_size_bytes = max(1_024, int(os.getenv("MAX_EVENT_SIZE_BYTES", "65536")))
+    max_retries = max(1, min(20, int(os.getenv("MAX_RETRIES", "5"))))
+    retry_base_seconds = max(1, min(60, int(os.getenv("RETRY_BASE_SECONDS", "5"))))
+    sqlite_path = os.getenv("SQLITE_PATH", "adapter_state.db").strip() or "adapter_state.db"
+
     return Settings(
-        shared_token=os.getenv("ADAPTER_SHARED_TOKEN", ""),
+        shared_token=shared_token,
         wazuh_ingest_url=os.getenv("WAZUH_INGEST_URL", "").strip(),
         wazuh_api_token=os.getenv("WAZUH_API_TOKEN", "").strip(),
         allow_insecure_wazuh=_bool_env("ALLOW_INSECURE_WAZUH", False),
-        max_event_size_bytes=int(os.getenv("MAX_EVENT_SIZE_BYTES", "65536")),
-        max_retries=int(os.getenv("MAX_RETRIES", "5")),
-        retry_base_seconds=int(os.getenv("RETRY_BASE_SECONDS", "5")),
-        sqlite_path=os.getenv("SQLITE_PATH", "adapter_state.db").strip(),
+        max_event_size_bytes=max_event_size_bytes,
+        max_retries=max_retries,
+        retry_base_seconds=retry_base_seconds,
+        sqlite_path=sqlite_path,
     )

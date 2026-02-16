@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ThresholdProfile(BaseModel):
@@ -24,6 +24,12 @@ class DevicePolicyPayload(BaseModel):
     app_threshold_overrides: dict[str, ThresholdProfile] = Field(default_factory=dict)
     export_enabled: bool = True
     retention_days: int = Field(default=7, ge=1, le=90)
+
+    @model_validator(mode="after")
+    def validate_override_count(self):
+        if len(self.app_threshold_overrides) > 1000:
+            raise ValueError("Too many app threshold overrides")
+        return self
 
 
 class MobileFlowEvent(BaseModel):
@@ -59,6 +65,13 @@ class MobileFlowEvent(BaseModel):
             raise ValueError("Only mobile_flow events are accepted")
         return value
 
+    @field_validator("event_version")
+    @classmethod
+    def validate_event_version(cls, value: str) -> str:
+        if value not in {"1.0", "1.1"}:
+            raise ValueError("Unsupported event_version")
+        return value
+
     @field_validator("protocol")
     @classmethod
     def normalize_protocol(cls, value: str) -> str:
@@ -66,6 +79,16 @@ class MobileFlowEvent(BaseModel):
         if normalized not in {"TCP", "UDP", "ICMP", "UNKNOWN"}:
             raise ValueError("Unsupported protocol")
         return normalized
+
+    @model_validator(mode="after")
+    def validate_time_and_payload_shape(self):
+        if self.timestamp_end < self.timestamp_start:
+            raise ValueError("timestamp_end must be >= timestamp_start")
+        if self.explain_top_features is not None and len(self.explain_top_features) > 16:
+            raise ValueError("Too many explain_top_features")
+        if self.ipfix_elements is not None and len(self.ipfix_elements) > 512:
+            raise ValueError("Too many ipfix_elements")
+        return self
 
 
 class MobileAlertEvent(BaseModel):
@@ -77,10 +100,10 @@ class MobileAlertEvent(BaseModel):
     anomaly_score: float = Field(ge=0.0, le=1.0)
     severity: Literal["LOW", "MEDIUM", "HIGH"]
     top_features: list[str] = Field(default_factory=list)
-    explanation: str = Field(default="")
-    source_model: str = Field(default="unknown")
+    explanation: str = Field(default="", max_length=2048)
+    source_model: str = Field(default="unknown", max_length=128)
     triage_status: Literal["OPEN", "INVESTIGATING", "RESOLVED", "FALSE_POSITIVE"] = "OPEN"
-    triage_note: str = Field(default="")
+    triage_note: str = Field(default="", max_length=1024)
     timestamp: int
 
     @field_validator("event_type")
@@ -89,6 +112,19 @@ class MobileAlertEvent(BaseModel):
         if value != "mobile_alert":
             raise ValueError("Only mobile_alert events are accepted")
         return value
+
+    @field_validator("event_version")
+    @classmethod
+    def validate_event_version(cls, value: str) -> str:
+        if value != "1.0":
+            raise ValueError("Unsupported event_version")
+        return value
+
+    @model_validator(mode="after")
+    def validate_top_features(self):
+        if len(self.top_features) > 16:
+            raise ValueError("Too many top_features")
+        return self
 
 
 class AlertTriageUpdate(BaseModel):
