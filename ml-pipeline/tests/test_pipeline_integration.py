@@ -45,6 +45,7 @@ def test_pipeline_cli_end_to_end(tmp_path: Path) -> None:
     report_path = reports / "eval.json"
     explanations_path = reports / "explanations.csv"
     policy_path = reports / "policy.json"
+    comparison_path = reports / "comparison.json"
 
     subprocess.run(
         [
@@ -65,8 +66,24 @@ def test_pipeline_cli_end_to_end(tmp_path: Path) -> None:
         check=True,
     )
 
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ml_pipeline.compare_baselines",
+            "--input",
+            str(input_csv),
+            "--artifacts",
+            str(artifacts),
+            "--output",
+            str(comparison_path),
+        ],
+        check=True,
+    )
+
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert "rows" in report
     assert report_path.exists()
     assert explanations_path.exists()
     assert policy_path.exists()
+    assert comparison_path.exists()
