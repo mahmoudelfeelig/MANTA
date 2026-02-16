@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, f1_score, precision_score, recall_score, roc_auc_score
 
+from .calibration import calibrate_thresholds
+from .explain import compute_feature_contributions
 from .features import build_feature_windows, feature_matrix
 
 
@@ -18,6 +20,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--artifacts", required=True, help="Directory containing baseline_model.joblib")
     parser.add_argument("--output", required=True, help="Output JSON report path")
     parser.add_argument("--threshold", type=float, default=0.5, help="Threshold on normalized anomaly score")
+    parser.add_argument("--explanations-output", default="", help="Optional CSV path for top-feature explanations")
+    parser.add_argument("--policy-output", default="", help="Optional JSON path for calibrated adaptive policy")
     return parser.parse_args()
 
 
@@ -40,6 +44,7 @@ def main() -> None:
     decision = -model.decision_function(X)
     scores = normalize_scores(decision)
     predictions = (scores >= args.threshold).astype(int)
+    windows["anomaly_score"] = scores
 
     report = {
         "rows": int(len(windows)),
@@ -64,6 +69,18 @@ def main() -> None:
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+    if args.explanations_output:
+        explanations = compute_feature_contributions(windows)
+        explanations_path = Path(args.explanations_output)
+        explanations_path.parent.mkdir(parents=True, exist_ok=True)
+        explanations.to_csv(explanations_path, index=False)
+
+    if args.policy_output:
+        policy = calibrate_thresholds(windows_df=windows, score_column="anomaly_score", app_column="app_id")
+        policy_path = Path(args.policy_output)
+        policy_path.parent.mkdir(parents=True, exist_ok=True)
+        policy_path.write_text(json.dumps(policy, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

@@ -23,10 +23,24 @@ python -m ml_pipeline.train_baseline --input data/flows.csv --output artifacts/b
 
 Evaluate:
 ```bash
-python -m ml_pipeline.evaluate --input data/flows.csv --artifacts artifacts/baseline --output reports/eval.json
+python -m ml_pipeline.evaluate \
+  --input data/flows.csv \
+  --artifacts artifacts/baseline \
+  --output reports/eval.json \
+  --explanations-output reports/explanations.csv \
+  --policy-output reports/policy-calibrated.json
 ```
 
 Export TFLite autoencoder:
 ```bash
 python -m ml_pipeline.export_tflite --input data/flows.csv --output artifacts/tflite/anomaly.tflite
+```
+
+Calibrate policy thresholds from scored windows:
+```bash
+python -m ml_pipeline.calibrate_thresholds \
+  --input reports/windows-with-scores.csv \
+  --output reports/policy.json \
+  --policy-version 2 \
+  --export-enabled
 ```
