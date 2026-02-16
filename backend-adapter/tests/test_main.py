@@ -84,6 +84,7 @@ def test_health_returns_ok() -> None:
     result = health()
     assert result["status"] == "ok"
     assert "queue" in result
+    assert "config_warnings" in result
 
 
 def test_accepts_mobile_flow_with_ipfix_fields() -> None:
