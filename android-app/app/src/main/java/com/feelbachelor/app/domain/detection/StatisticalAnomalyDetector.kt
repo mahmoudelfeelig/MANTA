@@ -57,6 +57,7 @@ class StatisticalAnomalyDetector : AnomalyScorer {
         return AnomalyScoreResult(
             score = bounded,
             topFeatures = topFeatures,
+            featureContributions = zScores,
             source = "statistical"
         )
     }

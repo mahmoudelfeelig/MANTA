@@ -7,6 +7,7 @@ import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.channels.FileChannel
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -14,6 +15,17 @@ class TfliteAnomalyScorer(
     private val context: Context,
     private val modelAssetPath: String = "models/anomaly.tflite"
 ) : AnomalyScorer {
+
+    private val featureNames = listOf(
+        "flow_count",
+        "bytes_out",
+        "bytes_in",
+        "mean_packet_size",
+        "outbound_ratio",
+        "burstiness",
+        "novelty",
+        "conn_freq_delta"
+    )
 
     private val interpreter: Interpreter? by lazy {
         runCatching {
@@ -44,9 +56,12 @@ class TfliteAnomalyScorer(
             window.connectionFrequencyDelta.toFloat()
         )
 
+        val contributions = featureNames.zip(input.map { abs(it.toDouble()) }).toMap()
+
         val interpreter = interpreter ?: return AnomalyScoreResult(
             score = 0.0,
             topFeatures = listOf("model_unavailable"),
+            featureContributions = contributions,
             source = "tflite-unavailable"
         )
 
@@ -57,9 +72,15 @@ class TfliteAnomalyScorer(
         val output = Array(1) { FloatArray(1) }
         interpreter.run(inputBuffer, output)
 
+        val topFeatures = contributions.entries
+            .sortedByDescending { it.value }
+            .take(3)
+            .map { it.key }
+
         return AnomalyScoreResult(
             score = min(1.0, max(0.0, output[0][0].toDouble())),
-            topFeatures = listOf("model_score"),
+            topFeatures = topFeatures,
+            featureContributions = contributions,
             source = "tflite"
         )
     }
