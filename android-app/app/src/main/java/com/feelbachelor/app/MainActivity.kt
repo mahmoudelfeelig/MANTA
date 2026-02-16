@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -36,15 +37,19 @@ class MainActivity : ComponentActivity() {
         setContent {
             val config by viewModel.config.collectAsState()
             val alerts by viewModel.alerts.collectAsState()
+            val statusMessage by viewModel.statusMessage.collectAsState()
 
             MainScreen(
                 config = config,
                 alerts = alerts,
+                statusMessage = statusMessage,
                 onSaveBackendUrl = viewModel::setBackendUrl,
                 onSaveApiToken = viewModel::setApiToken,
                 onToggleExport = viewModel::setExportEnabled,
                 onSaveThresholds = viewModel::setBaseThresholds,
                 onSyncPolicy = viewModel::syncPolicy,
+                onAcceptConsent = viewModel::acceptConsent,
+                onExportDataset = viewModel::exportDatasetSnapshot,
                 onStartCapture = ::requestOrStartCapture,
                 onStopCapture = ::stopCaptureService,
                 onPurgeData = viewModel::purgeLocalData,
@@ -54,6 +59,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestOrStartCapture() {
+        if (!viewModel.hasConsent()) {
+            Toast.makeText(this, "Consent is required before capture.", Toast.LENGTH_SHORT).show()
+            return
+        }
         val prepareIntent = VpnService.prepare(this)
         if (prepareIntent != null) {
             vpnPermissionLauncher.launch(prepareIntent)

@@ -32,11 +32,14 @@ import com.feelbachelor.app.core.settings.EndpointConfig
 fun MainScreen(
     config: EndpointConfig,
     alerts: List<AnomalyAlert>,
+    statusMessage: String?,
     onSaveBackendUrl: (String) -> Unit,
     onSaveApiToken: (String) -> Unit,
     onToggleExport: (Boolean) -> Unit,
     onSaveThresholds: (Double, Double) -> Unit,
     onSyncPolicy: () -> Unit,
+    onAcceptConsent: () -> Unit,
+    onExportDataset: () -> Unit,
     onStartCapture: () -> Unit,
     onStopCapture: () -> Unit,
     onPurgeData: () -> Unit,
@@ -55,6 +58,24 @@ fun MainScreen(
     ) {
         Text("Feel Endpoint Prototype", style = MaterialTheme.typography.headlineSmall)
         Text("Policy version: ${config.policyVersion}")
+
+        if (!config.consentAccepted) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Consent required", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "This app captures metadata-only network flow information via Android VPNService. " +
+                            "No packet payload is inspected. Export is optional and controlled by the toggle."
+                    )
+                    Button(onClick = onAcceptConsent) {
+                        Text("I understand and consent")
+                    }
+                }
+            }
+        }
 
         OutlinedTextField(
             value = backendUrl,
@@ -114,9 +135,20 @@ fun MainScreen(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onStartCapture) { Text("Start capture") }
+            Button(
+                onClick = onStartCapture,
+                enabled = config.consentAccepted
+            ) { Text("Start capture") }
             Button(onClick = onStopCapture) { Text("Stop capture") }
             Button(onClick = onPurgeData) { Text("Purge local data") }
+        }
+
+        Button(onClick = onExportDataset) {
+            Text("Export dataset snapshot")
+        }
+
+        if (!statusMessage.isNullOrBlank()) {
+            Text(statusMessage, style = MaterialTheme.typography.bodySmall)
         }
 
         Spacer(Modifier.height(8.dp))

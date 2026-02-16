@@ -20,6 +20,8 @@ class MainViewModel(
 
     private val _alerts = MutableStateFlow<List<AnomalyAlert>>(emptyList())
     val alerts: StateFlow<List<AnomalyAlert>> = _alerts
+    private val _statusMessage = MutableStateFlow<String?>(null)
+    val statusMessage: StateFlow<String?> = _statusMessage
 
     init {
         viewModelScope.launch {
@@ -46,6 +48,13 @@ class MainViewModel(
         container.settingsStore.setCaptureEnabled(enabled)
     }
 
+    fun hasConsent(): Boolean = container.settingsStore.readConfig().consentAccepted
+
+    fun acceptConsent() {
+        container.settingsStore.setConsentAccepted(true)
+        _statusMessage.value = "Consent saved. Capture can now be started."
+    }
+
     fun setBaseThresholds(medium: Double, high: Double) {
         container.settingsStore.setBaseThresholds(ThresholdProfile(medium, high))
     }
@@ -67,6 +76,17 @@ class MainViewModel(
         viewModelScope.launch {
             container.repository.purgeAllLocalData()
             _alerts.value = emptyList()
+            _statusMessage.value = "Local data purged."
+        }
+    }
+
+    fun exportDatasetSnapshot(maxRows: Int = 20_000) {
+        viewModelScope.launch {
+            val result = container.repository.exportLatestFlowsCsv(maxRows = maxRows)
+            _statusMessage.value = result.fold(
+                onSuccess = { path -> "Dataset snapshot exported: $path" },
+                onFailure = { error -> "Export failed: ${error.message}" }
+            )
         }
     }
 }

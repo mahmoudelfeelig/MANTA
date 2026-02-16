@@ -68,6 +68,14 @@ class FlowVpnService : VpnService() {
             return
         }
 
+        val app = application as FeelApplication
+        val config = app.container.settingsStore.readConfig()
+        if (!config.captureEnabled || !config.consentAccepted) {
+            running.set(false)
+            stopSelf()
+            return
+        }
+
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
 
@@ -85,7 +93,6 @@ class FlowVpnService : VpnService() {
         }
 
         vpnInterface = descriptor
-        val app = application as FeelApplication
         val repository = app.container.repository
         val resolver = AppAttributionResolver(this)
         val aggregator = FlowAggregator()

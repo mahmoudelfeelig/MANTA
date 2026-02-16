@@ -22,6 +22,7 @@ private const val KEY_HIGH_THRESHOLD = "high_threshold"
 private const val KEY_POLICY_VERSION = "policy_version"
 private const val KEY_RETENTION_DAYS = "retention_days"
 private const val KEY_APP_THRESHOLD_OVERRIDES = "app_threshold_overrides"
+private const val KEY_CONSENT_ACCEPTED = "consent_accepted"
 
 data class EndpointConfig(
     val backendUrl: String,
@@ -31,7 +32,8 @@ data class EndpointConfig(
     val mediumThreshold: Double,
     val highThreshold: Double,
     val policyVersion: Int,
-    val retentionDays: Int
+    val retentionDays: Int,
+    val consentAccepted: Boolean
 ) {
     fun isConfigured(): Boolean = backendUrl.isNotBlank() && apiToken.isNotBlank()
 }
@@ -71,6 +73,9 @@ class SecureSettingsStore(context: Context) {
         if (!prefs.contains(KEY_APP_THRESHOLD_OVERRIDES)) {
             prefs.edit().putString(KEY_APP_THRESHOLD_OVERRIDES, "{}").apply()
         }
+        if (!prefs.contains(KEY_CONSENT_ACCEPTED)) {
+            prefs.edit().putBoolean(KEY_CONSENT_ACCEPTED, false).apply()
+        }
 
         configState = MutableStateFlow(readConfig())
     }
@@ -86,7 +91,8 @@ class SecureSettingsStore(context: Context) {
             mediumThreshold = prefs.getString(KEY_MEDIUM_THRESHOLD, "0.60")?.toDoubleOrNull() ?: 0.60,
             highThreshold = prefs.getString(KEY_HIGH_THRESHOLD, "0.85")?.toDoubleOrNull() ?: 0.85,
             policyVersion = prefs.getInt(KEY_POLICY_VERSION, 1),
-            retentionDays = prefs.getInt(KEY_RETENTION_DAYS, 7).coerceIn(1, 90)
+            retentionDays = prefs.getInt(KEY_RETENTION_DAYS, 7).coerceIn(1, 90),
+            consentAccepted = prefs.getBoolean(KEY_CONSENT_ACCEPTED, false)
         )
     }
 
@@ -107,6 +113,11 @@ class SecureSettingsStore(context: Context) {
 
     fun setCaptureEnabled(value: Boolean) {
         prefs.edit().putBoolean(KEY_CAPTURE_ENABLED, value).apply()
+        configState.value = readConfig()
+    }
+
+    fun setConsentAccepted(value: Boolean) {
+        prefs.edit().putBoolean(KEY_CONSENT_ACCEPTED, value).apply()
         configState.value = readConfig()
     }
 

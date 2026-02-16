@@ -22,6 +22,7 @@ import com.feelbachelor.app.domain.flow.FeatureWindowBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.File
 import java.util.UUID
 import kotlin.math.min
 
@@ -238,6 +239,55 @@ class FlowRepository(
         dao.purgeFeatureWindows()
         dao.purgeScores()
         dao.purgeExportQueue()
+    }
+
+    suspend fun exportLatestFlowsCsv(maxRows: Int = 20_000): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val safeLimit = maxRows.coerceIn(1, 100_000)
+            val flows = dao.getLatestFlows(safeLimit).asReversed()
+            val exportRoot = File(appContext.getExternalFilesDir(null), "exports")
+            if (!exportRoot.exists()) {
+                exportRoot.mkdirs()
+            }
+
+            val outputFile = File(exportRoot, "flows-${System.currentTimeMillis()}.csv")
+            val salt = settingsStore.getDeviceSalt()
+
+            outputFile.bufferedWriter(Charsets.UTF_8).use { writer ->
+                writer.appendLine(
+                    "timestamp_start_ms,timestamp_end_ms,app_id_pseudo,protocol,src_ip_hash,src_port," +
+                        "dst_ip_hash,dst_port,dst_host_hash,bytes_out,bytes_in,packets_out,packets_in,duration_ms,dst_novelty"
+                )
+
+                flows.forEach { flow ->
+                    val appPseudo = CryptoUtils.sha256("$salt:${flow.appId}")
+                    val srcIpHash = CryptoUtils.sha256("$salt:${flow.srcIp}")
+                    val dstIpHash = CryptoUtils.sha256("$salt:${flow.dstIp}")
+
+                    writer.appendLine(
+                        listOf(
+                            flow.timestampStartMillis,
+                            flow.timestampEndMillis,
+                            appPseudo,
+                            flow.protocol,
+                            srcIpHash,
+                            flow.srcPort,
+                            dstIpHash,
+                            flow.dstPort,
+                            flow.destinationHash,
+                            flow.bytesOut,
+                            flow.bytesIn,
+                            flow.packetsOut,
+                            flow.packetsIn,
+                            flow.durationMillis,
+                            flow.destinationNovelty
+                        ).joinToString(",")
+                    )
+                }
+            }
+
+            outputFile.absolutePath
+        }
     }
 
     private suspend fun saveFeatureWindow(window: FeatureWindow) {
