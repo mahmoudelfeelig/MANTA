@@ -1,6 +1,29 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
+
+
+class ThresholdProfile(BaseModel):
+    medium: float = Field(ge=0.0, le=1.0)
+    high: float = Field(ge=0.0, le=1.0)
+
+    @field_validator("high")
+    @classmethod
+    def validate_high_ge_medium(cls, value: float, info):
+        medium = info.data.get("medium") if info and info.data else None
+        if medium is not None and value < medium:
+            raise ValueError("high threshold must be >= medium")
+        return value
+
+
+class DevicePolicyPayload(BaseModel):
+    policy_version: int = Field(ge=1)
+    default_thresholds: ThresholdProfile
+    app_threshold_overrides: dict[str, ThresholdProfile] = Field(default_factory=dict)
+    export_enabled: bool = True
+    retention_days: int = Field(default=7, ge=1, le=90)
 
 
 class MobileFlowEvent(BaseModel):
@@ -24,6 +47,11 @@ class MobileFlowEvent(BaseModel):
     anomaly_score: float | None = Field(default=None, ge=0.0, le=1.0)
     explain_top_features: list[str] | None = None
 
+    # P1: NetFlow/IPFIX-style fields
+    netflow_version: int | None = Field(default=None, ge=1)
+    ipfix_template_id: int | None = Field(default=None, ge=0)
+    ipfix_elements: list[dict] | None = None
+
     @field_validator("event_type")
     @classmethod
     def validate_event_type(cls, value: str) -> str:
@@ -38,3 +66,37 @@ class MobileFlowEvent(BaseModel):
         if normalized not in {"TCP", "UDP", "ICMP", "UNKNOWN"}:
             raise ValueError("Unsupported protocol")
         return normalized
+
+
+class MobileAlertEvent(BaseModel):
+    event_type: str = Field(default="mobile_alert")
+    event_version: str = Field(default="1.0")
+    device_id_pseudo: str = Field(min_length=8, max_length=128)
+    alert_id: str = Field(min_length=8, max_length=128)
+    app_id: str = Field(min_length=1, max_length=256)
+    anomaly_score: float = Field(ge=0.0, le=1.0)
+    severity: Literal["LOW", "MEDIUM", "HIGH"]
+    top_features: list[str] = Field(default_factory=list)
+    explanation: str = Field(default="")
+    source_model: str = Field(default="unknown")
+    triage_status: Literal["OPEN", "INVESTIGATING", "RESOLVED", "FALSE_POSITIVE"] = "OPEN"
+    triage_note: str = Field(default="")
+    timestamp: int
+
+    @field_validator("event_type")
+    @classmethod
+    def validate_event_type(cls, value: str) -> str:
+        if value != "mobile_alert":
+            raise ValueError("Only mobile_alert events are accepted")
+        return value
+
+
+class AlertTriageUpdate(BaseModel):
+    status: Literal["OPEN", "INVESTIGATING", "RESOLVED", "FALSE_POSITIVE"]
+    note: str = Field(default="", max_length=1024)
+
+
+class AdapterEventAck(BaseModel):
+    status: Literal["accepted"]
+    event_id: str
+    forwarded: bool
