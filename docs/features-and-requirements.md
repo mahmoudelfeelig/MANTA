@@ -69,7 +69,7 @@ Target completion for core thesis results: May 2026.
 - Reproducible experiment pipeline and metric reporting.
 
 ## Implementation status (scaffold)
-Current status as of February 7, 2026:
+Current status as of February 10, 2026:
 
 | Scope area | Status | Implementation location |
 |---|---|---|
@@ -87,11 +87,17 @@ Current status as of February 7, 2026:
 | Wazuh-compatible ingestion adapter | Implemented scaffold | `backend-adapter/app/main.py` |
 | Dashboard starter artifact | Implemented scaffold | `backend-adapter/dashboards/wazuh-mobile-anomaly-dashboard.ndjson` |
 | Privacy controls + purge + export toggle | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/ui/` |
+| Consent and disclosure gate | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/ui/MainScreen.kt`, `android-app/app/src/main/java/com/feelbachelor/app/core/settings/SecureSettingsStore.kt` |
+| Dataset export utility (anonymized CSV snapshot) | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/data/FlowRepository.kt` |
 | NetFlow/IPFIX-style mapping (P1) | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/core/model/IpfixMapper.kt` |
 | Alert explanation output (P1) | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/domain/detection/ExplanationFormatter.kt` |
 | Adaptive thresholds (P1) | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/core/settings/SecureSettingsStore.kt`, `ml-pipeline/src/ml_pipeline/calibration.py` |
 | Alert triage fields and workflow (P1) | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/ui/MainScreen.kt`, `backend-adapter/app/main.py` |
 | Remote policy sync (P2) | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/worker/PolicySyncWorker.kt`, `backend-adapter/app/main.py` |
+| Controlled scenario runner (P0 tooling) | Implemented | `ml-pipeline/src/ml_pipeline/generate_controlled_dataset.py` |
+| One-command experiment suite (P0 tooling) | Implemented | `ml-pipeline/src/ml_pipeline/run_experiment_suite.py` |
+| IDS-style comparison pipeline (P0 tooling) | Implemented | `ml-pipeline/src/ml_pipeline/compare_baselines.py`, `ml-pipeline/src/ml_pipeline/ids_baseline.py` |
+| Reproducibility manifest (versions, hash, commands) | Implemented | `ml-pipeline/src/ml_pipeline/run_experiment_suite.py` |
 
 ## Out of scope for MVP
 - Payload DPI.

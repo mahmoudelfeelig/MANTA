@@ -21,6 +21,8 @@ Unit and integration-like JVM tests:
 Integration tests covering endpoint logic and persistence behavior:
 - `backend-adapter/tests/test_main.py`
 - `backend-adapter/tests/test_policy_and_triage_edges.py`
+- `backend-adapter/tests/test_model_validation.py`
+- `backend-adapter/tests/test_config.py`
 
 Covered behaviors:
 - Authenticated mobile flow ingest with IPFIX fields.
@@ -35,23 +37,32 @@ Unit + integration tests:
 - `ml-pipeline/tests/test_calibration.py`
 - `ml-pipeline/tests/test_explain.py`
 - `ml-pipeline/tests/test_pipeline_integration.py`
+- `ml-pipeline/tests/test_generate_controlled_dataset.py`
+- `ml-pipeline/tests/test_run_experiment_suite.py`
+- `ml-pipeline/tests/test_ids_baseline.py`
+- `ml-pipeline/tests/test_compare_baselines.py`
 
 Covered behaviors:
 - Feature window extraction correctness.
 - Threshold calibration generation.
 - Explanation generation output.
-- End-to-end train/evaluate CLI flow with generated artifacts.
+- IDS-style rule baseline scoring.
+- ML vs IDS baseline comparison report generation.
+- End-to-end train/evaluate/compare CLI flow with generated artifacts.
 
 ## Executed validation in this environment
-Executed on February 7, 2026:
-- `python3 -m compileall backend-adapter/app backend-adapter/tests`
-- `python3 -m compileall ml-pipeline/src ml-pipeline/tests`
-- `pytest -q -s backend-adapter/tests` (in temporary venv)
-- `pytest -q -s ml-pipeline/tests` (in temporary venv)
+Executed on February 10, 2026:
+- `python3 -m compileall backend-adapter/app backend-adapter/tests ml-pipeline/src ml-pipeline/tests`
+- `gradle -v` check (failed due native runtime load issue in this environment)
+- Dependency install and local pytest execution were blocked by offline package index resolution (`pip` could not resolve `setuptools` and test dependencies).
+- GitHub workflows in repo for full validation:
+  - `.github/workflows/ci-python.yml`
+  - `.github/workflows/ci-android.yml`
 
 ## Known environment limitation
 - Android Gradle compilation/tests could not be executed in this environment due Gradle native runtime issues (`libnative-platform.so` load failure).
-- Android test sources and build configuration are in place and ready for local Android Studio/CI execution.
+- Python test dependencies could not be installed in this environment due network/index resolution restrictions.
+- Android and Python test sources are in place and ready for CI or local execution in a network-enabled setup.
 
 ## Recommended CI commands
 Backend:
