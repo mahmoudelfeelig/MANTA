@@ -1,6 +1,8 @@
 package com.feelbachelor.app.core.net
 
 import android.util.Log
+import com.feelbachelor.app.core.model.RemotePolicy
+import com.feelbachelor.app.core.model.RemotePolicyParser
 import com.feelbachelor.app.core.settings.SecureSettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -27,18 +29,19 @@ class OkHttpEventClient(
         })
         .build()
 
-    override suspend fun sendEvent(payload: String): Result<Unit> = withContext(Dispatchers.IO) {
+    override suspend fun sendEvent(eventType: String, payload: String): Result<Unit> = withContext(Dispatchers.IO) {
         val config = settingsStore.readConfig()
         if (!config.exportEnabled || !config.isConfigured()) {
             return@withContext Result.failure(IllegalStateException("Export disabled or backend not configured"))
         }
 
-        if (!config.backendUrl.startsWith("https://")) {
+        val endpointUrl = settingsStore.getEventIngestUrl(eventType)
+        if (!endpointUrl.startsWith("https://")) {
             return@withContext Result.failure(IllegalArgumentException("Insecure backend URL rejected"))
         }
 
         val request = Request.Builder()
-            .url(config.backendUrl)
+            .url(endpointUrl)
             .addHeader("Authorization", "Bearer ${config.apiToken}")
             .addHeader("Content-Type", "application/json")
             .post(payload.toRequestBody(jsonMediaType))
@@ -55,13 +58,43 @@ class OkHttpEventClient(
         }
     }
 
-    override suspend fun sendBatch(payloads: List<String>): Result<Unit> = withContext(Dispatchers.IO) {
+    override suspend fun sendBatch(eventType: String, payloads: List<String>): Result<Unit> = withContext(Dispatchers.IO) {
         payloads.forEach { payload ->
-            val result = sendEvent(payload)
+            val result = sendEvent(eventType = eventType, payload = payload)
             if (result.isFailure) {
                 return@withContext result
             }
         }
         Result.success(Unit)
+    }
+
+    override suspend fun fetchRemotePolicy(deviceIdPseudo: String): Result<RemotePolicy> = withContext(Dispatchers.IO) {
+        val config = settingsStore.readConfig()
+        if (!config.isConfigured()) {
+            return@withContext Result.failure(IllegalStateException("Backend not configured"))
+        }
+
+        val policyUrl = settingsStore.getPolicySyncUrl(deviceIdPseudo)
+        if (!policyUrl.startsWith("https://")) {
+            return@withContext Result.failure(IllegalArgumentException("Insecure policy URL rejected"))
+        }
+
+        val request = Request.Builder()
+            .url(policyUrl)
+            .addHeader("Authorization", "Bearer ${config.apiToken}")
+            .get()
+            .build()
+
+        runCatching {
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    error("Policy fetch failed with status ${response.code}")
+                }
+                val body = response.body?.string().orEmpty()
+                RemotePolicyParser.parse(body)
+            }
+        }.onFailure {
+            Log.w(TAG, "fetchRemotePolicy failed: ${it.message}")
+        }
     }
 }
