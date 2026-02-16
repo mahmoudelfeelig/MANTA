@@ -16,7 +16,7 @@ class RetentionCleanupWorker(
 
     override suspend fun doWork(): Result {
         val app = applicationContext as FeelApplication
-        app.container.repository.runRetentionCleanup(retentionDays = 7)
+        app.container.repository.runRetentionCleanup()
         return Result.success()
     }
 }

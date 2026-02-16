@@ -28,6 +28,15 @@ interface FlowDao {
     @Query("SELECT * FROM anomaly_scores ORDER BY createdAtMillis DESC LIMIT :limit")
     suspend fun getLatestScores(limit: Int): List<AnomalyScoreEntity>
 
+    @Query("SELECT * FROM anomaly_scores WHERE triageStatus = :triageStatus ORDER BY createdAtMillis DESC LIMIT :limit")
+    suspend fun getScoresByTriage(triageStatus: String, limit: Int): List<AnomalyScoreEntity>
+
+    @Query("SELECT * FROM anomaly_scores WHERE id = :alertId LIMIT 1")
+    suspend fun getScoreById(alertId: String): AnomalyScoreEntity?
+
+    @Query("UPDATE anomaly_scores SET triageStatus = :triageStatus, triageNote = :triageNote, triageUpdatedAtMillis = :updatedAtMillis WHERE id = :alertId")
+    suspend fun updateAlertTriage(alertId: String, triageStatus: String, triageNote: String, updatedAtMillis: Long)
+
     @Query("SELECT * FROM export_queue WHERE exported = 0 AND nextAttemptMillis <= :nowMillis ORDER BY createdAtMillis ASC LIMIT :limit")
     suspend fun getPendingExports(nowMillis: Long, limit: Int): List<ExportQueueEntity>
 

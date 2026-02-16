@@ -6,6 +6,7 @@ import com.feelbachelor.app.core.model.AnomalyAlert
 import com.feelbachelor.app.core.model.FeatureWindow
 import com.feelbachelor.app.core.model.FlowProtocol
 import com.feelbachelor.app.core.model.FlowRecord
+import com.feelbachelor.app.core.model.TriageStatus
 import com.feelbachelor.app.core.net.NetworkEventClient
 import com.feelbachelor.app.core.security.CryptoUtils
 import com.feelbachelor.app.core.settings.SecureSettingsStore
@@ -15,9 +16,12 @@ import com.feelbachelor.app.data.db.ExportQueueEntity
 import com.feelbachelor.app.data.db.FeatureWindowEntity
 import com.feelbachelor.app.data.db.RawFlowEntity
 import com.feelbachelor.app.domain.detection.AnomalyEngine
+import com.feelbachelor.app.domain.detection.ExplanationFormatter
+import com.feelbachelor.app.domain.detection.ThresholdResolver
 import com.feelbachelor.app.domain.flow.FeatureWindowBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.util.UUID
 import kotlin.math.min
 
@@ -33,7 +37,7 @@ class FlowRepository(
     private val db = AppDatabase.getInstance(context)
     private val dao = db.flowDao()
 
-    suspend fun persistFlow(flow: FlowRecord): AnomalyAlert? = withContext(Dispatchers.IO) {
+    suspend fun persistFlow(flow: FlowRecord): AnomalyAlert = withContext(Dispatchers.IO) {
         dao.insertRawFlow(
             RawFlowEntity(
                 id = flow.id,
@@ -88,11 +92,12 @@ class FlowRepository(
         saveFeatureWindow(window)
 
         val anomaly = anomalyEngine.score(window)
-        val severity = when {
-            anomaly.score >= 0.85 -> AlertSeverity.HIGH
-            anomaly.score >= 0.6 -> AlertSeverity.MEDIUM
-            else -> AlertSeverity.LOW
-        }
+        val thresholdProfile = settingsStore.getThresholdForApp(flow.appId)
+        val severity = ThresholdResolver.resolveSeverity(anomaly.score, thresholdProfile)
+        val explanation = ExplanationFormatter.summarize(
+            topFeatures = anomaly.topFeatures,
+            contributions = anomaly.featureContributions
+        )
 
         val alert = AnomalyAlert(
             id = UUID.randomUUID().toString(),
@@ -101,7 +106,12 @@ class FlowRepository(
             anomalyScore = anomaly.score,
             severity = severity,
             topFeatures = anomaly.topFeatures,
-            createdAtMillis = flow.timestampEndMillis
+            explanation = explanation,
+            sourceModel = anomaly.source,
+            triageStatus = TriageStatus.OPEN,
+            triageNote = "",
+            createdAtMillis = flow.timestampEndMillis,
+            triageUpdatedAtMillis = flow.timestampEndMillis
         )
 
         dao.insertAnomalyScore(
@@ -112,7 +122,12 @@ class FlowRepository(
                 score = alert.anomalyScore,
                 severity = alert.severity.name,
                 topFeaturesCsv = alert.topFeatures.joinToString(","),
-                createdAtMillis = alert.createdAtMillis
+                explanation = alert.explanation,
+                sourceModel = alert.sourceModel,
+                triageStatus = alert.triageStatus.name,
+                triageNote = alert.triageNote,
+                createdAtMillis = alert.createdAtMillis,
+                triageUpdatedAtMillis = alert.triageUpdatedAtMillis
             )
         )
 
@@ -124,15 +139,49 @@ class FlowRepository(
     }
 
     suspend fun latestAlerts(limit: Int = 20): List<AnomalyAlert> = withContext(Dispatchers.IO) {
-        dao.getLatestScores(limit).map {
-            AnomalyAlert(
-                id = it.id,
-                featureWindowId = it.featureWindowId,
-                appId = it.appId,
-                anomalyScore = it.score,
-                severity = AlertSeverity.valueOf(it.severity),
-                topFeatures = it.topFeaturesCsv.split(',').filter { item -> item.isNotBlank() },
-                createdAtMillis = it.createdAtMillis
+        dao.getLatestScores(limit).map { mapEntityToAlert(it) }
+    }
+
+    suspend fun alertsByTriage(status: TriageStatus, limit: Int = 50): List<AnomalyAlert> = withContext(Dispatchers.IO) {
+        dao.getScoresByTriage(status.name, limit).map { mapEntityToAlert(it) }
+    }
+
+    suspend fun updateAlertTriage(alertId: String, status: TriageStatus, note: String) = withContext(Dispatchers.IO) {
+        dao.updateAlertTriage(
+            alertId = alertId,
+            triageStatus = status.name,
+            triageNote = note,
+            updatedAtMillis = System.currentTimeMillis()
+        )
+
+        val updatedEntity = dao.getScoreById(alertId)
+        if (updatedEntity != null && settingsStore.readConfig().exportEnabled) {
+            val payload = JSONObject()
+                .put("event_type", "mobile_alert")
+                .put("event_version", "1.0")
+                .put("device_id_pseudo", pseudonymousDeviceId())
+                .put("alert_id", updatedEntity.id)
+                .put("app_id", updatedEntity.appId)
+                .put("anomaly_score", updatedEntity.score)
+                .put("severity", updatedEntity.severity)
+                .put("top_features", updatedEntity.topFeaturesCsv.split(',').filter { it.isNotBlank() })
+                .put("explanation", updatedEntity.explanation)
+                .put("source_model", updatedEntity.sourceModel)
+                .put("triage_status", status.name)
+                .put("triage_note", note)
+                .put("timestamp", updatedEntity.createdAtMillis)
+                .toString()
+
+            dao.enqueueExport(
+                ExportQueueEntity(
+                    eventType = "mobile_alert",
+                    payload = payload,
+                    createdAtMillis = System.currentTimeMillis(),
+                    lastAttemptMillis = 0,
+                    nextAttemptMillis = System.currentTimeMillis(),
+                    attempts = 0,
+                    exported = false
+                )
             )
         }
     }
@@ -146,7 +195,7 @@ class FlowRepository(
 
         var sent = 0
         pending.forEach { entry ->
-            val result = client.sendEvent(entry.payload)
+            val result = client.sendEvent(eventType = entry.eventType, payload = entry.payload)
             if (result.isSuccess) {
                 dao.markExported(entry.queueId, now)
                 sent += 1
@@ -164,7 +213,18 @@ class FlowRepository(
         sent
     }
 
-    suspend fun runRetentionCleanup(retentionDays: Int = 7): Int = withContext(Dispatchers.IO) {
+    suspend fun syncRemotePolicy(client: NetworkEventClient): Result<Unit> = withContext(Dispatchers.IO) {
+        val result = client.fetchRemotePolicy(pseudonymousDeviceId())
+        if (result.isFailure) {
+            return@withContext Result.failure(result.exceptionOrNull() ?: IllegalStateException("Unknown policy sync error"))
+        }
+
+        val policy = result.getOrThrow()
+        settingsStore.applyRemotePolicy(policy)
+        Result.success(Unit)
+    }
+
+    suspend fun runRetentionCleanup(retentionDays: Int = settingsStore.readConfig().retentionDays): Int = withContext(Dispatchers.IO) {
         val cutoff = System.currentTimeMillis() - retentionDays * 24L * 60L * 60L * 1000L
         val deletedFlows = dao.deleteOldFlows(cutoff)
         val deletedWindows = dao.deleteOldFeatureWindows(cutoff)
@@ -210,6 +270,7 @@ class FlowRepository(
         )
         dao.enqueueExport(
             ExportQueueEntity(
+                eventType = "mobile_flow",
                 payload = payload,
                 createdAtMillis = System.currentTimeMillis(),
                 lastAttemptMillis = 0,
@@ -224,22 +285,26 @@ class FlowRepository(
         if (!settingsStore.readConfig().exportEnabled) {
             return
         }
-        val payload = """
-            {
-              "event_type": "mobile_alert",
-              "event_version": "1.0",
-              "device_id_pseudo": "${pseudonymousDeviceId()}",
-              "alert_id": "${alert.id}",
-              "app_id": "${alert.appId}",
-              "anomaly_score": ${alert.anomalyScore},
-              "severity": "${alert.severity.name}",
-              "top_features": "${alert.topFeatures.joinToString(",")}",
-              "timestamp": ${alert.createdAtMillis}
-            }
-        """.trimIndent()
+
+        val payload = JSONObject()
+            .put("event_type", "mobile_alert")
+            .put("event_version", "1.0")
+            .put("device_id_pseudo", pseudonymousDeviceId())
+            .put("alert_id", alert.id)
+            .put("app_id", alert.appId)
+            .put("anomaly_score", alert.anomalyScore)
+            .put("severity", alert.severity.name)
+            .put("top_features", alert.topFeatures)
+            .put("explanation", alert.explanation)
+            .put("source_model", alert.sourceModel)
+            .put("triage_status", alert.triageStatus.name)
+            .put("triage_note", alert.triageNote)
+            .put("timestamp", alert.createdAtMillis)
+            .toString()
 
         dao.enqueueExport(
             ExportQueueEntity(
+                eventType = "mobile_alert",
                 payload = payload,
                 createdAtMillis = System.currentTimeMillis(),
                 lastAttemptMillis = 0,
@@ -253,5 +318,22 @@ class FlowRepository(
     private fun pseudonymousDeviceId(): String {
         val salt = settingsStore.getDeviceSalt()
         return CryptoUtils.pseudonymousDeviceId(appContext, salt)
+    }
+
+    private fun mapEntityToAlert(entity: AnomalyScoreEntity): AnomalyAlert {
+        return AnomalyAlert(
+            id = entity.id,
+            featureWindowId = entity.featureWindowId,
+            appId = entity.appId,
+            anomalyScore = entity.score,
+            severity = AlertSeverity.valueOf(entity.severity),
+            topFeatures = entity.topFeaturesCsv.split(',').filter { it.isNotBlank() },
+            explanation = entity.explanation,
+            sourceModel = entity.sourceModel,
+            triageStatus = TriageStatus.valueOf(entity.triageStatus),
+            triageNote = entity.triageNote,
+            createdAtMillis = entity.createdAtMillis,
+            triageUpdatedAtMillis = entity.triageUpdatedAtMillis
+        )
     }
 }

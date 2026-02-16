@@ -47,12 +47,18 @@ data class AnomalyScoreEntity(
     val score: Double,
     val severity: String,
     val topFeaturesCsv: String,
-    val createdAtMillis: Long
+    val explanation: String,
+    val sourceModel: String,
+    val triageStatus: String,
+    val triageNote: String,
+    val createdAtMillis: Long,
+    val triageUpdatedAtMillis: Long
 )
 
 @Entity(tableName = "export_queue")
 data class ExportQueueEntity(
     @PrimaryKey(autoGenerate = true) val queueId: Long = 0,
+    val eventType: String,
     val payload: String,
     val createdAtMillis: Long,
     val lastAttemptMillis: Long,
