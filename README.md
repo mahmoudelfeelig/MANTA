@@ -3,14 +3,15 @@ Anomaly detection of application network traffic on Android devices.
 
 ## Implementation scaffold
 - `android-app/` - Android endpoint prototype (`VpnService`, flow pipeline, Room storage, anomaly scoring, export queue workers, Compose UI).
-- `backend-adapter/` - Secure FastAPI ingest adapter with auth, validation, queue/retry, optional Wazuh forwarding.
-- `ml-pipeline/` - Feature extraction, baseline anomaly training/evaluation, optional TFLite export.
+- `backend-adapter/` - Secure FastAPI ingest adapter with auth, validation, queue/retry, triage APIs, policy sync APIs, optional Wazuh forwarding.
+- `ml-pipeline/` - Feature extraction, baseline anomaly training/evaluation, explanation output, threshold calibration, optional TFLite export.
 
 ## Thesis planning docs
 - `docs/features-and-requirements.md` - scope, MVP features, requirements, and experiment/evaluation plan.
 - `docs/architecture-and-resources.md` - system architecture, integration model, required resources, and risk register.
 - `docs/references.md` - curated implementation, standards, datasets, and research references.
 - `docs/license-audit-checklist.md` - implementation-time compliance checklist.
+- `docs/testing-and-validation.md` - test coverage matrix, integration scope, and execution commands.
 - `THIRD_PARTY_NOTICES.md` - running register of reused code, dependencies, and data terms.
 
 ## Quick start

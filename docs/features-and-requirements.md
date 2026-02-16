@@ -71,7 +71,7 @@ Target completion for core thesis results: May 2026.
 ## Implementation status (scaffold)
 Current status as of February 7, 2026:
 
-| P0 area | Status | Implementation location |
+| Scope area | Status | Implementation location |
 |---|---|---|
 | VPN lifecycle manager | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/service/FlowVpnService.kt` |
 | Packet-to-flow converter | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/service/TunPacketParser.kt` |
@@ -87,6 +87,11 @@ Current status as of February 7, 2026:
 | Wazuh-compatible ingestion adapter | Implemented scaffold | `backend-adapter/app/main.py` |
 | Dashboard starter artifact | Implemented scaffold | `backend-adapter/dashboards/wazuh-mobile-anomaly-dashboard.ndjson` |
 | Privacy controls + purge + export toggle | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/ui/` |
+| NetFlow/IPFIX-style mapping (P1) | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/core/model/IpfixMapper.kt` |
+| Alert explanation output (P1) | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/domain/detection/ExplanationFormatter.kt` |
+| Adaptive thresholds (P1) | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/core/settings/SecureSettingsStore.kt`, `ml-pipeline/src/ml_pipeline/calibration.py` |
+| Alert triage fields and workflow (P1) | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/ui/MainScreen.kt`, `backend-adapter/app/main.py` |
+| Remote policy sync (P2) | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/worker/PolicySyncWorker.kt`, `backend-adapter/app/main.py` |
 
 ## Out of scope for MVP
 - Payload DPI.

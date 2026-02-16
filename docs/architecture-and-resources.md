@@ -58,6 +58,10 @@
   - classical unsupervised baseline
   - statistical threshold fallback
 - Output includes anomaly score and top contributing features.
+- Adaptive threshold profile:
+  - default medium/high thresholds
+  - per-app threshold overrides
+  - remotely synced policy versioning
 
 ## Alerting and UI
 - Alert list with app, score, time, and explanation.
@@ -66,6 +70,11 @@
   - local-only vs export mode
   - privacy and consent settings
   - local data purge
+- Triage workflow states:
+  - `OPEN`
+  - `INVESTIGATING`
+  - `RESOLVED`
+  - `FALSE_POSITIVE`
 
 ## Backend connector
 - HTTPS client with token/API-key auth.
@@ -89,6 +98,9 @@
   - anomalous apps
   - trend over time
   - destination novelty and burst patterns
+- Additional management APIs:
+  - alert triage update endpoint
+  - device policy read/update endpoints for remote threshold/export control
 
 ## Event schema draft
 ```json
