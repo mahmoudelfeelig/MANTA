@@ -24,4 +24,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Run Android unit tests
-        run: gradle -p android-app :app:testDebugUnitTest --stacktrace
+        run: |
+          cd android-app
+          ./gradlew :app:testDebugUnitTest --stacktrace

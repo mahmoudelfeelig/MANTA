@@ -48,11 +48,13 @@ dist/
 # Adapter runtime state
 backend-adapter/*.db
 backend-adapter/tests/*.db
+backend-adapter/.env
 
 # Data and model artifacts
 ml-pipeline/data/
 ml-pipeline/artifacts/
 ml-pipeline/reports/
+ml-pipeline/experiment-runs/
 *.joblib
 *.tflite
 
@@ -60,3 +62,6 @@ ml-pipeline/reports/
 *.zip
 *.tar.gz
 *.rar
+
+# notes
+/notes.txt

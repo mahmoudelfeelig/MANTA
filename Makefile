@@ -16,16 +16,16 @@ test-backend:
 	python3 -m venv .venv && \
 	. .venv/bin/activate && \
 	pip install -e .[test] && \
-	pytest -q tests
+	pytest -q -s tests
 
 test-ml:
 	cd ml-pipeline && \
 	python3 -m venv .venv && \
 	. .venv/bin/activate && \
 	pip install -e .[test] && \
-	pytest -q tests
+	pytest -q -s tests
 
 test-android:
-	gradle -p android-app :app:testDebugUnitTest
+	cd android-app && ./gradlew :app:testDebugUnitTest
 
 test-all: test-backend test-ml
