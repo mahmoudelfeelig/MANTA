@@ -1,10 +1,15 @@
 __all__ = [
+    "build_retraining_dataset",
     "calibrate_thresholds",
     "calibration",
     "compare_baselines",
+    "drift_report",
     "explain",
     "features",
     "generate_controlled_dataset",
     "ids_baseline",
+    "privacy_ablation",
     "run_experiment_suite",
+    "simulate_policy",
+    "train_android_model",
 ]

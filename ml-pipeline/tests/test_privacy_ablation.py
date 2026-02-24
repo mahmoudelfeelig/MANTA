@@ -1,0 +1,44 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+def test_privacy_ablation_generates_tradeoff_report(tmp_path: Path) -> None:
+    input_csv = tmp_path / "controlled.csv"
+    output_json = tmp_path / "privacy-ablation.json"
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ml_pipeline.generate_controlled_dataset",
+            "--output",
+            str(input_csv),
+            "--rows-per-scenario",
+            "40",
+            "--seed",
+            "9",
+        ],
+        check=True,
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ml_pipeline.privacy_ablation",
+            "--input",
+            str(input_csv),
+            "--output",
+            str(output_json),
+        ],
+        check=True,
+    )
+
+    payload = json.loads(output_json.read_text(encoding="utf-8"))
+    assert "results" in payload
+    assert "full_features" in payload["results"]
+    assert "no_novelty" in payload["results"]

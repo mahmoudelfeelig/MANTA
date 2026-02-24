@@ -42,35 +42,38 @@ def _sample_flow(scenario: str, timestamp_end: int, rng: np.random.Generator) ->
 
     app_id = app_pool[scenario][int(rng.integers(0, len(app_pool[scenario])))]
 
+    def _clipped_int(value: float, low: float, high: float) -> int:
+        return int(np.clip(value, low, high))
+
     if scenario == "normal_browsing":
-        bytes_out = int(rng.normal(loc=4_500, scale=1_500).clip(300, 20_000))
-        bytes_in = int(rng.normal(loc=9_000, scale=3_000).clip(500, 35_000))
+        bytes_out = _clipped_int(rng.normal(loc=4_500, scale=1_500), 300, 20_000)
+        bytes_in = _clipped_int(rng.normal(loc=9_000, scale=3_000), 500, 35_000)
         novelty = float(rng.choice([0.0, 0.0, 0.1, 0.2]))
         dst_port = int(rng.choice([80, 443]))
     elif scenario == "normal_streaming":
-        bytes_out = int(rng.normal(loc=8_000, scale=2_500).clip(1_000, 30_000))
-        bytes_in = int(rng.normal(loc=45_000, scale=8_000).clip(3_000, 120_000))
+        bytes_out = _clipped_int(rng.normal(loc=8_000, scale=2_500), 1_000, 30_000)
+        bytes_in = _clipped_int(rng.normal(loc=45_000, scale=8_000), 3_000, 120_000)
         novelty = float(rng.choice([0.0, 0.0, 0.1]))
         dst_port = 443
     elif scenario == "beaconing":
-        bytes_out = int(rng.normal(loc=300, scale=90).clip(50, 1_000))
-        bytes_in = int(rng.normal(loc=250, scale=100).clip(40, 1_200))
+        bytes_out = _clipped_int(rng.normal(loc=300, scale=90), 50, 1_000)
+        bytes_in = _clipped_int(rng.normal(loc=250, scale=100), 40, 1_200)
         novelty = float(rng.choice([0.0, 0.2]))
         dst_port = int(rng.choice([443, 8080]))
     elif scenario == "burst_exfiltration":
-        bytes_out = int(rng.normal(loc=280_000, scale=75_000).clip(40_000, 700_000))
-        bytes_in = int(rng.normal(loc=4_000, scale=1_200).clip(200, 15_000))
+        bytes_out = _clipped_int(rng.normal(loc=280_000, scale=75_000), 40_000, 700_000)
+        bytes_in = _clipped_int(rng.normal(loc=4_000, scale=1_200), 200, 15_000)
         novelty = float(rng.choice([0.4, 0.7, 1.0]))
         dst_port = int(rng.choice([443, 8443, 9001]))
     else:  # unusual_destination
-        bytes_out = int(rng.normal(loc=7_000, scale=2_000).clip(600, 30_000))
-        bytes_in = int(rng.normal(loc=7_500, scale=2_000).clip(600, 35_000))
+        bytes_out = _clipped_int(rng.normal(loc=7_000, scale=2_000), 600, 30_000)
+        bytes_in = _clipped_int(rng.normal(loc=7_500, scale=2_000), 600, 35_000)
         novelty = float(rng.choice([0.6, 0.8, 1.0]))
         dst_port = int(rng.choice([443, 5222, 6881, 8443]))
 
     packets_out = max(1, int(bytes_out / max(80, rng.normal(300, 90))))
     packets_in = max(1, int(bytes_in / max(80, rng.normal(400, 120))))
-    duration_ms = int(rng.normal(loc=1_200, scale=300).clip(200, 10_000))
+    duration_ms = _clipped_int(rng.normal(loc=1_200, scale=300), 200, 10_000)
 
     return {
         "scenario": scenario,

@@ -42,16 +42,38 @@ def test_run_experiment_suite_creates_reports(tmp_path: Path) -> None:
     eval_report = output_dir / "reports" / "evaluation.json"
     policy_report = output_dir / "reports" / "policy-calibrated.json"
     comparison_report = output_dir / "reports" / "comparison.json"
+    privacy_report = output_dir / "reports" / "privacy-ablation.json"
+    drift_report = output_dir / "reports" / "drift-report.json"
+    policy_sim_report = output_dir / "reports" / "policy-simulation.json"
+    threshold_sweep = output_dir / "reports" / "threshold-sweep.csv"
+    roc_curve = output_dir / "reports" / "roc-curve.csv"
+    pr_curve = output_dir / "reports" / "pr-curve.csv"
+    confusion = output_dir / "reports" / "confusion-matrix.json"
+    drift_series = output_dir / "reports" / "drift-series.csv"
+    policy_sim_per_app = output_dir / "reports" / "policy-simulation-per-app.csv"
+    android_model = output_dir / "artifacts" / "android" / "anomaly-linear.json"
     manifest = output_dir / "reports" / "manifest.json"
 
     assert eval_report.exists()
     assert policy_report.exists()
     assert comparison_report.exists()
+    assert privacy_report.exists()
+    assert drift_report.exists()
+    assert policy_sim_report.exists()
+    assert threshold_sweep.exists()
+    assert roc_curve.exists()
+    assert pr_curve.exists()
+    assert confusion.exists()
+    assert drift_series.exists()
+    assert policy_sim_per_app.exists()
+    assert android_model.exists()
     assert manifest.exists()
 
     parsed = json.loads(eval_report.read_text(encoding="utf-8"))
     assert "rows" in parsed
+    assert parsed["threshold_source"] in {"fixed", "auto_f1"}
 
     manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
     assert "python_version" in manifest_data
     assert "input_sha256" in manifest_data
+    assert "labels_present" in manifest_data
