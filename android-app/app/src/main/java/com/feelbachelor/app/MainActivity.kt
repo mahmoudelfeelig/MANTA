@@ -15,6 +15,7 @@ import com.feelbachelor.app.service.FlowVpnService
 import com.feelbachelor.app.ui.MainScreen
 import com.feelbachelor.app.ui.MainViewModel
 import com.feelbachelor.app.ui.MainViewModelFactory
+import com.feelbachelor.app.ui.theme.FeelBachelorTheme
 
 class MainActivity : ComponentActivity() {
     private val app by lazy { application as FeelApplication }
@@ -35,26 +36,38 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-            val config by viewModel.config.collectAsState()
-            val alerts by viewModel.alerts.collectAsState()
-            val statusMessage by viewModel.statusMessage.collectAsState()
+            FeelBachelorTheme {
+                val config by viewModel.config.collectAsState()
+                val alerts by viewModel.alerts.collectAsState()
+                val alertsTotalCount by viewModel.alertsTotalCount.collectAsState()
+                val hasMoreAlerts by viewModel.hasMoreAlerts.collectAsState()
+                val isLoadingMoreAlerts by viewModel.isLoadingMoreAlerts.collectAsState()
+                val statusMessage by viewModel.statusMessage.collectAsState()
 
-            MainScreen(
-                config = config,
-                alerts = alerts,
-                statusMessage = statusMessage,
-                onSaveBackendUrl = viewModel::setBackendUrl,
-                onSaveApiToken = viewModel::setApiToken,
-                onToggleExport = viewModel::setExportEnabled,
-                onSaveThresholds = viewModel::setBaseThresholds,
-                onSyncPolicy = viewModel::syncPolicy,
-                onAcceptConsent = viewModel::acceptConsent,
-                onExportDataset = viewModel::exportDatasetSnapshot,
-                onStartCapture = ::requestOrStartCapture,
-                onStopCapture = ::stopCaptureService,
-                onPurgeData = viewModel::purgeLocalData,
-                onUpdateTriage = { alertId, status -> viewModel.updateAlertTriage(alertId, status) }
-            )
+                MainScreen(
+                    config = config,
+                    alerts = alerts,
+                    alertsTotalCount = alertsTotalCount,
+                    hasMoreAlerts = hasMoreAlerts,
+                    isLoadingMoreAlerts = isLoadingMoreAlerts,
+                    statusMessage = statusMessage,
+                    onSaveBackendUrl = viewModel::setBackendUrl,
+                    onSaveApiToken = viewModel::setApiToken,
+                    onToggleExport = viewModel::setExportEnabled,
+                    onSaveThresholds = viewModel::setBaseThresholds,
+                    onSetDetectionModel = viewModel::setDetectionModel,
+                    onSetShadowModel = viewModel::setShadowModel,
+                    onSyncPolicy = viewModel::syncPolicy,
+                    onAcceptConsent = viewModel::acceptConsent,
+                    onExportDataset = viewModel::exportDatasetSnapshot,
+                    onExportForensics = viewModel::exportForensicsBundle,
+                    onLoadMoreAlerts = viewModel::loadMoreAlerts,
+                    onStartCapture = ::requestOrStartCapture,
+                    onStopCapture = ::stopCaptureService,
+                    onPurgeData = viewModel::purgeLocalData,
+                    onUpdateTriage = { alertId, status -> viewModel.updateAlertTriage(alertId, status) }
+                )
+            }
         }
     }
 

@@ -28,7 +28,11 @@ object RemotePolicyParser {
             defaultThresholds = defaultThresholds,
             appThresholdOverrides = overrides,
             exportEnabled = policyNode.optBoolean("export_enabled", true),
-            retentionDays = policyNode.optInt("retention_days", 7).coerceIn(1, 90)
+            retentionDays = policyNode.optInt("retention_days", 7).coerceIn(1, 90),
+            detectionModel = policyNode.optString("detection_model", "ensemble_fusion"),
+            shadowModel = policyNode.optString("shadow_model", "").takeIf { it.isNotBlank() },
+            falsePositiveBudgetPerAppDay = policyNode.optInt("false_positive_budget_per_app_day", 12).coerceIn(1, 250),
+            driftHighThreshold = policyNode.optDouble("drift_high_threshold", 0.65).coerceIn(0.1, 1.0)
         )
     }
 }

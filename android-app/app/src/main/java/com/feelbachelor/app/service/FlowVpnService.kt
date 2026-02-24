@@ -3,11 +3,14 @@ package com.feelbachelor.app.service
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.Service
+import android.content.pm.PackageManager
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.feelbachelor.app.FeelApplication
 import com.feelbachelor.app.R
@@ -23,6 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class FlowVpnService : VpnService() {
 
     companion object {
+        private const val TAG = "FlowVpnService"
         const val ACTION_START = "com.feelbachelor.app.action.START_VPN"
         const val ACTION_STOP = "com.feelbachelor.app.action.STOP_VPN"
         private const val CHANNEL_ID = "flow_capture_channel"
@@ -43,6 +47,7 @@ class FlowVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var packetReader: TunPacketReader? = null
     private var flowAggregator: FlowAggregator? = null
+    private var forwarder: UserspaceTunForwarder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -79,12 +84,23 @@ class FlowVpnService : VpnService() {
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
 
-        val descriptor = Builder()
+        val builder = Builder()
             .setSession("FeelEndpointCapture")
+            .setMtu(1500)
             .addAddress("10.0.0.2", 32)
             .addRoute("0.0.0.0", 0)
+            .allowBypass()
             .setBlocking(true)
-            .establish()
+
+        runCatching {
+            builder.addDisallowedApplication(packageName)
+        }.onFailure { error ->
+            if (error !is PackageManager.NameNotFoundException) {
+                Log.w(TAG, "Failed to exclude app package from VPN routing", error)
+            }
+        }
+
+        val descriptor = builder.establish()
 
         if (descriptor == null) {
             running.set(false)
@@ -97,22 +113,40 @@ class FlowVpnService : VpnService() {
         val resolver = AppAttributionResolver(this)
         val aggregator = FlowAggregator()
         val parser = TunPacketParser()
+        val tunForwarder = UserspaceTunForwarder(
+            vpnService = this,
+            tunFd = descriptor,
+            localVpnAddress = "10.0.0.2"
+        )
         flowAggregator = aggregator
+        forwarder = tunForwarder
 
-        packetReader = TunPacketReader(parser) { packet ->
-            val appId = resolver.resolveAppId(packet)
-            val flushed = aggregator.ingest(packet, appId)
-            if (flushed.isNotEmpty()) {
-                serviceScope.launch {
-                    flushed.forEach { flow ->
-                        repository.persistFlow(flow)
+        packetReader = TunPacketReader { packetBytes, length, timestampMillis ->
+            tunForwarder.forward(packetBytes, length)
+
+            val parsed = parser.parse(packetBytes, length, timestampMillis)
+            if (parsed != null) {
+                val appId = resolver.resolveAppId(parsed)
+                val flushed = aggregator.ingest(parsed, appId)
+                if (flushed.isNotEmpty()) {
+                    serviceScope.launch {
+                        flushed.forEach { flow ->
+                            repository.persistFlow(flow)
+                        }
                     }
                 }
             }
         }
 
         serviceScope.launch {
-            packetReader?.start(descriptor)
+            runCatching {
+                packetReader?.start(descriptor)
+            }.onFailure { error ->
+                if (running.get()) {
+                    Log.e(TAG, "Capture loop failed", error)
+                    stopCapture()
+                }
+            }
         }
     }
 
@@ -123,6 +157,9 @@ class FlowVpnService : VpnService() {
 
         packetReader?.stop()
         packetReader = null
+
+        forwarder?.stop()
+        forwarder = null
 
         val app = application as FeelApplication
         val repository = app.container.repository

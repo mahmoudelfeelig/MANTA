@@ -62,7 +62,9 @@ class TfliteAnomalyScorer(
             score = 0.0,
             topFeatures = listOf("model_unavailable"),
             featureContributions = contributions,
-            source = "tflite-unavailable"
+            source = "tflite-unavailable",
+            confidence = 0.0,
+            uncertainty = 1.0
         )
 
         val inputBuffer = ByteBuffer.allocateDirect(4 * input.size).order(ByteOrder.nativeOrder())
@@ -76,12 +78,19 @@ class TfliteAnomalyScorer(
             .sortedByDescending { it.value }
             .take(3)
             .map { it.key }
+        val boundedScore = min(1.0, max(0.0, output[0][0].toDouble()))
+        val confidence = (0.4 + 0.6 * kotlin.math.abs(boundedScore - 0.5) * 2.0).coerceIn(0.0, 1.0)
 
         return AnomalyScoreResult(
-            score = min(1.0, max(0.0, output[0][0].toDouble())),
+            score = boundedScore,
             topFeatures = topFeatures,
             featureContributions = contributions,
-            source = "tflite"
+            source = "tflite",
+            confidence = confidence,
+            uncertainty = (1.0 - confidence).coerceIn(0.0, 1.0),
+            diagnostics = mapOf(
+                "raw_output" to output[0][0].toDouble()
+            )
         )
     }
 }

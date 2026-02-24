@@ -25,7 +25,8 @@ private data class FlowAccumulator(
 )
 
 class FlowAggregator(
-    private val flowIdleTimeoutMillis: Long = 30_000L
+    private val flowIdleTimeoutMillis: Long = 30_000L,
+    private val flowMaxDurationMillis: Long = 20_000L
 ) {
     private val activeFlows = LinkedHashMap<FlowKey, FlowAccumulator>()
     private val seenDestinationsByApp = mutableMapOf<String, MutableSet<String>>()
@@ -68,7 +69,11 @@ class FlowAggregator(
 
     private fun flushExpired(nowMillis: Long): List<FlowRecord> {
         val expiredKeys = activeFlows.entries
-            .filter { (_, value) -> nowMillis - value.endMillis >= flowIdleTimeoutMillis }
+            .filter { (_, value) ->
+                val idleExpired = nowMillis - value.endMillis >= flowIdleTimeoutMillis
+                val maxDurationReached = nowMillis - value.startMillis >= flowMaxDurationMillis
+                idleExpired || maxDurationReached
+            }
             .map { it.key }
 
         return flushInternal(expiredKeys, nowMillis)

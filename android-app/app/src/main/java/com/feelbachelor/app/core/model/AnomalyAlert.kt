@@ -25,5 +25,17 @@ data class AnomalyAlert(
     val triageStatus: TriageStatus,
     val triageNote: String,
     val createdAtMillis: Long,
-    val triageUpdatedAtMillis: Long
+    val triageUpdatedAtMillis: Long,
+    val confidence: Double = 0.5,
+    val uncertainty: Double = 0.5,
+    val driftScore: Double = 0.0,
+    val occurrenceCount: Int = 1,
+    val firstSeenMillis: Long = createdAtMillis,
+    val lastSeenMillis: Long = createdAtMillis,
+    val correlationKey: String = "",
+    val shadowModel: String? = null,
+    val shadowScore: Double? = null,
+    val suppressionReason: String? = null,
+    val dataQualityWarnings: List<String> = emptyList(),
+    val beaconScore: Double = 0.0
 )

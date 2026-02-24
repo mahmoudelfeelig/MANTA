@@ -36,7 +36,14 @@ data class FeatureWindowEntity(
     val outboundRatio: Double,
     val burstiness: Double,
     val noveltyScore: Double,
-    val connectionFrequencyDelta: Double
+    val connectionFrequencyDelta: Double,
+    val periodicBeaconScore: Double = 0.0,
+    val hourOfDay: Int = 0,
+    val dayOfWeek: Int = 1,
+    val isWeekend: Boolean = false,
+    val dataQualityScore: Double = 1.0,
+    val sampledByGuardrail: Boolean = false,
+    val processingCostMillis: Double = 0.0
 )
 
 @Entity(tableName = "anomaly_scores")
@@ -52,7 +59,19 @@ data class AnomalyScoreEntity(
     val triageStatus: String,
     val triageNote: String,
     val createdAtMillis: Long,
-    val triageUpdatedAtMillis: Long
+    val triageUpdatedAtMillis: Long,
+    val confidence: Double = 0.5,
+    val uncertainty: Double = 0.5,
+    val driftScore: Double = 0.0,
+    val occurrenceCount: Int = 1,
+    val firstSeenMillis: Long = createdAtMillis,
+    val lastSeenMillis: Long = createdAtMillis,
+    val correlationKey: String = "",
+    val shadowModel: String? = null,
+    val shadowScore: Double? = null,
+    val suppressionReason: String? = null,
+    val dataQualityWarningsCsv: String = "",
+    val beaconScore: Double = 0.0
 )
 
 @Entity(tableName = "export_queue")

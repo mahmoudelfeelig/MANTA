@@ -18,10 +18,12 @@ object ExplanationFormatter {
             return "Anomaly detected but detailed contributions are unavailable."
         }
 
+        val maxMagnitude = ranked.maxOf { (_, contribution) -> abs(contribution) }.coerceAtLeast(1e-9)
         val parts = ranked.map { (feature, contribution) ->
+            val normalizedImpact = abs(contribution) / maxMagnitude
             val impact = when {
-                abs(contribution) >= 3.0 -> "high"
-                abs(contribution) >= 1.5 -> "moderate"
+                normalizedImpact >= 0.66 -> "high"
+                normalizedImpact >= 0.33 -> "moderate"
                 else -> "low"
             }
             "$feature ($impact impact)"

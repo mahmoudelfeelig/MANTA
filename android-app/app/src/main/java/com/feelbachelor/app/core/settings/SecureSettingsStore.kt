@@ -23,6 +23,17 @@ private const val KEY_POLICY_VERSION = "policy_version"
 private const val KEY_RETENTION_DAYS = "retention_days"
 private const val KEY_APP_THRESHOLD_OVERRIDES = "app_threshold_overrides"
 private const val KEY_CONSENT_ACCEPTED = "consent_accepted"
+private const val KEY_DETECTION_MODEL = "detection_model"
+private const val KEY_SHADOW_MODEL = "shadow_model"
+private const val KEY_FALSE_POSITIVE_BUDGET = "false_positive_budget_per_app_day"
+private const val KEY_DRIFT_HIGH_THRESHOLD = "drift_high_threshold"
+
+private val SUPPORTED_DETECTION_MODELS = setOf(
+    "ensemble_fusion",
+    "statistical",
+    "linear",
+    "tflite"
+)
 
 data class EndpointConfig(
     val backendUrl: String,
@@ -33,7 +44,11 @@ data class EndpointConfig(
     val highThreshold: Double,
     val policyVersion: Int,
     val retentionDays: Int,
-    val consentAccepted: Boolean
+    val consentAccepted: Boolean,
+    val detectionModel: String,
+    val shadowModel: String?,
+    val falsePositiveBudgetPerAppDay: Int,
+    val driftHighThreshold: Double
 ) {
     fun isConfigured(): Boolean = backendUrl.isNotBlank() && apiToken.isNotBlank()
 }
@@ -76,6 +91,18 @@ class SecureSettingsStore(context: Context) {
         if (!prefs.contains(KEY_CONSENT_ACCEPTED)) {
             prefs.edit().putBoolean(KEY_CONSENT_ACCEPTED, false).apply()
         }
+        if (!prefs.contains(KEY_DETECTION_MODEL)) {
+            prefs.edit().putString(KEY_DETECTION_MODEL, "ensemble_fusion").apply()
+        }
+        if (!prefs.contains(KEY_SHADOW_MODEL)) {
+            prefs.edit().putString(KEY_SHADOW_MODEL, "").apply()
+        }
+        if (!prefs.contains(KEY_FALSE_POSITIVE_BUDGET)) {
+            prefs.edit().putInt(KEY_FALSE_POSITIVE_BUDGET, 12).apply()
+        }
+        if (!prefs.contains(KEY_DRIFT_HIGH_THRESHOLD)) {
+            prefs.edit().putString(KEY_DRIFT_HIGH_THRESHOLD, "0.65").apply()
+        }
 
         configState = MutableStateFlow(readConfig())
     }
@@ -92,7 +119,11 @@ class SecureSettingsStore(context: Context) {
             highThreshold = prefs.getString(KEY_HIGH_THRESHOLD, "0.85")?.toDoubleOrNull() ?: 0.85,
             policyVersion = prefs.getInt(KEY_POLICY_VERSION, 1),
             retentionDays = prefs.getInt(KEY_RETENTION_DAYS, 7).coerceIn(1, 90),
-            consentAccepted = prefs.getBoolean(KEY_CONSENT_ACCEPTED, false)
+            consentAccepted = prefs.getBoolean(KEY_CONSENT_ACCEPTED, false),
+            detectionModel = sanitizeDetectionModel(prefs.getString(KEY_DETECTION_MODEL, "ensemble_fusion")),
+            shadowModel = sanitizeShadowModel(prefs.getString(KEY_SHADOW_MODEL, "")),
+            falsePositiveBudgetPerAppDay = prefs.getInt(KEY_FALSE_POSITIVE_BUDGET, 12).coerceIn(1, 250),
+            driftHighThreshold = prefs.getString(KEY_DRIFT_HIGH_THRESHOLD, "0.65")?.toDoubleOrNull()?.coerceIn(0.1, 1.0) ?: 0.65
         )
     }
 
@@ -121,6 +152,26 @@ class SecureSettingsStore(context: Context) {
         configState.value = readConfig()
     }
 
+    fun setDetectionModel(value: String) {
+        prefs.edit().putString(KEY_DETECTION_MODEL, sanitizeDetectionModel(value)).apply()
+        configState.value = readConfig()
+    }
+
+    fun setShadowModel(value: String?) {
+        prefs.edit().putString(KEY_SHADOW_MODEL, sanitizeShadowModel(value).orEmpty()).apply()
+        configState.value = readConfig()
+    }
+
+    fun setFalsePositiveBudgetPerAppDay(value: Int) {
+        prefs.edit().putInt(KEY_FALSE_POSITIVE_BUDGET, value.coerceIn(1, 250)).apply()
+        configState.value = readConfig()
+    }
+
+    fun setDriftHighThreshold(value: Double) {
+        prefs.edit().putString(KEY_DRIFT_HIGH_THRESHOLD, value.coerceIn(0.1, 1.0).toString()).apply()
+        configState.value = readConfig()
+    }
+
     fun setBaseThresholds(profile: ThresholdProfile) {
         val normalized = profile.normalize()
         prefs.edit()
@@ -146,6 +197,19 @@ class SecureSettingsStore(context: Context) {
         ).normalize()
     }
 
+    fun setThresholdOverride(appId: String, profile: ThresholdProfile) {
+        val normalized = profile.normalize()
+        val root = JSONObject(prefs.getString(KEY_APP_THRESHOLD_OVERRIDES, "{}") ?: "{}")
+        root.put(
+            appId,
+            JSONObject()
+                .put("medium", normalized.medium)
+                .put("high", normalized.high)
+        )
+        prefs.edit().putString(KEY_APP_THRESHOLD_OVERRIDES, root.toString()).apply()
+        configState.value = readConfig()
+    }
+
     fun applyRemotePolicy(policy: RemotePolicy) {
         val normalizedThresholds = policy.defaultThresholds.normalize()
         val overrideRoot = JSONObject()
@@ -165,6 +229,10 @@ class SecureSettingsStore(context: Context) {
             .putInt(KEY_POLICY_VERSION, policy.policyVersion)
             .putInt(KEY_RETENTION_DAYS, policy.retentionDays.coerceIn(1, 90))
             .putBoolean(KEY_EXPORT_ENABLED, policy.exportEnabled)
+            .putString(KEY_DETECTION_MODEL, sanitizeDetectionModel(policy.detectionModel))
+            .putString(KEY_SHADOW_MODEL, sanitizeShadowModel(policy.shadowModel).orEmpty())
+            .putInt(KEY_FALSE_POSITIVE_BUDGET, policy.falsePositiveBudgetPerAppDay.coerceIn(1, 250))
+            .putString(KEY_DRIFT_HIGH_THRESHOLD, policy.driftHighThreshold.coerceIn(0.1, 1.0).toString())
             .putString(KEY_APP_THRESHOLD_OVERRIDES, overrideRoot.toString())
             .apply()
 
@@ -193,5 +261,26 @@ class SecureSettingsStore(context: Context) {
 
     fun getDeviceSalt(): String {
         return prefs.getString(KEY_DEVICE_SALT, "fallback-salt") ?: "fallback-salt"
+    }
+
+    private fun sanitizeDetectionModel(value: String?): String {
+        val candidate = value?.trim().orEmpty()
+        return if (candidate in SUPPORTED_DETECTION_MODELS) {
+            candidate
+        } else {
+            "ensemble_fusion"
+        }
+    }
+
+    private fun sanitizeShadowModel(value: String?): String? {
+        val candidate = value?.trim().orEmpty()
+        if (candidate.isBlank()) {
+            return null
+        }
+        return if (candidate in SUPPORTED_DETECTION_MODELS) {
+            candidate
+        } else {
+            null
+        }
     }
 }

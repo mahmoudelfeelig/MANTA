@@ -16,5 +16,9 @@ data class RemotePolicy(
     val defaultThresholds: ThresholdProfile,
     val appThresholdOverrides: Map<String, ThresholdProfile>,
     val exportEnabled: Boolean,
-    val retentionDays: Int
+    val retentionDays: Int,
+    val detectionModel: String = "ensemble_fusion",
+    val shadowModel: String? = null,
+    val falsePositiveBudgetPerAppDay: Int = 12,
+    val driftHighThreshold: Double = 0.65
 )

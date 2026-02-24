@@ -2,11 +2,22 @@ package com.feelbachelor.app.domain.flow
 
 import com.feelbachelor.app.core.model.FeatureWindow
 import com.feelbachelor.app.core.model.FlowRecord
+import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 import kotlin.math.abs
 
 class FeatureWindowBuilder {
-    fun build(appId: String, flows: List<FlowRecord>, windowStartMillis: Long, windowEndMillis: Long): FeatureWindow {
+    fun build(
+        appId: String,
+        flows: List<FlowRecord>,
+        windowStartMillis: Long,
+        windowEndMillis: Long,
+        periodicBeaconScore: Double = 0.0,
+        dataQualityScore: Double = 1.0,
+        sampledByGuardrail: Boolean = false,
+        processingCostMillis: Double = 0.0
+    ): FeatureWindow {
         val flowCount = flows.size.coerceAtLeast(1)
         val totalOut = flows.sumOf { it.bytesOut }
         val totalIn = flows.sumOf { it.bytesIn }
@@ -24,6 +35,10 @@ class FeatureWindowBuilder {
         val noveltyScore = flows.map { it.destinationNovelty }.average().takeIf { !it.isNaN() } ?: 0.0
         val durationSeconds = ((windowEndMillis - windowStartMillis).coerceAtLeast(1000L)) / 1000.0
         val connectionFrequencyDelta = flows.size / durationSeconds
+        val zoned = Instant.ofEpochMilli(windowEndMillis).atZone(ZoneId.systemDefault())
+        val hourOfDay = zoned.hour
+        val dayOfWeek = zoned.dayOfWeek.value
+        val isWeekend = dayOfWeek >= 6
 
         return FeatureWindow(
             id = UUID.randomUUID().toString(),
@@ -37,7 +52,14 @@ class FeatureWindowBuilder {
             outboundRatio = outboundRatio,
             burstiness = variance,
             noveltyScore = noveltyScore,
-            connectionFrequencyDelta = connectionFrequencyDelta
+            connectionFrequencyDelta = connectionFrequencyDelta,
+            periodicBeaconScore = periodicBeaconScore.coerceIn(0.0, 1.0),
+            hourOfDay = hourOfDay,
+            dayOfWeek = dayOfWeek,
+            isWeekend = isWeekend,
+            dataQualityScore = dataQualityScore.coerceIn(0.0, 1.0),
+            sampledByGuardrail = sampledByGuardrail,
+            processingCostMillis = processingCostMillis.coerceAtLeast(0.0)
         )
     }
 }
