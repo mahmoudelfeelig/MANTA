@@ -1,68 +1,71 @@
 # License Audit Checklist
 
-Use this checklist during implementation and before sharing any code, binaries, or datasets.
+Use this checklist before demo/release and before thesis publication.
 
-## Development start checklist
-- Define target project license for your own code.
-- Confirm GPL handling rule:
-  - no direct GPL code copy into non-GPL codebase.
-- Create and maintain `THIRD_PARTY_NOTICES.md`.
-- Record all direct snippet reuse with source URL and commit hash.
-- Record all datasets with explicit usage and redistribution terms.
+## Current audit snapshot (2026-02-22)
+- Third-party registry exists and is updated: `THIRD_PARTY_NOTICES.md`.
+- Direct GPL repositories are marked as reference-only (no direct code copy).
+- Core shipped dependencies are predominantly Apache-2.0 / MIT / BSD.
+- Public dataset license terms are still marked as verify-before-publish.
 
-## Dependency onboarding checklist
-For every new dependency:
-- Record package name, version, and license.
-- Verify license compatibility with your project license.
-- Check if NOTICE file obligations exist (Apache-2.0 and similar).
-- Check whether dependency introduces transitive copyleft obligations.
-- Add dependency entry to `THIRD_PARTY_NOTICES.md`.
+## Release gate checklist
 
-## Implementation-phase checks
-- Re-check licenses after dependency version bumps.
-- Keep generated code provenance:
-  - schema source
-  - generator tool version
-  - generation date
-- Avoid copying documentation text beyond short quotations.
-- Keep publication-safe attribution notes for all non-trivial reused logic.
+## 1) Project-level policy
+- [x] Project license decision documented.
+- [x] GPL copy policy documented.
+- [x] Third-party notices file maintained.
+- [x] Reuse provenance (URL/version) tracked.
 
-## Dataset compliance checks
-- Verify dataset license or terms page is archived (URL + access date).
-- Confirm allowed use includes academic research and your planned publication format.
-- Confirm redistribution status for raw data and derived features.
-- Remove or anonymize sensitive identifiers as required by terms and ethics policy.
-- Store required dataset citations in thesis draft and repo docs.
+## 2) Dependency compliance
+For each newly added dependency:
+- [x] package and version recorded.
+- [x] license recorded.
+- [x] compatibility with project licensing reviewed.
+- [x] notice obligations reviewed.
 
-## Pre-demo / pre-submission checks
-- Run dependency license scan for Android and ML components.
-- Review transitive dependencies manually for unknown/ambiguous licenses.
-- Ensure `THIRD_PARTY_NOTICES.md` is complete and date-stamped.
-- Ensure citations and acknowledgements are present in thesis text.
-- Confirm no restricted dataset content is accidentally committed.
+## 3) Dataset compliance
+- [x] project-generated synthetic dataset status documented.
+- [ ] external dataset terms archived with access date.
+- [ ] external dataset redistribution rights explicitly confirmed.
+- [ ] final thesis citations prepared for all external datasets.
+
+## 4) Pre-publication checks
+- [ ] run dependency license scan and archive result files.
+- [x] ensure no local secrets or env files are committed.
+- [x] ensure no generated runtime artifacts are committed.
+- [x] ensure third-party notices are date-stamped.
 
 ## Suggested tooling
-Use tools based on the tech stack once scaffold is in place.
+Android:
+- Gradle dependency tree + manual license reconciliation.
 
-Android/Gradle options:
-- Gradle license reporting plugins.
-- Dependency tree export + manual license reconciliation.
-
-Python/ML options:
+Python:
 - `pip-licenses`
-- `pipdeptree` plus manual license checks where metadata is missing.
+- `pipdeptree`
 
-General:
-- SPDX-style IDs in internal notes.
-- A small script to fail CI when unknown licenses are detected.
+## Optional audit commands
+Backend:
+```bash
+cd backend-adapter
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .[test] pip-licenses pipdeptree
+pip-licenses --format=markdown --with-urls > ../docs/license-scan-backend.md
+pipdeptree > ../docs/license-tree-backend.txt
+```
 
-## Audit log template
-| Date | Scope | Findings | Actions | Reviewer |
-|---|---|---|---|---|
-| YYYY-MM-DD | Android deps | 2 unknown licenses | Replaced one, pinned one | Name |
+ML:
+```bash
+cd ml-pipeline
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .[test] pip-licenses pipdeptree
+pip-licenses --format=markdown --with-urls > ../docs/license-scan-ml.md
+pipdeptree > ../docs/license-tree-ml.txt
+```
 
 ## Exit criteria
-- No unknown licenses in shipped dependencies.
-- No direct GPL code copy in non-GPL codebase (unless intentionally relicensed).
-- All datasets used in experiments have explicit permitted use and citation coverage.
-- Third-party notices and thesis citations are consistent.
+- no unknown licenses in shipped dependencies
+- no unapproved copyleft code copied into project source
+- dataset terms and citations complete for all published experiment inputs
+- `THIRD_PARTY_NOTICES.md` matches shipped artifacts and thesis acknowledgements

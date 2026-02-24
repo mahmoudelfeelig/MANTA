@@ -17,6 +17,7 @@ Target completion for core thesis results: May 2026.
 | Feature | Priority | Acceptance criteria | Dependencies |
 |---|---|---|---|
 | VPN lifecycle manager (`VpnService`) | P0 | User can start/stop capture reliably and recover after app restart | Android app skeleton |
+| Local TCP/UDP forwarding layer (`protect(...)`) | P0 | Internet connectivity remains functional during capture with protected upstream sockets | VPN lifecycle manager |
 | Packet-to-flow converter | P0 | 5-tuple flows generated with bytes/packets and start/end time | VPN lifecycle manager |
 | App attribution (UID to package) | P0 | At least 90% of flows linked to package in test scenarios | Packet-to-flow converter |
 | Local flow storage (Room/SQLite) | P0 | Captured flows persist and can be queried/exported | Packet-to-flow converter |
@@ -69,24 +70,30 @@ Target completion for core thesis results: May 2026.
 - Reproducible experiment pipeline and metric reporting.
 
 ## Implementation status (scaffold)
-Current status as of February 10, 2026:
+Current status as of February 22, 2026:
 
 | Scope area | Status | Implementation location |
 |---|---|---|
-| VPN lifecycle manager | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/service/FlowVpnService.kt` |
-| Packet-to-flow converter | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/service/TunPacketParser.kt` |
-| App attribution | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/domain/flow/AppAttributionResolver.kt` |
-| Local flow storage | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/data/db/` |
-| Retention policy | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/worker/RetentionCleanupWorker.kt` |
-| Export queue with retry | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/data/FlowRepository.kt` |
-| Feature window builder | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/domain/flow/FeatureWindowBuilder.kt` |
-| Statistical baseline detector | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/domain/detection/StatisticalAnomalyDetector.kt` |
-| Offline training pipeline | Implemented scaffold | `ml-pipeline/src/ml_pipeline/train_baseline.py` |
-| TFLite integration path | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/domain/detection/TfliteAnomalyScorer.kt`, `ml-pipeline/src/ml_pipeline/export_tflite.py` |
-| Backend API client | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/core/net/OkHttpEventClient.kt` |
-| Wazuh-compatible ingestion adapter | Implemented scaffold | `backend-adapter/app/main.py` |
-| Dashboard starter artifact | Implemented scaffold | `backend-adapter/dashboards/wazuh-mobile-anomaly-dashboard.ndjson` |
-| Privacy controls + purge + export toggle | Implemented scaffold | `android-app/app/src/main/java/com/feelbachelor/app/ui/` |
+| VPN lifecycle manager | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/service/FlowVpnService.kt` |
+| Local forwarding layer (`protect(...)`) | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/service/UserspaceTunForwarder.kt` |
+| Packet-to-flow converter | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/service/TunPacketParser.kt` |
+| App attribution | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/domain/flow/AppAttributionResolver.kt` |
+| Local flow storage | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/data/db/` |
+| Retention policy | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/worker/RetentionCleanupWorker.kt` |
+| Export queue with retry | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/data/FlowRepository.kt` |
+| Feature window builder | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/domain/flow/FeatureWindowBuilder.kt` |
+| Statistical baseline detector | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/domain/detection/StatisticalAnomalyDetector.kt` |
+| Offline training pipeline | Implemented | `ml-pipeline/src/ml_pipeline/train_baseline.py` |
+| TFLite integration path | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/domain/detection/TfliteAnomalyScorer.kt`, `ml-pipeline/src/ml_pipeline/export_tflite.py` |
+| Backend API client | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/core/net/OkHttpEventClient.kt` |
+| Wazuh-compatible ingestion adapter | Implemented | `backend-adapter/app/main.py` |
+| Resistine connector logic (register/connection/send APIs) | Implemented | `backend-adapter/app/main.py`, `backend-adapter/app/resistine_client.py` |
+| Dashboard starter artifact | Implemented | `backend-adapter/dashboards/wazuh-mobile-anomaly-dashboard.ndjson` |
+| Queue/dead-letter inspection and replay APIs | Implemented | `backend-adapter/app/main.py`, `backend-adapter/app/storage.py` |
+| Incident grouping and quality summary APIs | Implemented | `backend-adapter/app/main.py`, `backend-adapter/app/storage.py` |
+| Policy simulation and feedback auto-tune APIs | Implemented | `backend-adapter/app/main.py`, `backend-adapter/app/storage.py` |
+| Retraining sample export API and forensics bundle API | Implemented | `backend-adapter/app/main.py`, `backend-adapter/app/storage.py` |
+| Privacy controls + purge + export toggle | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/ui/` |
 | Consent and disclosure gate | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/ui/MainScreen.kt`, `android-app/app/src/main/java/com/feelbachelor/app/core/settings/SecureSettingsStore.kt` |
 | Dataset export utility (anonymized CSV snapshot) | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/data/FlowRepository.kt` |
 | NetFlow/IPFIX-style mapping (P1) | Implemented | `android-app/app/src/main/java/com/feelbachelor/app/core/model/IpfixMapper.kt` |
@@ -98,6 +105,10 @@ Current status as of February 10, 2026:
 | One-command experiment suite (P0 tooling) | Implemented | `ml-pipeline/src/ml_pipeline/run_experiment_suite.py` |
 | IDS-style comparison pipeline (P0 tooling) | Implemented | `ml-pipeline/src/ml_pipeline/compare_baselines.py`, `ml-pipeline/src/ml_pipeline/ids_baseline.py` |
 | Reproducibility manifest (versions, hash, commands) | Implemented | `ml-pipeline/src/ml_pipeline/run_experiment_suite.py` |
+| Privacy-utility ablation evaluation | Implemented | `ml-pipeline/src/ml_pipeline/privacy_ablation.py` |
+| Android-ready linear model export and scorer | Implemented | `ml-pipeline/src/ml_pipeline/train_android_model.py`, `android-app/app/src/main/java/com/feelbachelor/app/domain/detection/LinearModelScorer.kt` |
+| Drift report and policy simulation tooling | Implemented | `ml-pipeline/src/ml_pipeline/drift_report.py`, `ml-pipeline/src/ml_pipeline/simulate_policy.py` |
+| Retraining dataset builder from analyst feedback | Implemented | `ml-pipeline/src/ml_pipeline/build_retraining_dataset.py` |
 
 ## Out of scope for MVP
 - Payload DPI.

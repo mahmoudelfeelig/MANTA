@@ -12,7 +12,7 @@
 - Offline training and analysis pipeline
 
 ## Implemented repository layout
-- `android-app/`: Android endpoint scaffold.
+- `android-app/`: Android endpoint implementation.
 - `backend-adapter/`: secure ingest and Wazuh forwarding adapter.
 - `ml-pipeline/`: feature engineering, training, evaluation, TFLite export.
 - `THIRD_PARTY_NOTICES.md`: license and reuse tracking.
@@ -21,6 +21,8 @@
 
 ## VPN capture
 - Uses `VpnService` to establish a local tunnel.
+- Uses a local userspace forwarding layer (TCP/UDP) so capture and internet access run at the same time.
+- Protects upstream sockets with `VpnService.protect(...)` to prevent VPN routing loops.
 - Captures flow/session metadata only:
   - timestamps
   - app attribution (UID/package)
@@ -57,6 +59,7 @@
   - lightweight autoencoder
   - classical unsupervised baseline
   - statistical threshold fallback
+- bundled Android-ready linear model (`assets/models/anomaly-linear.json`) as an always-available ML scorer
 - Output includes anomaly score and top contributing features.
 - Adaptive threshold profile:
   - default medium/high thresholds
@@ -80,6 +83,10 @@
 - HTTPS client with token/API-key auth.
 - Reliable delivery with queue and retry backoff.
 - Optionally dead-letter queue for failed events.
+- Queue observability and replay APIs:
+  - pending queue inspection
+  - dead-letter inspection
+  - dead-letter replay to pending queue
 
 ## Implemented secure defaults
 - Android exporter rejects non-HTTPS backend URLs.
@@ -101,6 +108,10 @@
 - Additional management APIs:
   - alert triage update endpoint
   - device policy read/update endpoints for remote threshold/export control
+  - Resistine integration boundary endpoints:
+    - register endpoint
+    - retrieve connection context
+    - send stream data
 
 ## Event schema draft
 ```json
@@ -145,12 +156,6 @@
 - Clear retention and deletion policy.
 
 ## Needed resources
-
-## People and approvals
-- Supervisor sign-off on scope and experiment design.
-- Approval for controlled abnormal traffic generation.
-- Backend/SIEM API access and credentials.
-- Resistine integration constraints clarified early.
 
 ## Hardware and environment
 - At least two Android devices with different versions/vendors.
