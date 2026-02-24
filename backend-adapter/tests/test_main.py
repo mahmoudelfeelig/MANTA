@@ -7,6 +7,9 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
 
 DB_PATH = Path(tempfile.gettempdir()) / "feel_backend_test_adapter.db"
 if DB_PATH.exists():
@@ -19,18 +22,37 @@ os.environ["MAX_RETRIES"] = "3"
 os.environ["RETRY_BASE_SECONDS"] = "1"
 
 from app.main import (  # noqa: E402
+    auto_tune_policy_from_feedback,
+    export_forensics_bundle,
+    export_retraining_samples,
     get_device_policy,
     health,
     ingest_mobile_alert,
     ingest_mobile_flow,
+    list_dead_letter_queue,
+    list_incidents,
+    list_pending_queue,
     list_alerts,
+    quality_summary,
+    resistine_connection,
+    resistine_register,
+    resistine_send_data,
+    replay_dead_letter_queue,
     retry_pending,
     set_device_policy,
+    simulate_policy,
     storage,
     update_alert_triage,
     wazuh_client,
 )
-from app.models import AlertTriageUpdate, DevicePolicyPayload, MobileAlertEvent, MobileFlowEvent, ThresholdProfile  # noqa: E402
+from app.models import (  # noqa: E402
+    AlertTriageUpdate,
+    DevicePolicyPayload,
+    MobileAlertEvent,
+    MobileFlowEvent,
+    PolicySimulationRequest,
+    ThresholdProfile,
+)
 
 
 def _fake_request() -> SimpleNamespace:
@@ -142,3 +164,122 @@ def test_retry_moves_to_dead_letter_after_max_retries(monkeypatch) -> None:
 
     stats = storage.stats()
     assert stats["dead_letter"] >= 1
+
+
+def test_dead_letter_replay_lifecycle(monkeypatch) -> None:
+    monkeypatch.setattr(wazuh_client, "send", lambda payload_json: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    response = asyncio.run(ingest_mobile_flow(request=_fake_request(), event=_flow_payload(), _=None))
+    assert response.status == "accepted"
+
+    retry_pending(limit=100, _=None)
+    time.sleep(1.1)
+    retry_pending(limit=100, _=None)
+    time.sleep(2.1)
+    retry_pending(limit=100, _=None)
+
+    dead_letter_before = list_dead_letter_queue(limit=100, _=None)
+    assert dead_letter_before["dead_letter"]
+
+    replay = replay_dead_letter_queue(limit=10, _=None)
+    assert replay["replayed"] >= 1
+
+    pending = list_pending_queue(limit=100, _=None)
+    assert pending["pending"]
+
+
+def test_resistine_endpoints_require_configuration() -> None:
+    with pytest.raises(HTTPException):
+        resistine_register(payload={"device_id": "abc"}, _=None)
+
+    with pytest.raises(HTTPException):
+        resistine_connection(device_id="abc", _=None)
+
+    with pytest.raises(HTTPException):
+        resistine_send_data(stream_id="s1", payload={"k": "v"}, _=None)
+
+
+def test_incidents_quality_and_forensics_exports() -> None:
+    first = _alert_payload(alert_id="corr-alert-1").model_copy(
+        update={
+            "correlation_key": "corr-key-1",
+            "data_quality_warnings": ["zero_bytes_flow", "duration_non_positive"],
+            "severity": "HIGH",
+        }
+    )
+    second = _alert_payload(alert_id="corr-alert-2").model_copy(
+        update={
+            "correlation_key": "corr-key-1",
+            "data_quality_warnings": ["zero_bytes_flow"],
+            "severity": "MEDIUM",
+        }
+    )
+    asyncio.run(ingest_mobile_alert(request=_fake_request(), event=first, _=None))
+    asyncio.run(ingest_mobile_alert(request=_fake_request(), event=second, _=None))
+
+    incidents = list_incidents(device_id_pseudo="abcd1234", limit=100, _=None)
+    assert incidents["status"] == "ok"
+    assert any(item["correlation_key"] == "corr-key-1" for item in incidents["incidents"])
+    assert all("max_severity" in item for item in incidents["incidents"])
+
+    quality = quality_summary(device_id_pseudo="abcd1234", _=None)
+    assert quality["status"] == "ok"
+    assert quality["quality"]["alerts_scanned"] >= 2
+    assert quality["quality"]["warning_counts"].get("zero_bytes_flow", 0) >= 2
+
+    bundle = export_forensics_bundle(device_id_pseudo="abcd1234", limit=100, _=None)
+    assert bundle["status"] == "ok"
+    assert bundle["device_id_pseudo"] == "abcd1234"
+    assert isinstance(bundle["alerts"], list)
+    assert isinstance(bundle["incidents"], list)
+
+
+def test_policy_auto_tune_simulation_and_retraining_samples() -> None:
+    alert_fp = _alert_payload(alert_id="feedback-alert-fp").model_copy(
+        update={
+            "anomaly_score": 0.71,
+            "triage_status": "FALSE_POSITIVE",
+            "triage_note": "noise",
+            "source_model": "ensemble_fusion",
+            "timestamp": 2_000_001,
+        }
+    )
+    alert_tp = _alert_payload(alert_id="feedback-alert-tp").model_copy(
+        update={
+            "anomaly_score": 0.92,
+            "triage_status": "RESOLVED",
+            "triage_note": "confirmed",
+            "source_model": "linear",
+            "timestamp": 2_000_002,
+        }
+    )
+    asyncio.run(ingest_mobile_alert(request=_fake_request(), event=alert_fp, _=None))
+    asyncio.run(ingest_mobile_alert(request=_fake_request(), event=alert_tp, _=None))
+
+    tuned = auto_tune_policy_from_feedback(device_id_pseudo="abcd1234", _=None)
+    assert tuned["status"] == "ok"
+    assert tuned["policy"]["policy_version"] >= 2
+    assert isinstance(tuned["feedback_stats"], dict)
+
+    simulation_request = PolicySimulationRequest(
+        policy=DevicePolicyPayload(
+            policy_version=1,
+            default_thresholds=ThresholdProfile(medium=0.55, high=0.85),
+            app_threshold_overrides={},
+            export_enabled=True,
+            retention_days=7,
+        ),
+        limit=500,
+    )
+    simulation = simulate_policy(
+        device_id_pseudo="abcd1234",
+        payload=simulation_request,
+        _=None,
+    )
+    assert simulation["status"] == "ok"
+    assert "severity_distribution" in simulation["simulation"]
+
+    samples = export_retraining_samples(device_id_pseudo="abcd1234", limit=500, _=None)
+    assert samples["status"] == "ok"
+    assert samples["samples"]
+    assert all(item["label"] in {0, 1} for item in samples["samples"])

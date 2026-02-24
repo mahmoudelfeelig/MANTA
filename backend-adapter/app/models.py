@@ -24,11 +24,20 @@ class DevicePolicyPayload(BaseModel):
     app_threshold_overrides: dict[str, ThresholdProfile] = Field(default_factory=dict)
     export_enabled: bool = True
     retention_days: int = Field(default=7, ge=1, le=90)
+    detection_model: str = Field(default="ensemble_fusion", max_length=64)
+    shadow_model: str | None = Field(default=None, max_length=64)
+    false_positive_budget_per_app_day: int = Field(default=12, ge=1, le=250)
+    drift_high_threshold: float = Field(default=0.65, ge=0.1, le=1.0)
 
     @model_validator(mode="after")
     def validate_override_count(self):
         if len(self.app_threshold_overrides) > 1000:
             raise ValueError("Too many app threshold overrides")
+        supported = {"ensemble_fusion", "statistical", "linear", "tflite"}
+        if self.detection_model not in supported:
+            raise ValueError("Unsupported detection_model")
+        if self.shadow_model is not None and self.shadow_model not in supported:
+            raise ValueError("Unsupported shadow_model")
         return self
 
 
@@ -102,6 +111,18 @@ class MobileAlertEvent(BaseModel):
     top_features: list[str] = Field(default_factory=list)
     explanation: str = Field(default="", max_length=2048)
     source_model: str = Field(default="unknown", max_length=128)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    uncertainty: float | None = Field(default=None, ge=0.0, le=1.0)
+    drift_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    occurrence_count: int | None = Field(default=1, ge=1, le=100000)
+    first_seen: int | None = None
+    last_seen: int | None = None
+    correlation_key: str | None = Field(default=None, max_length=256)
+    shadow_model: str | None = Field(default=None, max_length=128)
+    shadow_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    suppression_reason: str | None = Field(default=None, max_length=512)
+    data_quality_warnings: list[str] | None = Field(default=None)
+    beacon_score: float | None = Field(default=None, ge=0.0, le=1.0)
     triage_status: Literal["OPEN", "INVESTIGATING", "RESOLVED", "FALSE_POSITIVE"] = "OPEN"
     triage_note: str = Field(default="", max_length=1024)
     timestamp: int
@@ -124,6 +145,8 @@ class MobileAlertEvent(BaseModel):
     def validate_top_features(self):
         if len(self.top_features) > 16:
             raise ValueError("Too many top_features")
+        if self.data_quality_warnings is not None and len(self.data_quality_warnings) > 64:
+            raise ValueError("Too many data_quality_warnings")
         return self
 
 
@@ -136,3 +159,8 @@ class AdapterEventAck(BaseModel):
     status: Literal["accepted"]
     event_id: str
     forwarded: bool
+
+
+class PolicySimulationRequest(BaseModel):
+    policy: DevicePolicyPayload
+    limit: int = Field(default=5000, ge=10, le=50000)

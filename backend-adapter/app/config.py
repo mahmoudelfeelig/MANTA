@@ -17,6 +17,9 @@ class Settings:
     wazuh_ingest_url: str
     wazuh_api_token: str
     allow_insecure_wazuh: bool
+    resistine_base_url: str
+    resistine_api_token: str
+    allow_insecure_resistine: bool
     max_event_size_bytes: int
     max_retries: int
     retry_base_seconds: int
@@ -36,6 +39,9 @@ def load_settings() -> Settings:
         wazuh_ingest_url=os.getenv("WAZUH_INGEST_URL", "").strip(),
         wazuh_api_token=os.getenv("WAZUH_API_TOKEN", "").strip(),
         allow_insecure_wazuh=_bool_env("ALLOW_INSECURE_WAZUH", False),
+        resistine_base_url=os.getenv("RESISTINE_BASE_URL", "").strip(),
+        resistine_api_token=os.getenv("RESISTINE_API_TOKEN", "").strip(),
+        allow_insecure_resistine=_bool_env("ALLOW_INSECURE_RESISTINE", False),
         max_event_size_bytes=max_event_size_bytes,
         max_retries=max_retries,
         retry_base_seconds=retry_base_seconds,

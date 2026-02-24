@@ -14,7 +14,9 @@ from .models import (
     DevicePolicyPayload,
     MobileAlertEvent,
     MobileFlowEvent,
+    PolicySimulationRequest,
 )
+from .resistine_client import ResistineClient, ResistineConfig
 from .security import require_auth
 from .storage import AdapterStorage, QueueItem
 from .wazuh_client import WazuhClient, WazuhConfig
@@ -24,6 +26,33 @@ def _retry_delay_seconds(base: int, attempts: int) -> int:
     return min(300, base * (2 ** max(0, attempts - 1)))
 
 
+def _severity_label(rank: int) -> str:
+    if rank >= 3:
+        return "HIGH"
+    if rank == 2:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _alert_payload(alert) -> dict:
+    payload = dict(alert.__dict__)
+    raw_warnings = payload.pop("data_quality_warnings_json", "[]")
+    try:
+        warnings = json.loads(raw_warnings) if raw_warnings else []
+    except Exception:  # noqa: BLE001
+        warnings = []
+    if not isinstance(warnings, list):
+        warnings = []
+    payload["data_quality_warnings"] = [str(item) for item in warnings]
+    return payload
+
+
+def _incident_payload(incident) -> dict:
+    payload = dict(incident.__dict__)
+    payload["max_severity"] = _severity_label(int(payload.get("max_severity_rank", 1)))
+    return payload
+
+
 settings = load_settings()
 storage = AdapterStorage(settings.sqlite_path)
 wazuh_client = WazuhClient(
@@ -31,6 +60,13 @@ wazuh_client = WazuhClient(
         ingest_url=settings.wazuh_ingest_url,
         api_token=settings.wazuh_api_token,
         allow_insecure=settings.allow_insecure_wazuh,
+    )
+)
+resistine_client = ResistineClient(
+    ResistineConfig(
+        base_url=settings.resistine_base_url,
+        api_token=settings.resistine_api_token,
+        allow_insecure=settings.allow_insecure_resistine,
     )
 )
 storage.initialize()
@@ -104,6 +140,7 @@ def health() -> dict:
     return {
         "status": "ok",
         "wazuh_configured": wazuh_client.configured(),
+        "resistine_configured": resistine_client.configured(),
         "config_warnings": config_warnings,
         "queue": storage.stats(),
     }
@@ -169,19 +206,116 @@ def retry_pending(
     }
 
 
+@app.get("/api/v1/queue/pending")
+def list_pending_queue(
+    limit: int = Query(default=100, ge=1, le=1000),
+    _: None = Depends(auth_dependency),
+):
+    records = storage.list_pending(limit=limit)
+    return {
+        "status": "ok",
+        "pending": [record.__dict__ for record in records],
+    }
+
+
+@app.get("/api/v1/queue/dead-letter")
+def list_dead_letter_queue(
+    limit: int = Query(default=100, ge=1, le=1000),
+    _: None = Depends(auth_dependency),
+):
+    records = storage.list_dead_letter(limit=limit)
+    return {
+        "status": "ok",
+        "dead_letter": [record.__dict__ for record in records],
+    }
+
+
+@app.post("/api/v1/queue/dead-letter/replay")
+def replay_dead_letter_queue(
+    limit: int = Query(default=100, ge=1, le=1000),
+    _: None = Depends(auth_dependency),
+):
+    moved = storage.replay_dead_letter(limit=limit)
+    return {
+        "status": "ok",
+        "replayed": moved,
+        "queue": storage.stats(),
+    }
+
+
+@app.post("/api/v1/resistine/register")
+def resistine_register(
+    payload: dict,
+    _: None = Depends(auth_dependency),
+):
+    if not resistine_client.configured():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Resistine is not configured")
+    response = resistine_client.register_endpoint(payload)
+    return {"status": "ok", "response": response}
+
+
+@app.get("/api/v1/resistine/connection/{device_id}")
+def resistine_connection(
+    device_id: str,
+    _: None = Depends(auth_dependency),
+):
+    if not resistine_client.configured():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Resistine is not configured")
+    response = resistine_client.get_connection(device_id=device_id)
+    return {"status": "ok", "response": response}
+
+
+@app.post("/api/v1/resistine/send/{stream_id}")
+def resistine_send_data(
+    stream_id: str,
+    payload: dict,
+    _: None = Depends(auth_dependency),
+):
+    if not resistine_client.configured():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Resistine is not configured")
+    response = resistine_client.send_data(stream_id=stream_id, payload=payload)
+    return {"status": "ok", "response": response}
+
+
 @app.get("/api/v1/alerts")
 def list_alerts(
     triage_status: str | None = Query(default=None),
+    device_id_pseudo: str | None = Query(default=None, min_length=8, max_length=128),
     limit: int = Query(default=100, ge=1, le=1000),
     _: None = Depends(auth_dependency),
 ):
     if triage_status is not None and triage_status not in {"OPEN", "INVESTIGATING", "RESOLVED", "FALSE_POSITIVE"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid triage status")
 
-    alerts = storage.list_alerts(status=triage_status, limit=limit)
+    alerts = storage.list_alerts(status=triage_status, limit=limit, device_id_pseudo=device_id_pseudo)
     return {
         "status": "ok",
-        "alerts": [alert.__dict__ for alert in alerts],
+        "alerts": [_alert_payload(alert) for alert in alerts],
+    }
+
+
+@app.get("/api/v1/incidents")
+def list_incidents(
+    device_id_pseudo: str | None = Query(default=None, min_length=8, max_length=128),
+    limit: int = Query(default=250, ge=1, le=5000),
+    _: None = Depends(auth_dependency),
+):
+    incidents = storage.list_incidents(limit=limit, device_id_pseudo=device_id_pseudo)
+    return {
+        "status": "ok",
+        "incidents": [_incident_payload(incident) for incident in incidents],
+    }
+
+
+@app.get("/api/v1/quality/summary")
+def quality_summary(
+    device_id_pseudo: str | None = Query(default=None, min_length=8, max_length=128),
+    _: None = Depends(auth_dependency),
+):
+    summary = storage.quality_summary(device_id_pseudo=device_id_pseudo)
+    return {
+        "status": "ok",
+        "quality": summary,
     }
 
 
@@ -202,7 +336,7 @@ def update_alert_triage(
     alert = storage.get_alert(alert_id)
     return {
         "status": "ok",
-        "alert": alert.__dict__ if alert else None,
+        "alert": _alert_payload(alert) if alert else None,
     }
 
 
@@ -212,6 +346,10 @@ _DEFAULT_POLICY = {
     "app_threshold_overrides": {},
     "export_enabled": True,
     "retention_days": 7,
+    "detection_model": "ensemble_fusion",
+    "shadow_model": None,
+    "false_positive_budget_per_app_day": 12,
+    "drift_high_threshold": 0.65,
 }
 
 
@@ -241,3 +379,89 @@ def set_device_policy(
         "device_id_pseudo": device_id_pseudo,
         "policy": policy,
     }
+
+
+@app.post("/api/v1/policy/device/{device_id_pseudo}/auto-tune")
+def auto_tune_policy_from_feedback(
+    device_id_pseudo: str,
+    _: None = Depends(auth_dependency),
+):
+    current_policy = storage.get_policy(device_id_pseudo) or dict(_DEFAULT_POLICY)
+    default_thresholds = current_policy.get("default_thresholds", {})
+    base_medium = float(default_thresholds.get("medium", 0.6))
+    base_high = float(default_thresholds.get("high", 0.85))
+
+    overrides, feedback_stats = storage.feedback_adjust_policy(
+        device_id_pseudo=device_id_pseudo,
+        base_medium=base_medium,
+        base_high=base_high,
+    )
+
+    merged_policy = dict(current_policy)
+    merged_overrides = dict(merged_policy.get("app_threshold_overrides", {}))
+    merged_overrides.update(overrides)
+    merged_policy["app_threshold_overrides"] = merged_overrides
+    merged_policy["policy_version"] = int(merged_policy.get("policy_version", 1)) + 1
+
+    storage.set_policy(device_id_pseudo=device_id_pseudo, policy=merged_policy)
+    return {
+        "status": "ok",
+        "device_id_pseudo": device_id_pseudo,
+        "feedback_stats": feedback_stats,
+        "policy": merged_policy,
+    }
+
+
+@app.post("/api/v1/policy/simulate/{device_id_pseudo}")
+def simulate_policy(
+    device_id_pseudo: str,
+    payload: PolicySimulationRequest,
+    _: None = Depends(auth_dependency),
+):
+    simulation = storage.simulate_policy(
+        device_id_pseudo=device_id_pseudo,
+        policy=payload.policy.model_dump(mode="json"),
+        limit=payload.limit,
+    )
+    return {
+        "status": "ok",
+        "device_id_pseudo": device_id_pseudo,
+        "simulation": simulation,
+    }
+
+
+@app.get("/api/v1/retraining/samples/{device_id_pseudo}")
+def export_retraining_samples(
+    device_id_pseudo: str,
+    limit: int = Query(default=5000, ge=10, le=50000),
+    _: None = Depends(auth_dependency),
+):
+    samples = storage.export_retraining_samples(device_id_pseudo=device_id_pseudo, limit=limit)
+    return {
+        "status": "ok",
+        "device_id_pseudo": device_id_pseudo,
+        "samples": samples,
+    }
+
+
+@app.get("/api/v1/forensics/device/{device_id_pseudo}/bundle")
+def export_forensics_bundle(
+    device_id_pseudo: str,
+    limit: int = Query(default=5000, ge=10, le=50000),
+    _: None = Depends(auth_dependency),
+):
+    policy = storage.get_policy(device_id_pseudo) or dict(_DEFAULT_POLICY)
+    alerts = storage.list_alerts(status=None, limit=limit, device_id_pseudo=device_id_pseudo)
+    incidents = storage.list_incidents(limit=min(limit, 5000), device_id_pseudo=device_id_pseudo)
+    quality = storage.quality_summary(device_id_pseudo=device_id_pseudo)
+    payload = {
+        "status": "ok",
+        "device_id_pseudo": device_id_pseudo,
+        "generated_epoch": int(time.time()),
+        "policy": policy,
+        "queue": storage.stats(),
+        "quality": quality,
+        "alerts": [_alert_payload(alert) for alert in alerts],
+        "incidents": [_incident_payload(incident) for incident in incidents],
+    }
+    return payload

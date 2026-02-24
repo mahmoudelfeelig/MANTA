@@ -14,3 +14,5 @@ def test_load_settings_clamps_ranges(monkeypatch) -> None:
     assert settings.max_event_size_bytes >= 1024
     assert settings.max_retries <= 20
     assert settings.retry_base_seconds >= 1
+    assert settings.resistine_base_url == ""
+    assert settings.allow_insecure_resistine is False
