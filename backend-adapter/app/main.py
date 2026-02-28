@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from starlette.responses import Response
@@ -181,7 +182,7 @@ async def ingest_mobile_alert(
 
 @app.post("/api/v1/events/retry")
 def retry_pending(
-    limit: int = Query(default=100, ge=1, le=1000),
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     _: None = Depends(auth_dependency),
 ):
     now = int(time.time())
@@ -208,7 +209,7 @@ def retry_pending(
 
 @app.get("/api/v1/queue/pending")
 def list_pending_queue(
-    limit: int = Query(default=100, ge=1, le=1000),
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     _: None = Depends(auth_dependency),
 ):
     records = storage.list_pending(limit=limit)
@@ -220,7 +221,7 @@ def list_pending_queue(
 
 @app.get("/api/v1/queue/dead-letter")
 def list_dead_letter_queue(
-    limit: int = Query(default=100, ge=1, le=1000),
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     _: None = Depends(auth_dependency),
 ):
     records = storage.list_dead_letter(limit=limit)
@@ -232,7 +233,7 @@ def list_dead_letter_queue(
 
 @app.post("/api/v1/queue/dead-letter/replay")
 def replay_dead_letter_queue(
-    limit: int = Query(default=100, ge=1, le=1000),
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     _: None = Depends(auth_dependency),
 ):
     moved = storage.replay_dead_letter(limit=limit)
@@ -279,9 +280,9 @@ def resistine_send_data(
 
 @app.get("/api/v1/alerts")
 def list_alerts(
-    triage_status: str | None = Query(default=None),
-    device_id_pseudo: str | None = Query(default=None, min_length=8, max_length=128),
-    limit: int = Query(default=100, ge=1, le=1000),
+    triage_status: Annotated[str | None, Query()] = None,
+    device_id_pseudo: Annotated[str | None, Query(min_length=8, max_length=128)] = None,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     _: None = Depends(auth_dependency),
 ):
     if triage_status is not None and triage_status not in {"OPEN", "INVESTIGATING", "RESOLVED", "FALSE_POSITIVE"}:
@@ -296,8 +297,8 @@ def list_alerts(
 
 @app.get("/api/v1/incidents")
 def list_incidents(
-    device_id_pseudo: str | None = Query(default=None, min_length=8, max_length=128),
-    limit: int = Query(default=250, ge=1, le=5000),
+    device_id_pseudo: Annotated[str | None, Query(min_length=8, max_length=128)] = None,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 250,
     _: None = Depends(auth_dependency),
 ):
     incidents = storage.list_incidents(limit=limit, device_id_pseudo=device_id_pseudo)
@@ -309,7 +310,7 @@ def list_incidents(
 
 @app.get("/api/v1/quality/summary")
 def quality_summary(
-    device_id_pseudo: str | None = Query(default=None, min_length=8, max_length=128),
+    device_id_pseudo: Annotated[str | None, Query(min_length=8, max_length=128)] = None,
     _: None = Depends(auth_dependency),
 ):
     summary = storage.quality_summary(device_id_pseudo=device_id_pseudo)
@@ -433,7 +434,7 @@ def simulate_policy(
 @app.get("/api/v1/retraining/samples/{device_id_pseudo}")
 def export_retraining_samples(
     device_id_pseudo: str,
-    limit: int = Query(default=5000, ge=10, le=50000),
+    limit: Annotated[int, Query(ge=10, le=50000)] = 5000,
     _: None = Depends(auth_dependency),
 ):
     samples = storage.export_retraining_samples(device_id_pseudo=device_id_pseudo, limit=limit)
@@ -447,7 +448,7 @@ def export_retraining_samples(
 @app.get("/api/v1/forensics/device/{device_id_pseudo}/bundle")
 def export_forensics_bundle(
     device_id_pseudo: str,
-    limit: int = Query(default=5000, ge=10, le=50000),
+    limit: Annotated[int, Query(ge=10, le=50000)] = 5000,
     _: None = Depends(auth_dependency),
 ):
     policy = storage.get_policy(device_id_pseudo) or dict(_DEFAULT_POLICY)

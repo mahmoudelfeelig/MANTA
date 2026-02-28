@@ -2,6 +2,8 @@
 
 This is the working source list for architecture decisions, implementation, experiments, and thesis writing.
 
+For compliance sign-off and publication checklist execution, see `licenses.md`.
+
 ## License policy for this thesis project
 - GPL sources are used for architecture inspiration only unless we decide to license our own code as GPL-compatible.
 - MIT, Apache-2.0, and BSD-3-Clause sources can be reused in code with attribution and license notice preservation.
@@ -70,7 +72,7 @@ This is the working source list for architecture decisions, implementation, expe
 | IEEE Xplore | https://ieeexplore.ieee.org/ | Publisher access and copyright terms | Primary literature source for networking and IDS comparisons. | Same as above. |
 | Google Scholar | https://scholar.google.com/ | Indexing/discovery service terms | Fast discovery and citation chaining for related work. | Use for discovery, then verify primary source licenses/copyright. |
 
-## Compliance checklist for implementation
+## Compliance checklist for implementation (quick reminder)
 - Keep a `THIRD_PARTY_NOTICES` file once coding starts.
 - Track each direct code reuse snippet with source URL, commit hash, and license.
 - Avoid direct code copy from GPL repositories unless your distribution license strategy is decided.
