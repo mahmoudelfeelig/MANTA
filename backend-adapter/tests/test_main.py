@@ -11,7 +11,7 @@ import pytest
 from fastapi import HTTPException
 
 
-DB_PATH = Path(tempfile.gettempdir()) / "feel_backend_test_adapter.db"
+DB_PATH = Path(tempfile.gettempdir()) / "manta_backend_test_adapter.db"
 if DB_PATH.exists():
     DB_PATH.unlink()
 
@@ -23,6 +23,7 @@ os.environ["RETRY_BASE_SECONDS"] = "1"
 
 from app.main import (  # noqa: E402
     auto_tune_policy_from_feedback,
+    device_heartbeat,
     export_forensics_bundle,
     export_retraining_samples,
     get_device_policy,
@@ -30,6 +31,7 @@ from app.main import (  # noqa: E402
     ingest_mobile_alert,
     ingest_mobile_flow,
     list_dead_letter_queue,
+    list_devices,
     list_incidents,
     list_pending_queue,
     list_alerts,
@@ -47,6 +49,7 @@ from app.main import (  # noqa: E402
 )
 from app.models import (  # noqa: E402
     AlertTriageUpdate,
+    DeviceHeartbeatPayload,
     DevicePolicyPayload,
     MobileAlertEvent,
     MobileFlowEvent,
@@ -92,6 +95,9 @@ def _alert_payload(alert_id: str = "alert-12345") -> MobileAlertEvent:
         alert_id=alert_id,
         app_id="com.test",
         anomaly_score=0.91,
+        base_anomaly_score=0.83,
+        context_score=0.18,
+        response_score=0.91,
         severity="HIGH",
         top_features=["novelty", "burstiness"],
         explanation="Unusual destination novelty and burst traffic",
@@ -115,12 +121,36 @@ def test_accepts_mobile_flow_with_ipfix_fields() -> None:
     assert response.event_id
 
 
+def test_device_heartbeat_marks_device_online() -> None:
+    result = device_heartbeat(
+        payload=DeviceHeartbeatPayload(
+            device_id_pseudo="heartbeat-device-123",
+            device_label="Pixel Test",
+            capture_enabled=True,
+            export_enabled=True,
+            policy_version=3,
+        ),
+        _=None,
+    )
+    assert result["status"] == "ok"
+
+    devices = list_devices(limit=20, _=None)
+    matching = [item for item in devices["devices"] if item["device_id_pseudo"] == "heartbeat-device-123"]
+    assert matching
+    assert matching[0]["activity_source"] == "heartbeat"
+    assert matching[0]["online"] is True
+
+
 def test_mobile_alert_triage_lifecycle() -> None:
     response = asyncio.run(ingest_mobile_alert(request=_fake_request(), event=_alert_payload(), _=None))
     assert response.status == "accepted"
 
     open_alerts = list_alerts(triage_status="OPEN", limit=100, _=None)
-    assert any(item["alert_id"] == "alert-12345" for item in open_alerts["alerts"])
+    stored = next(item for item in open_alerts["alerts"] if item["alert_id"] == "alert-12345")
+    assert stored["anomaly_score"] == pytest.approx(0.91)
+    assert stored["base_anomaly_score"] == pytest.approx(0.83)
+    assert stored["context_score"] == pytest.approx(0.18)
+    assert stored["response_score"] == pytest.approx(0.91)
 
     patched = update_alert_triage(
         alert_id="alert-12345",

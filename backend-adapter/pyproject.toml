@@ -1,5 +1,5 @@
 [project]
-name = "feel-backend-adapter"
+name = "manta-backend-adapter"
 version = "0.1.0"
 description = "Secure mobile flow ingest adapter for Wazuh/SIEM forwarding"
 readme = "README.md"
@@ -9,6 +9,8 @@ dependencies = [
   "uvicorn[standard]==0.32.1",
   "httpx==0.28.1",
   "pydantic==2.10.5",
+  "numpy==2.2.1",
+  "scikit-learn==1.6.0",
 ]
 
 [project.optional-dependencies]

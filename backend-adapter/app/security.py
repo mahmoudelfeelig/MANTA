@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import hmac
-from fastapi import Header, HTTPException, status
+from fastapi import Cookie, Header, HTTPException, status
 
 
-def extract_token(authorization: str | None, x_endpoint_token: str | None) -> str:
+def extract_token(authorization: str | None, x_endpoint_token: str | None, dashboard_session: str | None = None) -> str:
     if x_endpoint_token:
         return x_endpoint_token.strip()
     if authorization and authorization.lower().startswith("bearer "):
         return authorization[7:].strip()
+    if dashboard_session:
+        return dashboard_session.strip()
     return ""
 
 
@@ -29,6 +31,7 @@ def require_auth(
     expected_token: str,
     authorization: str | None = Header(default=None),
     x_endpoint_token: str | None = Header(default=None),
+    dashboard_session: str | None = Cookie(default=None),
 ) -> None:
-    token = extract_token(authorization, x_endpoint_token)
+    token = extract_token(authorization, x_endpoint_token, dashboard_session)
     verify_token(expected_token, token)

@@ -18,6 +18,21 @@ class ThresholdProfile(BaseModel):
         return value
 
 
+class FusionWeightsPayload(BaseModel):
+    statistical: float = Field(default=0.28, ge=0.0, le=1.0)
+    multivariate: float = Field(default=0.20, ge=0.0, le=1.0)
+    sequence: float = Field(default=0.12, ge=0.0, le=1.0)
+    linear: float = Field(default=0.16, ge=0.0, le=1.0)
+    tflite: float = Field(default=0.12, ge=0.0, le=1.0)
+    remote: float = Field(default=0.12, ge=0.0, le=1.0)
+    beacon: float = Field(default=0.15, ge=0.0, le=1.0)
+    drift: float = Field(default=0.10, ge=0.0, le=1.0)
+    reputation: float = Field(default=0.18, ge=0.0, le=1.0)
+    data_quality_penalty: float = Field(default=0.10, ge=0.0, le=1.0)
+    response_anomaly: float = Field(default=0.82, ge=0.0, le=1.0)
+    response_context: float = Field(default=0.18, ge=0.0, le=1.0)
+
+
 class DevicePolicyPayload(BaseModel):
     policy_version: int = Field(ge=1)
     default_thresholds: ThresholdProfile
@@ -28,12 +43,22 @@ class DevicePolicyPayload(BaseModel):
     shadow_model: str | None = Field(default=None, max_length=64)
     false_positive_budget_per_app_day: int = Field(default=12, ge=1, le=250)
     drift_high_threshold: float = Field(default=0.65, ge=0.1, le=1.0)
+    capture_enabled: bool = True
+    theme_mode: Literal["SYSTEM", "LIGHT", "DARK"] = "SYSTEM"
+    debug_mode_enabled: bool = False
+    fusion_weights: FusionWeightsPayload = Field(default_factory=FusionWeightsPayload)
+    disable_volume_features: bool = False
+    disable_timing_features: bool = False
+    disable_destination_features: bool = False
+    app_profile_overrides: dict[str, Literal["DEFAULT", "TRUSTED", "HIGH_CHURN", "BROWSER", "SYSTEM"]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_override_count(self):
         if len(self.app_threshold_overrides) > 1000:
             raise ValueError("Too many app threshold overrides")
-        supported = {"ensemble_fusion", "statistical", "linear", "tflite"}
+        if len(self.app_profile_overrides) > 1000:
+            raise ValueError("Too many app profile overrides")
+        supported = {"ensemble_fusion", "statistical", "multivariate", "sequence", "linear", "tflite", "remote_assisted"}
         if self.detection_model not in supported:
             raise ValueError("Unsupported detection_model")
         if self.shadow_model is not None and self.shadow_model not in supported:
@@ -61,6 +86,8 @@ class MobileFlowEvent(BaseModel):
     timestamp_end: int
     anomaly_score: float | None = Field(default=None, ge=0.0, le=1.0)
     explain_top_features: list[str] | None = None
+    site_hint: str | None = Field(default=None, max_length=512)
+    device_label: str | None = Field(default=None, max_length=256)
 
     # P1: NetFlow/IPFIX-style fields
     netflow_version: int | None = Field(default=None, ge=1)
@@ -107,10 +134,16 @@ class MobileAlertEvent(BaseModel):
     alert_id: str = Field(min_length=8, max_length=128)
     app_id: str = Field(min_length=1, max_length=256)
     anomaly_score: float = Field(ge=0.0, le=1.0)
+    base_anomaly_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    context_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    response_score: float | None = Field(default=None, ge=0.0, le=1.0)
     severity: Literal["LOW", "MEDIUM", "HIGH"]
     top_features: list[str] = Field(default_factory=list)
     explanation: str = Field(default="", max_length=2048)
     source_model: str = Field(default="unknown", max_length=128)
+    site_hint: str | None = Field(default=None, max_length=512)
+    device_label: str | None = Field(default=None, max_length=256)
+    window_features: "RemoteFeatureWindowPayload | None" = None
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     uncertainty: float | None = Field(default=None, ge=0.0, le=1.0)
     drift_score: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -161,6 +194,89 @@ class AdapterEventAck(BaseModel):
     forwarded: bool
 
 
+class DeviceHeartbeatPayload(BaseModel):
+    device_id_pseudo: str = Field(min_length=8, max_length=128)
+    device_label: str | None = Field(default=None, max_length=256)
+    capture_enabled: bool = False
+    export_enabled: bool = False
+    policy_version: int = Field(default=1, ge=1)
+
+
 class PolicySimulationRequest(BaseModel):
     policy: DevicePolicyPayload
     limit: int = Field(default=5000, ge=10, le=50000)
+
+
+class RemoteFeatureWindowPayload(BaseModel):
+    flow_count: int = Field(ge=0)
+    bytes_out: int = Field(ge=0)
+    bytes_in: int = Field(ge=0)
+    mean_packet_size: float = Field(ge=0.0)
+    outbound_ratio: float = Field(ge=0.0, le=1.0)
+    burstiness: float = Field(ge=0.0)
+    novelty_score: float = Field(ge=0.0, le=1.0)
+    connection_frequency_delta: float = Field(ge=0.0)
+    bytes_per_flow: float = Field(ge=0.0)
+    destination_diversity: float = Field(ge=0.0, le=1.0)
+    activity_ratio: float = Field(ge=0.0, le=1.0)
+    periodic_beacon_score: float = Field(ge=0.0, le=1.0)
+    byte_rate: float = Field(default=0.0, ge=0.0)
+    packet_rate: float = Field(default=0.0, ge=0.0)
+    mean_duration_ms: float = Field(default=0.0, ge=0.0)
+    duration_jitter: float = Field(default=0.0, ge=0.0)
+    port_diversity: float = Field(default=0.0, ge=0.0, le=1.0)
+    protocol_diversity: float = Field(default=0.0, ge=0.0, le=1.0)
+    packet_imbalance: float = Field(default=0.0, ge=0.0, le=1.0)
+    small_flow_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    high_port_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    hour_of_day: int = Field(ge=0, le=23)
+    is_weekend: bool = False
+    data_quality_score: float = Field(ge=0.0, le=1.0)
+    ttl_gap: float = Field(default=0.0, ge=0.0)
+    ttl_metrics_present: float = Field(default=0.0, ge=0.0, le=1.0)
+    syn_rate_total: float = Field(default=0.0, ge=0.0)
+    rst_rate_total: float = Field(default=0.0, ge=0.0)
+    ack_rate_total: float = Field(default=0.0, ge=0.0)
+    fin_rate_total: float = Field(default=0.0, ge=0.0)
+    psh_rate_total: float = Field(default=0.0, ge=0.0)
+    fragment_rate_total: float = Field(default=0.0, ge=0.0)
+    tcp_window_mean: float = Field(default=0.0, ge=0.0)
+    ack_delay_mean: float = Field(default=0.0, ge=0.0)
+    inter_packet_gap_mean: float = Field(default=0.0, ge=0.0)
+    payload_mean: float = Field(default=0.0, ge=0.0)
+    load_mean: float = Field(default=0.0, ge=0.0)
+    transport_metrics_present: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class RemoteInferenceRequest(BaseModel):
+    device_id_pseudo: str = Field(min_length=8, max_length=128)
+    app_id: str = Field(min_length=1, max_length=256)
+    site_hint: str | None = Field(default=None, max_length=512)
+    feature_window: RemoteFeatureWindowPayload
+
+
+class PolicyApplyScopeRequest(BaseModel):
+    scope: Literal["device", "selected_devices", "all_devices", "global_default"]
+    policy: DevicePolicyPayload
+    device_ids: list[str] = Field(default_factory=list)
+
+
+class AdminPurgeRequest(BaseModel):
+    device_ids: list[str] = Field(default_factory=list)
+    all_devices: bool = False
+    clear_events: bool = False
+    clear_alerts: bool = False
+    clear_policies: bool = False
+    clear_models: bool = False
+    clear_dead_letter: bool = False
+    purge_test_data: bool = False
+
+
+class RemoteModelUpsertRequest(BaseModel):
+    model: dict
+    activate: bool = True
+    family: str | None = Field(default=None, max_length=64)
+
+
+class DeviceDisplayNameUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=128)

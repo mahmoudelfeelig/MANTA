@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 
 
-DB_PATH = Path(tempfile.gettempdir()) / "feel_backend_test_adapter_edge.db"
+DB_PATH = Path(tempfile.gettempdir()) / "manta_backend_test_adapter_edge.db"
 if DB_PATH.exists():
     DB_PATH.unlink()
 

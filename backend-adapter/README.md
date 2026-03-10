@@ -1,6 +1,6 @@
-# Backend Adapter
+# MANTA Backend Adapter
 
-Secure ingest service for Android mobile flow events with optional Wazuh forwarding.
+Secure ingest service for MANTA mobile flow events with optional Wazuh forwarding.
 
 ## Features
 - Token-authenticated event ingest endpoint.
@@ -10,6 +10,7 @@ Secure ingest service for Android mobile flow events with optional Wazuh forward
 - Optional Resistine manager connector routes (register, connection lookup, stream send).
 - Alert triage lifecycle storage and update endpoints.
 - Device policy sync endpoints for adaptive thresholds and retention/export controls.
+- Device heartbeat and device-presence tracking endpoints.
 - Incident grouping, quality summary, policy simulation, retraining sample export, and forensics bundle endpoints.
 - Security hardening middleware headers and payload shape limits.
 
@@ -35,7 +36,11 @@ Note: environment variables are read from process env (`os.getenv`) at startup; 
 - `GET /health`
 - `POST /api/v1/events/mobile-flow`
 - `POST /api/v1/events/mobile-alert`
+- `POST /api/v1/inference/window`
+- `GET /api/v1/model/device/{device_id_pseudo}`
+- `POST /api/v1/model/device/{device_id_pseudo}/retrain`
 - `POST /api/v1/events/retry?limit=100`
+- `GET /api/v1/events/recent?status=sent&limit=100`
 - `GET /api/v1/queue/pending?limit=100`
 - `GET /api/v1/queue/dead-letter?limit=100`
 - `POST /api/v1/queue/dead-letter/replay?limit=100`
