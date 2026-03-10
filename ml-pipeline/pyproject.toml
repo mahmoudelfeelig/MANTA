@@ -1,11 +1,11 @@
 [project]
-name = "feel-ml-pipeline"
+name = "manta-ml-pipeline"
 version = "0.1.0"
 description = "Feature engineering, anomaly training, and evaluation for Android flow metadata"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "numpy==2.2.1",
+  "numpy==1.26.4",
   "pandas==2.2.3",
   "scikit-learn==1.6.0",
   "joblib==1.4.2",

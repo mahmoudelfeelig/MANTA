@@ -13,6 +13,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from .features import FEATURE_COLUMNS, build_feature_windows, feature_matrix
+from .progress import PhaseProgress
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,11 +40,15 @@ def _best_threshold(y_true: np.ndarray, scores: np.ndarray) -> float:
 
 def main() -> None:
     args = parse_args()
+    progress = PhaseProgress("Android linear training")
+    progress.update(5, "Loading flow CSV")
     df = pd.read_csv(args.input)
+    progress.update(18, "Building feature windows")
     windows = build_feature_windows(df)
     if "label" not in windows.columns:
         raise SystemExit("Input must include label or is_anomaly column for supervised Android model training")
 
+    progress.update(30, "Preparing train/test split")
     sorted_windows = windows.sort_values("window_bucket", kind="mergesort").reset_index(drop=True)
     split_index = max(1, int(len(sorted_windows) * (1.0 - args.test_ratio)))
     train_df = sorted_windows.iloc[:split_index].copy()
@@ -93,6 +98,7 @@ def main() -> None:
     X_test = feature_matrix(test_df)
     y_test = test_df["label"].fillna(0).astype(int).to_numpy()
 
+    progress.update(52, "Fitting logistic regression")
     pipeline = Pipeline(
         steps=[
             ("scaler", StandardScaler()),
@@ -101,6 +107,7 @@ def main() -> None:
     )
     pipeline.fit(X_train, y_train)
 
+    progress.update(78, "Evaluating model")
     scores = pipeline.predict_proba(X_test)[:, 1]
     threshold = _best_threshold(y_true=y_test, scores=scores)
     pred = (scores >= threshold).astype(int)
@@ -131,11 +138,13 @@ def main() -> None:
 
     model_path = Path(args.output_model)
     model_path.parent.mkdir(parents=True, exist_ok=True)
+    progress.update(92, "Writing model artifact")
     model_path.write_text(json.dumps(model_payload, indent=2), encoding="utf-8")
 
     report_path = Path(args.output_report)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report_payload, indent=2), encoding="utf-8")
+    progress.update(100, "Completed")
 
 
 if __name__ == "__main__":
