@@ -1,4 +1,4 @@
-name: CI Python
+name: MANTA CI Python
 
 on:
   push:
@@ -6,6 +6,46 @@ on:
   pull_request:
 
 jobs:
+  repo-sanity:
+    name: Repo sanity checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Legacy naming guard
+        run: python tools/check_legacy_naming.py
+
+      - name: Python syntax checks
+        run: |
+          python -m py_compile \
+            backend-adapter/app/main.py \
+            backend-adapter/app/models.py \
+            backend-adapter/app/storage.py \
+            backend-adapter/app/remote_modeling.py \
+            ml-pipeline/src/ml_pipeline/train_remote_backend_model.py \
+            tools/collect_manta_dataset.py \
+            tools/check_manta_validation.py \
+            tools/check_legacy_naming.py
+
+      - name: Validation gate report check
+        run: python tools/check_manta_validation.py
+
+      - name: Dataset collection planner smoke test
+        run: |
+          python tools/collect_manta_dataset.py \
+            --output-dir /tmp/manta-study-plan \
+            --days 1 \
+            --repetitions 1 \
+            --include-phone \
+            --include-laptop \
+            --include-attack-scenarios
+
   backend-tests:
     name: Backend adapter tests
     runs-on: ubuntu-latest
@@ -30,7 +70,7 @@ jobs:
           pytest -q tests
 
   ml-tests:
-    name: ML pipeline tests
+    name: MANTA ML pipeline tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

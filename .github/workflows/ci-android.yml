@@ -1,4 +1,4 @@
-name: CI Android
+name: MANTA CI Android
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   android-unit-tests:
-    name: Android unit tests
+    name: MANTA Android unit tests
     runs-on: ubuntu-latest
 
     steps:

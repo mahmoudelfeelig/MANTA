@@ -4,9 +4,11 @@ This folder contains the thesis manuscript source (LaTeX).
 
 ## Related project docs
 - `../README.md` - primary project overview, commands, and workflow notes.
-- `../docs/features-checklist.md` - scope/completion checklist and remaining publication-readiness work.
-- `../docs/licenses.md` - license and dataset compliance checklist.
-- `../docs/references.md` - curated technical and academic references.
+- `../docs/FEATURES.md` - scope/completion checklist grouped by subsystem.
+- `../docs/LICENSES.md` - license and dataset compliance checklist.
+- `../docs/REFERENCES.md` - curated technical and academic references.
+- `../docs/VALIDATION.md` - experiment and metric gates.
+- `../docs/PRIVACY_ETHICS.md` - privacy and ethics position for MANTA.
 
 ## Build
 ```bash

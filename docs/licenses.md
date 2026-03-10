@@ -1,55 +1,46 @@
-# Licenses and Dataset Compliance
+# MANTA License and Data Compliance
 
-Use this checklist before demo/release and before thesis publication.
-
-## Current audit snapshot (2026-02-22)
-- Third-party registry exists and is updated: `../THIRD_PARTY_NOTICES.md`
-- Direct GPL repositories are marked as reference-only (no direct code copy)
-- Core shipped dependencies are predominantly Apache-2.0 / MIT / BSD
-- Public dataset license terms are still marked as verify-before-publish
+Use this checklist before public demos, thesis submission, or distribution of code, models, or datasets.
 
 ## Project policy
-- GPL sources are used for architecture inspiration/reference unless project licensing strategy explicitly changes.
-- Track reuse provenance (URL/version/commit + license/terms) for copied/adapted snippets and assets.
-- Re-check dependency and dataset terms before any public release or thesis submission.
-- Preserve notices/attributions required by dependencies and reused materials.
+- Treat GPL repositories as design references unless the project licensing strategy is explicitly changed.
+- Track provenance for every copied or adapted third-party snippet, asset, or script.
+- Keep raw private captures separate from any derived dataset intended for experiments or publication.
+- Re-check dependency and dataset terms before any public release.
 
-## Release / submission checklist
+## Raw vs derived data policy
+- Raw packet captures and locally collected private traffic are internal research assets by default.
+- Derived datasets for experiments should be generated from scripts, not edited manually.
+- Derived privacy views should be explicitly labeled, for example:
+  - `full`
+  - `pseudonymous`
+  - `semantic-private`
+  - `strict`
+- If a dataset cannot be redistributed, publish only transformation scripts, manifests, and reproducibility metadata.
 
-## 1) Project-level policy
-- [x] Project license decision documented
-- [x] GPL copy policy documented
-- [x] Third-party notices file maintained
-- [x] Reuse provenance (URL/version) tracked
+## Dependency compliance checklist
+- [x] project-level notice file maintained
+- [x] GPL reference-only policy documented
+- [ ] dependency license scan archived for backend
+- [ ] dependency license scan archived for ML pipeline
+- [ ] Android dependency/license reconciliation archived
+- [ ] final shipped dependency set reviewed for compatibility
 
-## 2) Dependency compliance
-For each newly added dependency:
-- [x] package and version recorded
-- [x] license recorded
-- [x] compatibility with project licensing reviewed
-- [x] notice obligations reviewed
+## Dataset compliance checklist
+- [x] synthetic/project-generated dataset status documented
+- [ ] external dataset terms archived with access dates
+- [ ] redistribution rights confirmed for every published derived artifact
+- [ ] thesis citations prepared for every external dataset used
+- [ ] local capture consent and storage policy documented for private collection campaigns
+- [ ] raw-vs-derived separation enforced in collection and curation scripts
 
-## 3) Dataset compliance
-- [x] project-generated synthetic dataset status documented
-- [ ] external dataset terms archived with access date
-- [ ] external dataset redistribution rights explicitly confirmed
-- [ ] final thesis citations prepared for all external datasets
+## Privacy-specific compliance checklist
+- [ ] privacy-tier descriptions documented for thesis and user docs
+- [ ] leakage-risk evaluation methodology documented
+- [ ] data-minimization rationale written for exported fields
+- [ ] retention and purge behavior documented for local and backend stores
 
-## 4) Pre-publication checks
-- [ ] run dependency license scan and archive result files
-- [x] ensure no local secrets or env files are committed
-- [x] ensure no generated runtime artifacts are committed
-- [x] ensure third-party notices are date-stamped
-
-## Suggested tooling
-Android:
-- Gradle dependency tree + manual license reconciliation
-
-Python:
-- `pip-licenses`
-- `pipdeptree`
-
-## Optional audit commands
+## Suggested audit tooling
 Backend:
 ```bash
 cd backend-adapter
@@ -60,7 +51,7 @@ pip-licenses --format=markdown --with-urls > ../docs/license-scan-backend.md
 pipdeptree > ../docs/license-tree-backend.txt
 ```
 
-ML:
+ML pipeline:
 ```bash
 cd ml-pipeline
 python -m venv .venv
@@ -70,14 +61,8 @@ pip-licenses --format=markdown --with-urls > ../docs/license-scan-ml.md
 pipdeptree > ../docs/license-tree-ml.txt
 ```
 
-## Expected optional outputs
-- `docs/license-scan-backend.md`
-- `docs/license-tree-backend.txt`
-- `docs/license-scan-ml.md`
-- `docs/license-tree-ml.txt`
-
 ## Exit criteria
 - no unknown licenses in shipped dependencies
-- no unapproved copyleft code copied into project source
-- dataset terms and citations complete for all published experiment inputs
-- `THIRD_PARTY_NOTICES.md` matches shipped artifacts and thesis acknowledgements
+- no copied copyleft code beyond documented, intentional policy
+- no dataset used without terms, attribution path, and publication decision documented
+- raw private captures are never confused with redistributable benchmark artifacts

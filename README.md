@@ -1,22 +1,30 @@
-# feel-bachelor
+# MANTA
 
-Anomaly detection of Android application network traffic using metadata-only flow collection, on-device anomaly detection, and optional backend export for triage and SIEM integration.
+`MANTA: Can We Detect Threats Without Seeing the Payload?`
+
+MANTA (Mobile Anomaly and Network Threat Analysis) is an anomaly-first hybrid IDS for encrypted mobile and endpoint traffic. It captures metadata-only flows, performs on-device anomaly scoring, supports privacy-tiered export and remote assistance, and provides backend/SIEM integration for triage, policy, and model management.
 
 ## Components
-- `android-app/` - Android endpoint app (`VpnService`, flow pipeline, local storage, anomaly scoring, export queue, privacy/consent UI)
-- `backend-adapter/` - FastAPI ingest adapter (auth, validation, retry/dead-letter queue, triage/policy APIs, optional Wazuh forwarding, Resistine connector routes)
-- `ml-pipeline/` - feature extraction, anomaly training/evaluation, IDS-style baseline comparison, drift/privacy/policy analyses, Android model export
-- `thesis-paper/` - LaTeX thesis manuscript source
+- `android-app/` - MANTA Endpoint app for Android (`VpnService`, flow pipeline, local storage, privacy controls, on-device scoring, export queue, policy sync)
+- `backend-adapter/` - MANTA Backend Adapter (FastAPI ingest, queueing, triage, policy APIs, model control, optional SIEM forwarding)
+- `ml-pipeline/` - feature extraction, model training, evaluation, privacy/utility benchmarking, experiment orchestration, artifact export
+- `docs/` - scope, feature checklist, references, licenses, and architecture-facing project documentation
+- `thesis-paper/` - manuscript source and bibliography
+- `tools/` - helper scripts for experiment operations and project maintenance
 
-## Project Docs (Minimal Set)
-- `docs/features-checklist.md` - scope, feature checklist, current completion snapshot, and remaining publish-readiness tasks
-- `docs/licenses.md` - license + dataset compliance checklist and optional audit commands
-- `docs/references.md` - implementation, standards, datasets, privacy, and research references
-- `THIRD_PARTY_NOTICES.md` - third-party notices and reuse provenance register
+## Core Docs
+- `docs/FEATURES.md` - feature checklist and implementation scope grouped by subsystem
+- `docs/REFERENCES.md` - implementation references, literature register, and thesis-story paper links
+- `docs/LICENSES.md` - license, dataset, and raw-vs-derived data compliance policy
+- `docs/VALIDATION.md` - formal metric, privacy, reliability, and performance gates
+- `docs/PRIVACY_ETHICS.md` - privacy-tier, leakage, and ethics analysis
+- `docs/SIEM_CONTRACTS.md` - backend/SIEM integration contracts and live verification entrypoint
+- `docs/EVIDENCE_PACKAGE.md` - appendix/publication evidence archiving flow
+- `THIRD_PARTY_NOTICES.md` - provenance and reuse notices
 
 ## Quick Start
 
-## Backend adapter (local)
+### Backend adapter
 ```bash
 cd backend-adapter
 python -m venv .venv
@@ -26,53 +34,33 @@ export ADAPTER_SHARED_TOKEN='replace-with-long-random-token'
 uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
-## ML pipeline (tests + experiment)
+### ML pipeline
 ```bash
 cd ml-pipeline
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .[test]
 pytest -q -s tests
-
-python -m ml_pipeline.generate_controlled_dataset \
-  --output data/controlled_flows.csv \
-  --rows-per-scenario 400 \
-  --seed 42
-
-python -m ml_pipeline.run_experiment_suite \
-  --input data/controlled_flows.csv \
-  --output-dir experiment-runs/run-001 \
-  --model-threshold 0.5 \
-  --ids-threshold 0.55
 ```
 
-## Android app
+### Android app
 - Open `android-app/` in Android Studio.
-- Ensure Android SDK path is configured (`ANDROID_HOME` or `android-app/local.properties`).
-- Configure backend URL/token in app UI (HTTPS required for app export).
-- Accept consent/disclosure, start capture, and validate alerts/export behavior.
+- Configure the backend URL and token in the app.
+- Choose the privacy tier you want for local-only, pseudonymous, semantic-private, strict, research, or custom export behavior.
+- Accept consent, start capture, and validate alerts, export, and policy sync.
 
-## Automated test commands (root)
-```bash
-make smoke
-make test-backend
-make test-ml
-# Requires Android SDK setup:
-make test-android
-```
-
-## CI workflows
-- `.github/workflows/ci-python.yml`
-- `.github/workflows/ci-android.yml`
-
-## Thesis / Submission Notes
-- Use `docs/features-checklist.md` as the single progress + remaining-work tracker.
-- Use `docs/licenses.md` before release/thesis submission for compliance sign-off.
-- Use `docs/references.md` as the curated source list for implementation and writing.
-- `thesis-paper/README.md` contains manuscript build instructions.
+## Project Direction
+MANTA is being rewritten toward:
+- anomaly-first hybrid IDS framing
+- stronger multivariate and sequence-aware anomaly detection
+- light on-device inference and heavier remote model options
+- privacy-tier benchmarking with documented utility degradation
+- rigorous replay, integration, and long-running evaluation gates
+- GitHub Actions-driven CI/CD and benchmark evidence
 
 ## Component READMEs
 - `android-app/README.md`
 - `backend-adapter/README.md`
 - `ml-pipeline/README.md`
+- `cloudflared/README.md`
 - `thesis-paper/README.md`

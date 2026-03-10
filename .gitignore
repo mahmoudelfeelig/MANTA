@@ -63,10 +63,28 @@ ml-pipeline/experiment-runs/
 *.tar.gz
 *.rar
 
+# Env/Config files
+*.env
+config.*
+
 # notes
 /notes.txt
+
+# cloudflared stuff
+/cloudflared.exe
+
+# executables
+*.exe
+
+# datasets
+/ml-pipeline/downloads/
+
+# reports
+/reports/
 
 # Thesis / animation assets
 /presentation/
 /animations/
 /thesis-paper/
+/.venv-manim
+/media/

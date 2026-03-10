@@ -1,84 +1,80 @@
-# References
+# MANTA References
 
-This is the working source list for architecture decisions, implementation, experiments, and thesis writing.
+This is the curated implementation and literature register for:
+- system design
+- datasets
+- privacy/utility benchmarking
+- anomaly-detection model comparisons
+- thesis writing for `MANTA: Can We Detect Threats Without Seeing the Payload?`
 
-For compliance sign-off and publication checklist execution, see `licenses.md`.
+## Thesis story anchor
+MANTA is framed as an anomaly-first hybrid IDS for encrypted mobile traffic. The literature story should move in this order:
+- payload-free anomaly detection is feasible
+- encrypted traffic still exposes behavioral structure
+- multivariate and self-supervised methods improve anomaly quality
+- privacy-preserving and federated methods can reduce leakage while retaining utility
+- hybrid anomaly/context systems are practically stronger than pure rule engines
 
-## License policy for this thesis project
-- GPL sources are used for architecture inspiration only unless we decide to license our own code as GPL-compatible.
-- MIT, Apache-2.0, and BSD-3-Clause sources can be reused in code with attribution and license notice preservation.
-- Documentation and standards are primarily for citation and design guidance; do not copy large text verbatim.
-- Dataset usage must follow each dataset's explicit terms, attribution, and redistribution constraints.
-- Before shipping any prototype publicly, run a final dependency and source-license audit.
+## Core literature register
+All links below are intended to be directly readable full-text or open-access pages.
 
-## Core implementation and inspiration
-| Reference | Link | License | Why relevant | License usage note |
-|---|---|---|---|---|
-| NetGuard (Android local VPN firewall) | https://github.com/M66B/NetGuard | GPL-3.0 | Strong practical reference for `VpnService` lifecycle and packet handling on Android. | Do not copy source into non-GPL project; use for design patterns and reimplementation. |
-| elastic-agent-android (prototype-style Android telemetry app) | https://github.com/swiftbird07/elastic-agent-android/tree/main/app/src/main/java/de/swiftbird/elasticandroid | MIT | Useful structure for endpoint telemetry flow and backend export patterns. | Permissive reuse allowed with attribution and license retention. |
-| PCAPdroid | https://github.com/emanuele-f/PCAPdroid | GPL-3.0 | Good reference for traffic capture UX and Android packet capture constraints. | Treat as inspiration only unless project licensing changes to GPL-compatible. |
+| Paper / source | Link | Why it matters for MANTA |
+|---|---|---|
+| Kitsune: An Ensemble of Autoencoders for Online Network Intrusion Detection | https://arxiv.org/abs/1802.09089 | Lightweight online anomaly detection reference and strong anomaly-first baseline. |
+| N-BaIoT: Network-based Detection of IoT Botnet Attacks Using Deep Autoencoders | https://arxiv.org/abs/1805.03409 | Deep autoencoder anomaly detection with deployment-oriented framing. |
+| ET-SSL: Self-Supervised Learning for Anomaly Detection in Encrypted Traffic | https://www.nature.com/articles/s41598-025-08568-0 | Strong reference for privacy-compatible representation learning over encrypted traffic. |
+| ARGUS: Context-Based Detection of Stealthy IoT Infiltration Attacks | https://www.usenix.org/conference/usenixsecurity23/presentation/rieger | Good comparison point for context-enriched anomaly detection. |
+| NetVigil: Robust and Low-Cost Anomaly Detection for East-West Data Center Security | https://www.usenix.org/conference/nsdi24/presentation/hsieh | Good modern reference for robust and low-cost anomaly detection design. |
+| An adaptive smartphone anomaly detection model based on data mining | https://link.springer.com/article/10.1186/s13638-018-1158-6 | Mobile-device anomaly detection reference that fits the smartphone angle directly. |
+| Deep Learning for Encrypted Traffic Classification and Unknown Data Detection | https://www.mdpi.com/1424-8220/22/19/7643 | Useful for the classification/unknown-detection side of the comparison section. |
+| A Mobile Application-Classifying Method Based on a Graph Attention Network from Encrypted Network Traffic | https://www.mdpi.com/2079-9292/12/10/2313 | Mobile encrypted-traffic classification comparison point. |
+| Artificial Intelligence-Based Anomaly Detection Technology over Encrypted Traffic: A Systematic Literature Review | https://www.mdpi.com/1424-8220/24/3/898 | Survey anchor for related-work positioning. |
+| Privacy-Preserving FL-Based IDS for Cyber-Physical Systems | https://www.mdpi.com/2227-7390/12/20/3194 | Federated privacy-preserving IDS training reference. |
+| Enhancing Privacy-Preserving Intrusion Detection through Federated Learning | https://www.mdpi.com/2079-9292/12/16/3382 | Strong reference for collaborative training without central raw-data collection. |
+| NIDS-FGPA: Privacy-Preserved Federated Learning for Network Intrusion Detection | https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0308639 | Secure-aggregation-oriented federated NIDS reference. |
+| PD-PAn: Prefix- and Distribution-Preserving Packet Anonymization | https://www.mdpi.com/2079-9292/12/20/4369 | Useful for the dataset transformation and anonymization discussion. |
 
-## Android platform documentation
-| Reference | Link | License/terms | Why relevant | License usage note |
-|---|---|---|---|---|
-| Android `VpnService` | https://developer.android.com/reference/android/net/VpnService | Developer docs terms | Core API for on-device VPN capture design. | Use as technical reference and cite URL; avoid copying large doc text. |
-| Android networking overview | https://developer.android.com/develop/connectivity/network-ops/reading-network-state | Developer docs terms | Useful for connectivity state handling and resilient networking behavior. | Same as above. |
-| Foreground services | https://developer.android.com/develop/background-work/services/foreground-services | Developer docs terms | Needed for reliable long-running VPN capture. | Same as above. |
-| WorkManager | https://developer.android.com/topic/libraries/architecture/workmanager | Developer docs terms | Useful for deferred/retry export jobs and robust background sync. | Same as above. |
-| Room persistence library | https://developer.android.com/training/data-storage/room | Developer docs terms | Primary local storage layer for flows, features, and export queue. | Same as above. |
+## Literature-to-thesis mapping
+- Use `Kitsune`, `N-BaIoT`, `ARGUS`, and `NetVigil` to justify the anomaly side.
+- Use the mobile encrypted-traffic classification papers to justify why classification baselines must still be compared.
+- Use `ET-SSL` and the federated/privacy papers to justify the privacy-preserving extension and the custom privacy-tier evaluation.
+- Use `PD-PAn` to justify derived anonymized dataset variants and the utility-leakage trade-off discussion.
 
-## Network flow standards and telemetry schema
-| Reference | Link | License/terms | Why relevant | License usage note |
-|---|---|---|---|---|
-| RFC 7011 (IPFIX protocol specification) | https://www.rfc-editor.org/rfc/rfc7011 | IETF Trust legal provisions | Core standard for flow-style record design. | Cite and paraphrase; avoid large verbatim excerpts. |
-| RFC 7012 (IPFIX information model) | https://www.rfc-editor.org/rfc/rfc7012 | IETF Trust legal provisions | Defines reusable flow field semantics for schema design. | Cite and paraphrase. |
-| RFC 3954 (Cisco NetFlow v9) | https://www.rfc-editor.org/rfc/rfc3954 | IETF Trust legal provisions | Practical NetFlow template/reference for event mapping. | Cite and paraphrase. |
-| IANA IPFIX registry | https://www.iana.org/assignments/ipfix/ipfix.xhtml | IANA terms | Canonical field IDs for interoperability-minded schema choices. | Use field definitions with attribution. |
+## Model-comparison section targets
+The paper should compare at least these model families:
+- rigorous multivariate statistical anomaly detector
+- one-class or reconstruction neural anomaly detector
+- drift-aware anomaly stack
+- supervised tabular classifier
+- remote neural classifier
+- hybrid late-fusion model
+- privacy-preserving and federated variants of the strongest models
 
-## SIEM and backend integration
-| Reference | Link | License | Why relevant | License usage note |
-|---|---|---|---|---|
-| Wazuh API reference | https://documentation.wazuh.com/current/user-manual/api/reference.html | Product components include GPLv2 and Apache-2.0 | Primary source for manager communication endpoints and auth. | API integration is fine; do not copy internal Wazuh source unless license obligations are met. |
-| Wazuh documentation root | https://documentation.wazuh.com/current/ | Documentation terms | Ingestion, indexing, rules, and dashboard operational guidance. | Cite docs; avoid copying large doc text blocks. |
-| OpenAPI Generator | https://openapi-generator.tech/ | Apache-2.0 | Generate typed API clients for backend manager communication. | Tool is permissive; generated code is generally user-owned per project docs. |
+## Implementation and platform references
+| Reference | Link | Why relevant |
+|---|---|---|
+| Android `VpnService` | https://developer.android.com/reference/android/net/VpnService | Core capture primitive on Android. |
+| WorkManager | https://developer.android.com/topic/libraries/architecture/workmanager | Reliable export, sync, and retention jobs. |
+| Room persistence library | https://developer.android.com/training/data-storage/room | Local on-device storage. |
+| RFC 7011 (IPFIX) | https://www.rfc-editor.org/rfc/rfc7011 | Flow export/event schema grounding. |
+| RFC 7012 (IPFIX information model) | https://www.rfc-editor.org/rfc/rfc7012 | Canonical flow field semantics. |
+| RFC 3954 (NetFlow v9) | https://www.rfc-editor.org/rfc/rfc3954 | Template-based flow export reference. |
+| TensorFlow Lite guide | https://www.tensorflow.org/lite/guide | On-device model deployment path. |
+| scikit-learn IsolationForest docs | https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.IsolationForest.html | Classical anomaly baseline candidate. |
+| Wazuh API reference | https://documentation.wazuh.com/current/user-manual/api/reference.html | SIEM integration reference. |
 
-## On-device ML and anomaly detection
-| Reference | Link | License | Why relevant | License usage note |
-|---|---|---|---|---|
-| TensorFlow Lite guide | https://www.tensorflow.org/lite/guide | TensorFlow Apache-2.0 (docs and samples have separate site terms) | On-device inference runtime and deployment workflow. | Library use is permissive; keep NOTICE and dependency license records. |
-| TensorFlow Lite Android quickstart | https://www.tensorflow.org/lite/android | TensorFlow Apache-2.0 | Android integration details for model loading/inference. | Same as above. |
-| Keras timeseries anomaly example (autoencoder) | https://keras.io/examples/timeseries/timeseries_anomaly_detection/ | Keras project Apache-2.0 | Practical baseline approach for anomaly modeling with sequence data. | Reuse concepts and adapt code with attribution. |
-| scikit-learn Isolation Forest | https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.IsolationForest.html | BSD-3-Clause | Classical unsupervised baseline for anomaly scoring. | Permissive use; include attribution in dependency docs. |
-| SHAP documentation | https://shap.readthedocs.io/en/latest/ | SHAP library MIT | Candidate explanation method for feature contribution insights. | Permissive use; include license notice when distributing components. |
+## Datasets already in play or planned
+| Dataset / source | Link | Role in MANTA |
+|---|---|---|
+| Westermo network traffic dataset | https://github.com/westermo/network-traffic-dataset | Rich open attack/anomaly source. |
+| Android Spyware Detection Through a VPN-Based App | https://data.mendeley.com/datasets/mhvgtywrxf/1 | Android/mobile malware-oriented traffic. |
+| SDNCampus application-flow dataset | https://data.mendeley.com/datasets/wvp9tksn72/1 | Benign app diversity. |
+| PARROT2025_mitmproxy | https://zenodo.org/records/16368932 | Mobile/browser behavior enrichment. |
+| Android Mischief Dataset | https://data.mendeley.com/datasets/xbx2j63xfd/2 | Android RAT traffic with benign and malicious phases. |
+| CIC-AndMal2017 | https://www.unb.ca/cic/datasets/andmal2017.html | Official Android malware traffic and flow benchmark on real devices. |
+| Labeled Multi-Stage Android APT Datasets | https://data.mendeley.com/datasets/bdtn9vj7d7/3 | Android device-behavior dataset for multi-stage attack evaluation. |
 
-## Datasets and benchmarking sources
-| Reference | Link | License/terms status | Why relevant | License usage note |
-|---|---|---|---|---|
-| CICAndMal2017 dataset page | https://www.unb.ca/cic/datasets/andmal2017.html | Check dataset page terms and request conditions | Mobile malware traffic benchmark candidate. | Verify redistribution/citation terms before publishing derived artifacts. |
-| CICMalDroid 2020 dataset page | https://www.unb.ca/cic/datasets/maldroid-2020.html | Access typically via request form for research use | Additional Android malware traffic benchmark candidate. | Keep proof of allowed use and include required citation text. |
-| Android Malware Dataset (Kaggle mirror variants) | https://www.kaggle.com/ | Varies per dataset (CC, GPL, ODbL, proprietary, unknown) | Practical source for exploratory benchmark supplements. | Approve each dataset license individually; avoid mixing incompatible terms in redistributed bundles. |
-
-## Privacy, ethics, and compliance framing
-| Reference | Link | License/terms | Why relevant | License usage note |
-|---|---|---|---|---|
-| GDPR official portal | https://gdpr.eu/ | Website terms; legal-text reference | Baseline privacy principles for data minimization and transparency framing. | Treat as legal context reference, not as reusable software asset. |
-| EDPB guidelines (European Data Protection Board) | https://edpb.europa.eu/our-work-tools/our-documents/guidelines_en | Public regulatory guidance terms | Better legal/ethical grounding for consent, purpose limitation, and retention discussion. | Cite guideline identifiers and publication dates. |
-| OWASP MASVS | https://mas.owasp.org/MASVS/ | OWASP project terms | Mobile app security best practices relevant to secure endpoint implementation. | Use as compliance guidance and cite version used. |
-
-## Thesis writing and scientific method support
-| Reference | Link | License/terms | Why relevant | License usage note |
-|---|---|---|---|---|
-| ACM Digital Library | https://dl.acm.org/ | Publisher access and copyright terms | Primary literature source for anomaly detection and mobile security papers. | Use proper citation; do not redistribute full copyrighted PDFs. |
-| IEEE Xplore | https://ieeexplore.ieee.org/ | Publisher access and copyright terms | Primary literature source for networking and IDS comparisons. | Same as above. |
-| Google Scholar | https://scholar.google.com/ | Indexing/discovery service terms | Fast discovery and citation chaining for related work. | Use for discovery, then verify primary source licenses/copyright. |
-
-## Compliance checklist for implementation (quick reminder)
-- Keep a `THIRD_PARTY_NOTICES` file once coding starts.
-- Track each direct code reuse snippet with source URL, commit hash, and license.
-- Avoid direct code copy from GPL repositories unless your distribution license strategy is decided.
-- Record dataset license/terms and citation requirement before using any dataset in experiments.
-- Run a dependency license scan before sharing binaries or source outside the thesis environment.
-
-## Verification note
-License statuses above were checked from project repositories and official docs where possible on February 7, 2026.  
-Re-check before final submission or any public release.
+## Citation policy
+- Prefer the paper or official project page over secondary summaries.
+- Keep this file as the working register for thesis citations and implementation rationale.
+- Add every paper/dataset actually used in experiments to `thesis-paper/bibliography/references.bib`.

@@ -1,4 +1,4 @@
-# Android App
+# MANTA Endpoint (Android)
 
 ## Implemented P0 components
 - `VpnService` lifecycle and foreground capture service.
@@ -7,7 +7,7 @@
 - App attribution resolver (`ConnectivityManager#getConnectionOwnerUid` where available).
 - Room storage for flows, feature windows, anomaly scores, and export queue.
 - Retention cleanup and export queue workers via WorkManager.
-- Statistical anomaly detector, bundled linear ML scorer, and optional TFLite scorer.
+- Statistical, multivariate, and sequence anomaly detectors, plus bundled linear ML scoring and optional one-class TFLite scoring.
 - Compose UI for consent, backend config, export toggle, capture control, alert view, local purge, and dataset snapshot export.
 
 ## Implemented P1 and P2 components
@@ -19,12 +19,12 @@
 
 ## Security defaults
 - Cleartext HTTP disabled by `network_security_config`.
-- Backend exporter rejects non-HTTPS URLs.
+- Public backend export requires HTTPS; local development hosts may use HTTP.
 - Forwarder upstream sockets are explicitly protected with `VpnService.protect(...)` to avoid tunnel loops.
 - API token and endpoint settings stored with `EncryptedSharedPreferences`.
 - Device identifier export is pseudonymous (salted hash).
 - Metadata-only capture policy (no payload storage).
-- Policy fetch and event export both require HTTPS endpoints.
+- Policy fetch and event export support privacy-tiered export behavior, including a custom tier.
 
 ## Build
 Open this folder in Android Studio and sync Gradle.
@@ -37,6 +37,9 @@ Minimum configuration:
 - First capture start requires VPN permission grant.
 - Capture is blocked until consent is explicitly accepted in UI.
 - Export requires a backend URL and API token in settings.
+- Privacy modes include off, balanced, strict, research, and custom field-level export controls.
+- An exported automation receiver is available for adb-driven test orchestration.
+- Managed app restrictions are supported for Android Enterprise / EMM deployment via `mdm/managed-configurations.json`.
 - A bundled linear model is loaded from `app/src/main/assets/models/anomaly-linear.json`.
 - If no TFLite model exists in `app/src/main/assets/models/anomaly.tflite`, scoring uses linear + statistical paths.
 - Dataset snapshots are written to app external files under `exports/` as anonymized CSV.
