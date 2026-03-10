@@ -17,5 +17,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "feel-android-endpoint"
+rootProject.name = "manta-android-endpoint"
 include(":app")

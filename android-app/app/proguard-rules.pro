@@ -1,5 +1,5 @@
 # Keep model classes serialized to JSON.
--keep class com.feelbachelor.app.core.model.** { *; }
+-keep class com.manta.app.core.model.** { *; }
 
 # Keep WorkManager workers.
 -keep class * extends androidx.work.ListenableWorker {

@@ -1,6 +1,7 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
     id("org.jetbrains.kotlin.plugin.compose")
 }
@@ -12,11 +13,11 @@ ksp {
 }
 
 android {
-    namespace = "com.feelbachelor.app"
+    namespace = "com.manta.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.feelbachelor.app"
+        applicationId = "com.manta.app"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -46,13 +47,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-        freeCompilerArgs += listOf(
-            "-Xjvm-default=all"
-        )
-    }
-
     buildFeatures {
         compose = true
         buildConfig = true
@@ -62,6 +56,13 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+        freeCompilerArgs.add("-Xjvm-default=all")
     }
 }
 

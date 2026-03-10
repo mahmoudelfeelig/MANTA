@@ -1,0 +1,17 @@
+{
+  "backend_url": "https://manta.example.com",
+  "api_token": "REPLACE_WITH_TOKEN",
+  "export_enabled": true,
+  "capture_enabled": true,
+  "privacy_mode": "BALANCED",
+  "theme_mode": "SYSTEM",
+  "detection_model": "ensemble_fusion",
+  "shadow_model": "",
+  "custom_include_app_id": false,
+  "custom_include_site_hint": false,
+  "custom_include_ip_addresses": false,
+  "custom_include_exact_ports": true,
+  "custom_include_device_label": false,
+  "custom_include_explanations": true,
+  "custom_include_feature_window": true
+}
