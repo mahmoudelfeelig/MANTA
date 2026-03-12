@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from .cache_utils import load_remote_windows_cached
+from .io_utils import read_csv_resilient
 from .train_remote_backend_model import build_remote_windows
 from .progress import PhaseProgress
 
@@ -19,8 +21,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--families",
         nargs="+",
-        default=["logistic_regression", "mahalanobis_covariance", "hybrid_dual_channel"],
-        choices=["logistic_regression", "mahalanobis_covariance", "hybrid_dual_channel"],
+        default=["logistic_regression", "gradient_boosted_tree", "mahalanobis_covariance", "hybrid_dual_channel"],
+        choices=["logistic_regression", "gradient_boosted_tree", "mahalanobis_covariance", "hybrid_dual_channel"],
         help="Remote model families to compare",
     )
     return parser.parse_args()
@@ -44,9 +46,13 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     progress.update(5, "Loading flow CSV")
-    flows = pd.read_csv(input_path)
     progress.update(18, "Building feature windows")
-    windows = build_remote_windows(flows, window_seconds=args.window_seconds)
+    windows = load_remote_windows_cached(
+        input_path,
+        build_remote_windows_fn=build_remote_windows,
+        read_frame_fn=read_csv_resilient,
+        window_seconds=args.window_seconds,
+    )
     samples = [
         {
             "window_features": {
@@ -91,6 +97,13 @@ def main() -> None:
             },
             "site_hint": None,
             "label": int(row.label),
+            "dataset_source": str(row.dataset_source),
+            "dataset_profile": str(row.dataset_profile),
+            "dataset_variant": str(row.dataset_variant),
+            "environment_id": str(row.environment_id),
+            "session_id": str(row.session_id),
+            "app_family": str(row.app_family),
+            "window_bucket": int(row.window_bucket),
         }
         for row in windows.itertuples(index=False)
     ]
@@ -113,6 +126,10 @@ def main() -> None:
                 "f1": metrics.get("f1"),
                 "pr_auc": metrics.get("pr_auc"),
                 "roc_auc": metrics.get("roc_auc"),
+                "brier_score": metrics.get("brier_score"),
+                "ece": metrics.get("ece"),
+                "threshold": metrics.get("threshold"),
+                "split": metrics.get("split"),
             }
         )
 
@@ -121,7 +138,15 @@ def main() -> None:
         "window_seconds": args.window_seconds,
         "families": matrix,
         "label_counts": windows["label"].value_counts().to_dict() if "label" in windows.columns else {},
+        "best_family_by_f1": None,
+        "best_family_by_pr_auc": None,
     }
+    ranked_f1 = [row for row in matrix if row.get("f1") is not None]
+    ranked_pr = [row for row in matrix if row.get("pr_auc") is not None]
+    if ranked_f1:
+        summary["best_family_by_f1"] = max(ranked_f1, key=lambda row: float(row["f1"]))["family"]
+    if ranked_pr:
+        summary["best_family_by_pr_auc"] = max(ranked_pr, key=lambda row: float(row["pr_auc"]))["family"]
     (output_dir / "comparison-summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     progress.update(100, "Completed")
 

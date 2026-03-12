@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from .io_utils import read_csv_resilient
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Simulate policy thresholds against scored windows")
@@ -39,7 +41,7 @@ def _severity(score: float, medium: float, high: float) -> str:
 
 def main() -> None:
     args = parse_args()
-    df = pd.read_csv(args.input)
+    df = read_csv_resilient(args.input)
     if args.app_column not in df.columns:
         raise SystemExit(f"Missing app column: {args.app_column}")
     if args.score_column not in df.columns:

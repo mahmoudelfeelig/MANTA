@@ -3,7 +3,7 @@
   "api_token": "REPLACE_WITH_TOKEN",
   "export_enabled": true,
   "capture_enabled": true,
-  "privacy_mode": "BALANCED",
+  "privacy_mode": "MEDIUM",
   "theme_mode": "SYSTEM",
   "detection_model": "ensemble_fusion",
   "shadow_model": "",

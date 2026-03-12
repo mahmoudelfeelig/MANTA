@@ -66,6 +66,20 @@ class FeatureWindowBuilder {
         val packetImbalance = (abs(totalPacketsOut - totalPacketsIn).toDouble() / (packetCount.toDouble() + 1.0)).coerceIn(0.0, 1.0)
         val smallFlowRatio = (flows.count { (it.bytesOut + it.bytesIn) <= 256L }.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
         val highPortRatio = (flows.count { it.dstPort >= 1024 }.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
+        val ttlGap = flows.map { it.ttlGap }.average().takeIf { !it.isNaN() } ?: 0.0
+        val ttlMetricsPresent = flows.map { it.ttlMetricsPresent }.average().takeIf { !it.isNaN() } ?: 0.0
+        val synRateTotal = flows.map { it.synRateTotal }.average().takeIf { !it.isNaN() } ?: 0.0
+        val rstRateTotal = flows.map { it.rstRateTotal }.average().takeIf { !it.isNaN() } ?: 0.0
+        val ackRateTotal = flows.map { it.ackRateTotal }.average().takeIf { !it.isNaN() } ?: 0.0
+        val finRateTotal = flows.map { it.finRateTotal }.average().takeIf { !it.isNaN() } ?: 0.0
+        val pshRateTotal = flows.map { it.pshRateTotal }.average().takeIf { !it.isNaN() } ?: 0.0
+        val fragmentRateTotal = flows.map { it.fragmentRateTotal }.average().takeIf { !it.isNaN() } ?: 0.0
+        val tcpWindowMean = flows.map { it.tcpWindowMean }.average().takeIf { !it.isNaN() } ?: 0.0
+        val ackDelayMean = flows.map { it.ackDelayMean }.average().takeIf { !it.isNaN() } ?: 0.0
+        val interPacketGapMean = flows.map { it.interPacketGapMean }.average().takeIf { !it.isNaN() } ?: 0.0
+        val payloadMean = flows.map { it.payloadMean }.average().takeIf { !it.isNaN() } ?: 0.0
+        val loadMean = flows.map { it.loadMean }.average().takeIf { !it.isNaN() } ?: 0.0
+        val transportMetricsPresent = flows.map { it.transportMetricsPresent }.average().takeIf { !it.isNaN() } ?: 0.0
         val zoned = Instant.ofEpochMilli(windowEndMillis).atZone(ZoneId.systemDefault())
         val hourOfDay = zoned.hour
         val dayOfWeek = zoned.dayOfWeek.value
@@ -102,6 +116,20 @@ class FeatureWindowBuilder {
             dayOfWeek = dayOfWeek,
             isWeekend = isWeekend,
             dataQualityScore = dataQualityScore.coerceIn(0.0, 1.0),
+            ttlGap = ttlGap.coerceIn(0.0, 1.0),
+            ttlMetricsPresent = ttlMetricsPresent.coerceIn(0.0, 1.0),
+            synRateTotal = synRateTotal.coerceAtLeast(0.0),
+            rstRateTotal = rstRateTotal.coerceAtLeast(0.0),
+            ackRateTotal = ackRateTotal.coerceAtLeast(0.0),
+            finRateTotal = finRateTotal.coerceAtLeast(0.0),
+            pshRateTotal = pshRateTotal.coerceAtLeast(0.0),
+            fragmentRateTotal = fragmentRateTotal.coerceAtLeast(0.0),
+            tcpWindowMean = tcpWindowMean.coerceAtLeast(0.0),
+            ackDelayMean = ackDelayMean.coerceAtLeast(0.0),
+            interPacketGapMean = interPacketGapMean.coerceAtLeast(0.0),
+            payloadMean = payloadMean.coerceAtLeast(0.0),
+            loadMean = loadMean.coerceAtLeast(0.0),
+            transportMetricsPresent = transportMetricsPresent.coerceIn(0.0, 1.0),
             sampledByGuardrail = sampledByGuardrail,
             processingCostMillis = processingCostMillis.coerceAtLeast(0.0)
         )

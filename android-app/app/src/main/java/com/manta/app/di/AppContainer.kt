@@ -1,6 +1,7 @@
 package com.manta.app.di
 
 import android.content.Context
+import com.manta.app.core.model.RuntimeHealth
 import com.manta.app.core.net.OkHttpEventClient
 import com.manta.app.core.settings.SecureSettingsStore
 import com.manta.app.data.FlowRepository
@@ -57,4 +58,15 @@ class AppContainer(context: Context) {
         falsePositiveBudgetManager = falsePositiveBudgetManager,
         runtimeGuardrailManager = runtimeGuardrailManager
     )
+
+    fun runtimeHealth(): RuntimeHealth {
+        val config = settingsStore.readConfig()
+        return RuntimeHealth(
+            linearAvailable = exportedModelScorer.isModelAvailable(),
+            tfliteAvailable = tfliteScorer.isModelAvailable(),
+            remoteConfigured = config.isConfigured(),
+            activeDetectionModel = config.detectionModel,
+            shadowModel = config.shadowModel
+        )
+    }
 }

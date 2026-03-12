@@ -127,6 +127,18 @@ python -m ml_pipeline.run_experiment_suite \
   --ids-threshold 0.55
 ```
 
+Run the full training workflow into the next numbered run directory automatically:
+```bash
+python -m ml_pipeline.train_all \
+  --input data/real/manta-real-training.csv \
+  --runs-root experiment-runs
+```
+
+Windows wrapper:
+```powershell
+.\train_all.ps1 -Input ".\data\real\manta-real-training.csv"
+```
+
 ## Real data instead of synthetic
 The synthetic generator is only a smoke-test and regression fixture. The training commands also accept real flow CSVs, as long as they are normalized into the canonical columns expected by `ml_pipeline.features`:
 
@@ -145,17 +157,35 @@ Recommended public datasets:
   `https://github.com/westermo/network-traffic-dataset`
 - `Android Spyware Detection Through a VPN-Based App` (`CC BY 4.0`): Android/mobile malware-oriented traffic corpus
   `https://data.mendeley.com/datasets/mhvgtywrxf/1`
+- `Android Mischief` (`CC BY 4.0`): Android RAT traffic PCAP corpus with malicious and benign context
+  `https://data.mendeley.com/datasets/xbx2j63xfd/2`
 - `SDNCampus flow statistics data across 30 applications` (`CC BY 4.0`): benign application-flow coverage with app diversity
   `https://data.mendeley.com/datasets/wvp9tksn72/1`
-- `PARROT2025_mitmproxy`: useful for mobile/browser behavior enrichment via Zenodo
-  `https://zenodo.org/records/16368932`
+- `ITC-Net-Blend-60 scenario E` (`CC BY 4.0`): benign Android app traffic across 60 apps, useful for privacy leakage and hard benign negatives
+  `https://data.mendeley.com/datasets/gdtnnfyr7s/2`
+- `CIC-AndMal2017` (public CIC research dataset): Android malware traffic captures and extracted flow features
+  `https://www.unb.ca/cic/datasets/andmal2017.html`
+- `Labeled Multi-Stage Android APT Datasets` (`CC BY 4.0`): device-behavior and multi-stage Android attack traces that are useful as an auxiliary suspicious-behavior source
+  `https://data.mendeley.com/datasets/bdtn9vj7d7/3`
 
 Practical split for MANTA:
 
 - Use `Westermo` as the strongest open attack/anomaly source.
-- Use `SDNCampus` and `Android Spyware` to add app/application diversity and mobile-oriented coverage.
-- Use `PARROT2025_mitmproxy` if you want richer browser/mobile capture material and you are willing to convert PCAP-style exports into flow CSV first.
-- Use backend-triaged alert windows to continuously retrain the per-device remote-assisted model on real deployment data.
+- Use `SDNCampus` and `ITC-Net-Blend-60` as the primary public benign/app-diversity slices.
+- Use `Android Spyware`, `Android Mischief`, and `CIC-AndMal2017` as the primary public Android-malware / suspicious-behavior slices.
+- Use only public datasets for the thesis corpus if you do not want to collect private MANTA sessions.
+
+### Public-only thesis corpus
+The intended thesis corpus is a public-only merge of:
+
+- `Westermo`
+- `Android Spyware`
+- `Android Mischief`
+- `SDNCampus`
+- `ITC-Net-Blend-60 scenario E`
+- `CIC-AndMal2017`
+
+Optionally add `Labeled Multi-Stage Android APT Datasets` as an extra suspicious-behavior slice. The pipeline now carries dataset/source/session metadata through normalization, privacy-view derivation, remote training, privacy-student training, and federated simulation so the evaluation split can stay source-aware instead of collapsing to a random row holdout.
 
 ### Exact workflow
 1. Install dependencies:
@@ -172,7 +202,11 @@ pip install -e .[tflite,test]
 ```bash
 python -m ml_pipeline.download_real_datasets --list
 python -m ml_pipeline.download_real_datasets --dataset westermo --output-dir downloads
-python -m ml_pipeline.download_real_datasets --dataset parrot2025_mitmproxy --output-dir downloads
+python -m ml_pipeline.download_real_datasets --dataset android_spyware_mendeley
+python -m ml_pipeline.download_real_datasets --dataset android_mischief_rat_traffic
+python -m ml_pipeline.download_real_datasets --dataset sdncampus_flow_statistics
+python -m ml_pipeline.download_real_datasets --dataset itc_net_blend60_scenario_e
+python -m ml_pipeline.download_real_datasets --dataset cicandmal2017_android
 ```
 
 Notes:
@@ -231,11 +265,34 @@ This converter requires `tshark` from Wireshark to be installed and available on
 
 ```bash
 python -m ml_pipeline.merge_normalized_datasets \
-  --inputs data/real/westermo-normalized.csv data/real/android-spyware-normalized.csv \
-  --output data/real/manta-real-training.csv
+  --inputs \
+    data/real/westermo-bottom-normalized.csv \
+    data/real/westermo-left-normalized.csv \
+    data/real/westermo-right-normalized.csv \
+    data/real/android-spyware-normalized.csv \
+    data/real/android-mischief-converted.csv \
+    data/real/sdncampus-normalized.csv \
+    data/real/itc-net-blend60-converted.csv \
+    data/real/cicandmal2017-normalized.csv \
+  --output data/real/manta-real-training.csv \
+  --manifest-output reports/manta-real-training-manifest.json
 ```
 
-5. Train the Android linear model and export the TFLite model:
+If your existing `data/real/manta-real-training.csv` was built before the metadata-aware merge path landed, rebuild it. The newer grouped evaluation, privacy, and federated reports depend on the merged corpus carrying `dataset_source`, `dataset_variant`, `environment_id`, `session_id`, and `app_family`.
+
+5. Audit the merged corpus protocol before training:
+
+```bash
+python -m ml_pipeline.dataset_manifest \
+  --input data/real/manta-real-training.csv \
+  --output reports/dataset-manifest.json
+
+python -m ml_pipeline.evaluation_protocol_report \
+  --input data/real/manta-real-training.csv \
+  --output reports/evaluation-protocol.json
+```
+
+6. Train the Android linear model and export the TFLite model:
 
 ```bash
 python -m ml_pipeline.train_android_model \
@@ -249,20 +306,42 @@ python -m ml_pipeline.export_tflite \
   --output-report reports/tflite-autoencoder-evaluation.json
 ```
 
-6. Train the backend remote-assisted model as a real sklearn artifact:
+7. Train the backend remote-assisted model as a real sklearn artifact:
 
 ```bash
 python -m ml_pipeline.train_remote_backend_model \
   --input data/real/manta-real-training.csv \
   --output-model artifacts/backend/remote-assisted-model.json \
-  --output-report reports/remote-assisted-model.json
+  --output-report reports/remote-assisted-model.json \
+  --model-family hybrid_dual_channel
 
 python -m ml_pipeline.compare_model_families \
   --input data/real/manta-real-training.csv \
   --output-dir reports/model-family-matrix
 ```
 
-7. Run the full experiment suite on the real corpus:
+8. Train the privacy-preserving student and the public-proxy federated variant:
+
+```bash
+python -m ml_pipeline.train_privacy_student \
+  --input data/real/manta-real-training.csv \
+  --output-model artifacts/privacy/privacy-student.json \
+  --output-report reports/privacy-student-report.json \
+  --student-view medium
+
+python -m ml_pipeline.simulate_federated_rounds \
+  --input data/real/manta-real-training.csv \
+  --student-model artifacts/privacy/privacy-student.json \
+  --output-report reports/federated-report.json \
+  --view medium
+
+python -m ml_pipeline.privacy_gate_report \
+  --ablation-report reports/privacy-ablation.json \
+  --leakage-report reports/privacy-leakage.json \
+  --output reports/privacy-gate.json
+```
+
+9. Run the full experiment suite on the real corpus:
 
 ```bash
 python -m ml_pipeline.run_experiment_suite \
@@ -272,13 +351,23 @@ python -m ml_pipeline.run_experiment_suite \
   --ids-threshold 0.55
 ```
 
-8. Deliver the newly trained artifacts:
+The suite uses the public-corpus-aware grouped split logic, trains the hybrid remote primary by default, reruns privacy leakage on the derived views, and builds the full comparison matrix.
+
+The suite now also warms reusable caches for:
+- feature windows
+- remote windows
+- privacy views
+- full-frame CSV reads
+
+Those caches live under the run cache directory by default and make reruns much faster.
+
+10. Deliver the newly trained artifacts:
 
 - Copy `artifacts/android/anomaly-linear.json` to `android-app/app/src/main/assets/models/anomaly-linear.json`
 - Copy `artifacts/tflite/anomaly.tflite` to `android-app/app/src/main/assets/models/anomaly.tflite`
 - Import `artifacts/backend/remote-assisted-model.json` into the backend dashboard under `Remote model control -> Import trained backend model JSON`
 
-9. Continue improving the remote-assisted model with real device feedback:
+11. Continue improving the remote-assisted model with real device feedback:
 
 - generate alerts from the phone
 - triage them as `FALSE_POSITIVE` or `RESOLVED`
@@ -307,7 +396,11 @@ python -m ml_pipeline.download_real_datasets --dataset sdncampus_flow_statistics
 Manual datasets:
 
 - Download the Android spyware dataset from the printed Mendeley URL and place the extracted CSV/TSV/Parquet under `downloads/manual/android-spyware/`
+- Download the Android Mischief PCAP corpus and place the extracted `.pcap` files under `downloads/manual/android-mischief/`
 - Download the SDNCampus dataset from the printed Mendeley URL and place the extracted CSV/TSV/Parquet under `downloads/manual/sdncampus/`
+- Download the ITC-Net-Blend-60 scenario E PCAPs and place the extracted `.pcap` files under `downloads/manual/itc-net-blend60/`
+- Download CIC-AndMal2017 from the official CIC page and place its extracted CICFlowMeter CSVs or PCAPs under `downloads/manual/cicandmal2017/`
+- Download the Android APT behavior dataset and place the extracted CSV/TSV/Parquet under `downloads/manual/android-apt-behavior/`
 - If you downloaded the Android Mischief archive (`xbx2j63xfd-2.zip`), do not rely on `Expand-Archive` alone. That package contains nested ZIP files and at least one unsupported compression method for the default PowerShell extractor. Prefer `7z` or `tar`, extract it under `downloads/android-mischief-unzipped/`, then convert the embedded `.pcap` files with the `android_spyware` PCAP converter profile.
 
 Normalize Westermo reduced-flow CSVs after extracting the ZIP archives:
@@ -351,14 +444,35 @@ python -m ml_pipeline.normalize_real_dataset `
   --profile sdncampus `
   --output ".\data\real\sdncampus-normalized.csv" `
   --report ".\reports\sdncampus-normalized.json"
+
+python -m ml_pipeline.normalize_real_dataset `
+  --input ".\downloads\manual\cicandmal2017\<FILE>.csv" `
+  --profile cicflowmeter `
+  --output ".\data\real\cicandmal2017-normalized.csv" `
+  --report ".\reports\cicandmal2017-normalized.json"
+
+python -m ml_pipeline.normalize_real_dataset `
+  --input ".\downloads\manual\android-apt-behavior\<FILE>.csv" `
+  --profile android_apt_behavior `
+  --output ".\data\real\android-apt-behavior-normalized.csv" `
+  --report ".\reports\android-apt-behavior-normalized.json"
 ```
 
 Merge and train:
 
 ```powershell
 python -m ml_pipeline.merge_normalized_datasets `
-  --inputs ".\data\real\westermo-bottom-normalized.csv" ".\data\real\westermo-left-normalized.csv" ".\data\real\westermo-right-normalized.csv" ".\data\real\android-spyware-normalized.csv" ".\data\real\sdncampus-normalized.csv" `
-  --output ".\data\real\manta-real-training.csv"
+  --inputs ".\data\real\westermo-bottom-normalized.csv" ".\data\real\westermo-left-normalized.csv" ".\data\real\westermo-right-normalized.csv" ".\data\real\android-spyware-normalized.csv" ".\data\real\android-mischief-converted.csv" ".\data\real\sdncampus-normalized.csv" ".\data\real\itc-net-blend60-converted.csv" ".\data\real\cicandmal2017-normalized.csv" ".\data\real\android-apt-behavior-normalized.csv" `
+  --output ".\data\real\manta-real-training.csv" `
+  --manifest-output ".\reports\manta-real-training-manifest.json"
+
+python -m ml_pipeline.dataset_manifest `
+  --input ".\data\real\manta-real-training.csv" `
+  --output ".\reports\dataset-manifest.json"
+
+python -m ml_pipeline.evaluation_protocol_report `
+  --input ".\data\real\manta-real-training.csv" `
+  --output ".\reports\evaluation-protocol.json"
 
 python -m ml_pipeline.train_android_model `
   --input ".\data\real\manta-real-training.csv" `
@@ -373,11 +487,29 @@ python -m ml_pipeline.export_tflite `
 python -m ml_pipeline.train_remote_backend_model `
   --input ".\data\real\manta-real-training.csv" `
   --output-model ".\artifacts\backend\remote-assisted-model.json" `
-  --output-report ".\reports\remote-assisted-model.json"
+  --output-report ".\reports\remote-assisted-model.json" `
+  --model-family hybrid_dual_channel
 
 python -m ml_pipeline.compare_model_families `
   --input ".\data\real\manta-real-training.csv" `
   --output-dir ".\reports\model-family-matrix"
+
+python -m ml_pipeline.train_privacy_student `
+  --input ".\data\real\manta-real-training.csv" `
+  --output-model ".\artifacts\privacy\privacy-student.json" `
+  --output-report ".\reports\privacy-student-report.json" `
+  --student-view medium
+
+python -m ml_pipeline.simulate_federated_rounds `
+  --input ".\data\real\manta-real-training.csv" `
+  --student-model ".\artifacts\privacy\privacy-student.json" `
+  --output-report ".\reports\federated-report.json" `
+  --view medium
+
+python -m ml_pipeline.privacy_gate_report `
+  --ablation-report ".\reports\privacy-ablation.json" `
+  --leakage-report ".\reports\privacy-leakage.json" `
+  --output ".\reports\privacy-gate.json"
 ```
 
 PCAP conversion on Windows:
@@ -393,6 +525,18 @@ python -m ml_pipeline.convert_pcaps_to_flow_csv `
   --report ".\reports\android-spyware-converted-report.csv"
 
 python -m ml_pipeline.convert_pcaps_to_flow_csv `
+  --profile android_mischief `
+  --input-dir ".\downloads\manual\android-mischief" `
+  --output ".\data\real\android-mischief-converted.csv" `
+  --report ".\reports\android-mischief-converted-report.csv"
+
+python -m ml_pipeline.convert_pcaps_to_flow_csv `
+  --profile itc_net_blend `
+  --input-dir ".\downloads\manual\itc-net-blend60" `
+  --output ".\data\real\itc-net-blend60-converted.csv" `
+  --report ".\reports\itc-net-blend60-converted-report.csv"
+
+python -m ml_pipeline.convert_pcaps_to_flow_csv `
   --profile parrot `
   --input-dir ".\downloads\parrot2025_mitmproxy\unzipped\PARROT2025_mitmproxy" `
   --output ".\data\real\parrot-converted.csv" `
@@ -406,13 +550,22 @@ python -m ml_pipeline.convert_pcaps_to_flow_csv `
 ```
 
 Generated reports include:
+- `dataset-manifest.json` (corpus source/session/app-family inventory and metadata completeness)
+- `evaluation-protocol.json` (source/app-family/temporal robustness matrix across grouped holdouts)
 - `evaluation.json` (core metrics + policy calibration references)
 - `threshold-sweep.csv`, `roc-curve.csv`, `pr-curve.csv`, `confusion-matrix.json`
 - `comparison.json` (ML vs IDS baseline)
 - `privacy-ablation.json` (privacy/utility deltas by feature set)
+- `privacy-gate.json` (combined utility + leakage verdict per privacy tier)
 - `drift-report.json`, `drift-series.csv` (concept drift timeline by app)
 - `policy-simulation.json`, `policy-simulation-per-app.csv` (policy threshold what-if)
 - `android-model-evaluation.json` (metrics for exported Android model)
+- `tflite-autoencoder-evaluation.json` (cluster-centered one-class metrics for the exported TFLite model)
+- `remote-assisted-model.json` (hybrid remote primary report)
+- `model-family-matrix/comparison-summary.json` (logistic vs tree vs mahalanobis vs hybrid comparison)
+- `privacy-student-report.json` (adversarial medium-view student report)
+- `federated-report.json` (FedProx simulation over public proxy clients)
+- `full-model-matrix.json` (ranked cross-family comparison matrix)
 - `window-comparison.csv` (per-window scores)
 - `manifest.json` (commands, dependency versions, input hash, platform metadata)
 

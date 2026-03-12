@@ -41,7 +41,7 @@ This is the single feature checklist for MANTA. Unchecked items are still in sco
 - [x] Metadata-only hard lock (no payload capture)
 - [x] Local purge controls
 - [x] Export toggle and local-only mode
-- [x] Privacy tiers: off, strict, balanced, research
+- [x] Privacy tiers: off, low, medium, strict
 - [x] Custom privacy tier scaffolding with field-level export controls
 - [x] Pseudonymous device identifier export
 - [x] Privacy-aware export preview in the app
@@ -94,7 +94,7 @@ This is the single feature checklist for MANTA. Unchecked items are still in sco
 - [x] Final publication-ready evidence package
 
 ## Dataset curation and privacy views
-- [x] Multi-view dataset derivation (`full`, `pseudonymous`, `semantic-private`, `strict`)
+- [x] Multi-view dataset derivation (`off`, `low`, `medium`, `strict`)
 - [x] Raw-vs-derived storage separation and documentation
 - [x] Additional mobile encrypted-traffic datasets integrated where legally usable
 

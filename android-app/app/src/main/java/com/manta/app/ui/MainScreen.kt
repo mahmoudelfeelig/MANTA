@@ -50,6 +50,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
@@ -77,6 +78,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.manta.app.core.model.AlertSeverity
 import com.manta.app.core.model.AnomalyAlert
+import com.manta.app.core.model.RuntimeHealth
 import com.manta.app.core.model.TriageStatus
 import com.manta.app.core.settings.AppProfile
 import com.manta.app.core.settings.CustomPrivacyOptions
@@ -150,6 +152,7 @@ fun MainScreen(
     hasMoreAlerts: Boolean,
     isLoadingMoreAlerts: Boolean,
     statusMessage: String?,
+    runtimeHealth: RuntimeHealth,
     onSaveBackendUrl: (String) -> Unit,
     onSaveApiToken: (String) -> Unit,
     onToggleExport: (Boolean) -> Unit,
@@ -162,12 +165,14 @@ fun MainScreen(
     onSetShadowModel: (String?) -> Unit,
     onSetThemeMode: (ThemeMode) -> Unit,
     onSetDebugModeEnabled: (Boolean) -> Unit,
+    onSetTestModeEnabled: (Boolean) -> Unit,
     onSetPrivacyMode: (PrivacyMode) -> Unit,
     onSetCustomPrivacyOptions: (CustomPrivacyOptions) -> Unit,
     onSyncPolicy: () -> Unit,
     onPingBackend: () -> Unit,
     onAcceptConsent: () -> Unit,
     onExportDataset: () -> Unit,
+    onExportAlerts: () -> Unit,
     onExportForensics: () -> Unit,
     onCaptureEvidence: () -> Unit,
     onFlushExportQueue: () -> Unit,
@@ -208,7 +213,6 @@ fun MainScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var modelInfoDialog by rememberSaveable { mutableStateOf<String?>(null) }
     var alertsPage by rememberSaveable { mutableStateOf(1) }
-    var hiddenAlertIds by rememberSaveable { mutableStateOf(setOf<String>()) }
     var pendingUndo by rememberSaveable { mutableStateOf<PendingUndoAction?>(null) }
 
     LaunchedEffect(
@@ -253,23 +257,19 @@ fun MainScreen(
         responseContextBlendWeight = formatDecimal(config.fusionWeights.responseContextBlend)
     }
 
-    val visibleAlerts = remember(alerts, hiddenAlertIds) {
-        alerts.filterNot { it.id in hiddenAlertIds }
-    }
-
-    val modelFilters = remember(visibleAlerts, selectedTab) {
+    val modelFilters = remember(alerts, selectedTab) {
         if (selectedTab != MainTab.ALERTS) {
             listOf(ALL_MODELS_KEY) + KNOWN_MODEL_FILTERS
         } else {
             buildList {
                 add(ALL_MODELS_KEY)
                 addAll(KNOWN_MODEL_FILTERS)
-                addAll(visibleAlerts.map { it.sourceModel }.distinct().sorted())
+                addAll(alerts.map { it.sourceModel }.distinct().sorted())
             }.distinct()
         }
     }
 
-    val shadowFilters = remember(visibleAlerts, selectedTab) {
+    val shadowFilters = remember(alerts, selectedTab) {
         if (selectedTab != MainTab.ALERTS) {
             listOf(ALL_SHADOWS_KEY, DISABLED_SHADOW_KEY) + KNOWN_MODEL_FILTERS
         } else {
@@ -277,16 +277,16 @@ fun MainScreen(
                 add(ALL_SHADOWS_KEY)
                 add(DISABLED_SHADOW_KEY)
                 addAll(KNOWN_MODEL_FILTERS)
-                addAll(visibleAlerts.mapNotNull { it.shadowModel }.distinct().sorted())
+                addAll(alerts.mapNotNull { it.shadowModel }.distinct().sorted())
             }.distinct()
         }
     }
 
-    val severityScopedAlerts = remember(visibleAlerts, selectedModelFilter, selectedShadowFilter, searchQuery, selectedTab) {
+    val severityScopedAlerts = remember(alerts, selectedModelFilter, selectedShadowFilter, searchQuery, selectedTab) {
         if (selectedTab != MainTab.ALERTS) {
             emptyList()
         } else {
-            visibleAlerts.filter { alert ->
+            alerts.filter { alert ->
                 val modelMatches = selectedModelFilter == ALL_MODELS_KEY || alert.sourceModel == selectedModelFilter
                 val shadowMatches = when (selectedShadowFilter) {
                     ALL_SHADOWS_KEY -> true
@@ -337,13 +337,12 @@ fun MainScreen(
         filteredAlerts.drop((currentAlertsPage - 1) * 20).take(20)
     }
 
-    LaunchedEffect(severityFilter, selectedModelFilter, selectedShadowFilter, searchQuery, visibleAlerts.size) {
+    LaunchedEffect(severityFilter, selectedModelFilter, selectedShadowFilter, searchQuery, alerts.size) {
         alertsPage = 1
     }
 
     LaunchedEffect(alerts) {
         val currentIds = alerts.map { it.id }.toSet()
-        hiddenAlertIds = hiddenAlertIds.intersect(currentIds)
         if (pendingUndo != null && pendingUndo?.alertId !in currentIds) {
             pendingUndo = null
         }
@@ -371,7 +370,6 @@ fun MainScreen(
                 AlertAction.NEUTRAL -> onDismissAlertNeutral(previous.alertId)
             }
         }
-        hiddenAlertIds = hiddenAlertIds + alert.id
         pendingUndo = PendingUndoAction(
             alertId = alert.id,
             appLabel = displayAppName(alert.appId),
@@ -380,8 +378,7 @@ fun MainScreen(
     }
 
     fun undoPendingAction() {
-        val pending = pendingUndo ?: return
-        hiddenAlertIds = hiddenAlertIds - pending.alertId
+        pendingUndo ?: return
         pendingUndo = null
     }
 
@@ -434,6 +431,7 @@ fun MainScreen(
                     config = config,
                     alerts = alerts,
                     statusMessage = statusMessage,
+                    runtimeHealth = runtimeHealth,
                     onAcceptConsent = onAcceptConsent,
                     onStartCapture = onStartCapture,
                     onStopCapture = onStopCapture
@@ -461,16 +459,17 @@ fun MainScreen(
                     onPreviousPage = { alertsPage = (currentAlertsPage - 1).coerceAtLeast(1) },
                     onNextPage = { alertsPage = (currentAlertsPage + 1).coerceAtMost(totalAlertPages) },
                     onMarkDangerous = { alertId ->
-                        visibleAlerts.find { it.id == alertId }?.let { queueUndoAction(it, AlertAction.DANGEROUS) }
+                        alerts.find { it.id == alertId }?.let { queueUndoAction(it, AlertAction.DANGEROUS) }
                     },
                     onMarkFalsePositive = { alertId ->
-                        visibleAlerts.find { it.id == alertId }?.let { queueUndoAction(it, AlertAction.FALSE_POSITIVE) }
+                        alerts.find { it.id == alertId }?.let { queueUndoAction(it, AlertAction.FALSE_POSITIVE) }
                     },
                     onDismissNeutral = { alertId ->
-                        visibleAlerts.find { it.id == alertId }?.let { queueUndoAction(it, AlertAction.NEUTRAL) }
+                        alerts.find { it.id == alertId }?.let { queueUndoAction(it, AlertAction.NEUTRAL) }
                     },
                     onClearAlerts = onClearAlerts,
                     debugModeEnabled = config.debugModeEnabled,
+                    testModeEnabled = config.testModeEnabled,
                     privacyModeEnabled = config.privacyModeEnabled,
                     currentAppProfile = currentAppProfile,
                     onSetAppProfile = onSetAppProfile,
@@ -482,6 +481,7 @@ fun MainScreen(
                     config = config,
                     deviceIdPseudo = deviceIdPseudo,
                     statusMessage = statusMessage,
+                    runtimeHealth = runtimeHealth,
                     backendUrl = backendUrl,
                     onBackendUrlChange = { backendUrl = it },
                     onSaveBackendUrl = { onSaveBackendUrl(backendUrl) },
@@ -560,12 +560,14 @@ fun MainScreen(
                     onShowModelInfo = { modelInfoDialog = it },
                     onSetThemeMode = onSetThemeMode,
                     onSetDebugModeEnabled = onSetDebugModeEnabled,
+                    onSetTestModeEnabled = onSetTestModeEnabled,
                     onSetPrivacyMode = onSetPrivacyMode,
                     onSetCustomPrivacyOptions = onSetCustomPrivacyOptions,
                     onToggleExport = onToggleExport,
                     onSyncPolicy = onSyncPolicy,
                     onPingBackend = onPingBackend,
                     onExportDataset = onExportDataset,
+                    onExportAlerts = onExportAlerts,
                     onExportForensics = onExportForensics,
                     onCaptureEvidence = onCaptureEvidence,
                     onFlushExportQueue = onFlushExportQueue,
@@ -583,11 +585,13 @@ fun MainScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun HomeView(
     config: EndpointConfig,
     alerts: List<AnomalyAlert>,
     statusMessage: String?,
+    runtimeHealth: RuntimeHealth,
     onAcceptConsent: () -> Unit,
     onStartCapture: () -> Unit,
     onStopCapture: () -> Unit
@@ -674,6 +678,29 @@ private fun HomeView(
             }
         }
 
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("Runtime health", style = MaterialTheme.typography.titleMedium)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    RuntimeHealthChip("Linear", runtimeHealth.linearAvailable)
+                    RuntimeHealthChip("TFLite", runtimeHealth.tfliteAvailable)
+                    RuntimeHealthChip("Remote", runtimeHealth.remoteConfigured)
+                }
+                Text(
+                    "Active ${modelDisplayName(runtimeHealth.activeDetectionModel)}" +
+                        (runtimeHealth.shadowModel?.let { " • Shadow ${modelDisplayName(it)}" } ?: ""),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
         if (!statusMessage.isNullOrBlank()) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -716,6 +743,7 @@ private fun AlertsView(
     onDismissNeutral: (String) -> Unit,
     onClearAlerts: () -> Unit,
     debugModeEnabled: Boolean,
+    testModeEnabled: Boolean,
     privacyModeEnabled: Boolean,
     currentAppProfile: (String) -> AppProfile,
     onSetAppProfile: (String, AppProfile) -> Unit,
@@ -723,12 +751,27 @@ private fun AlertsView(
     onUndoPendingAction: () -> Unit
 ) {
     var filtersExpanded by rememberSaveable { mutableStateOf(false) }
+    var compactRepeatedAlerts by rememberSaveable { mutableStateOf(true) }
     val activeFilterCount = (
         (if (severityFilter != SeverityFilter.ALL) 1 else 0) +
             (if (selectedModelFilter != ALL_MODELS_KEY) 1 else 0) +
             (if (selectedShadowFilter != ALL_SHADOWS_KEY) 1 else 0) +
             (if (searchQuery.isNotBlank()) 1 else 0)
         )
+
+    val displayedAlerts = remember(alerts, compactRepeatedAlerts) {
+        if (!compactRepeatedAlerts) {
+            alerts
+        } else {
+            alerts
+                .groupBy { alert ->
+                    alert.correlationKey.takeIf { it.isNotBlank() }
+                        ?: "${alert.appId}|${alert.sourceModel}|${alert.siteHint ?: alert.destinationHash ?: "unknown"}"
+                }
+                .map { (_, grouped) -> grouped.maxByOrNull { it.lastSeenMillis } ?: grouped.first() }
+                .sortedByDescending { it.createdAtMillis }
+        }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -770,18 +813,19 @@ private fun AlertsView(
                                     onSeverityFilterChange(SeverityFilter.ALL)
                                     onModelFilterChange(ALL_MODELS_KEY)
                                     onShadowFilterChange(ALL_SHADOWS_KEY)
-                                }
+                                },
+                                modifier = Modifier.weight(1f)
                             ) {
                                 Text("Reset filters")
                             }
                             if (allAlertsCount > 0) {
-                                OutlinedButton(onClick = onClearAlerts) {
+                                OutlinedButton(onClick = onClearAlerts, modifier = Modifier.weight(1f)) {
                                     Text("Clear all alerts")
                                 }
                             }
                         }
                     } else if (allAlertsCount > 0) {
-                        OutlinedButton(onClick = onClearAlerts) {
+                        OutlinedButton(onClick = onClearAlerts, modifier = Modifier.fillMaxWidth()) {
                             Text("Clear all alerts")
                         }
                     }
@@ -794,6 +838,24 @@ private fun AlertsView(
                                 modifier = Modifier.fillMaxWidth(),
                                 label = { Text("Search app / model / explanation / site") }
                             )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Compact repeated alerts", style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        "Show only the latest card for repeated incidents from the same app/correlation group.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = compactRepeatedAlerts,
+                                    onCheckedChange = { compactRepeatedAlerts = it }
+                                )
+                            }
 
                             Text("Severity", style = MaterialTheme.typography.labelLarge)
                             LazyRow(
@@ -850,7 +912,7 @@ private fun AlertsView(
                     }
 
                     Text(
-                        "Showing ${alerts.size} alerts on this page • ${allFilteredAlerts.size} match the filters • $allAlertsCount total stored",
+                        "Showing ${displayedAlerts.size} alerts on this page • ${allFilteredAlerts.size} match the filters • $allAlertsCount total stored",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -869,36 +931,6 @@ private fun AlertsView(
             }
         }
 
-        if (pendingUndo != null) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = when (pendingUndo.action) {
-                                AlertAction.DANGEROUS -> "${pendingUndo.appLabel} marked dangerous."
-                                AlertAction.FALSE_POSITIVE -> "${pendingUndo.appLabel} marked false positive."
-                                AlertAction.NEUTRAL -> "${pendingUndo.appLabel} dismissed."
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedButton(onClick = onUndoPendingAction) {
-                            Text("Undo")
-                        }
-                    }
-                }
-            }
-        }
-
         if (allFilteredAlerts.isEmpty()) {
             item {
                 Card(
@@ -911,22 +943,40 @@ private fun AlertsView(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Text("No alerts match the current filters.")
+                        if (debugModeEnabled) {
+                            Text(
+                                if (testModeEnabled) {
+                                    "Debug hint: test mode is enabled, so low-severity browser-risk alerts should surface more easily."
+                                } else {
+                                    "Debug hint: enable test mode in Settings to lower browser-risk validation thresholds while testing."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
         } else {
-            items(items = alerts, key = { it.id }) { alert ->
-                AlertCard(
-                    alert = alert,
-                    debugModeEnabled = debugModeEnabled,
-                    privacyModeEnabled = privacyModeEnabled,
-                    onMarkDangerous = { onMarkDangerous(alert.id) },
-                    onMarkFalsePositive = { onMarkFalsePositive(alert.id) },
-                    onDismissNeutral = { onDismissNeutral(alert.id) },
-                    onShowInfo = { onShowModelInfo(it) },
-                    currentProfile = currentAppProfile(alert.appId),
-                    onSetAppProfile = { profile -> onSetAppProfile(alert.appId, profile) }
-                )
+            items(items = displayedAlerts, key = { it.id }) { alert ->
+                if (pendingUndo?.alertId == alert.id) {
+                    PendingUndoCard(
+                        pendingUndo = pendingUndo,
+                        onUndoPendingAction = onUndoPendingAction
+                    )
+                } else {
+                    AlertCard(
+                        alert = alert,
+                        debugModeEnabled = debugModeEnabled,
+                        privacyModeEnabled = privacyModeEnabled,
+                        onMarkDangerous = { onMarkDangerous(alert.id) },
+                        onMarkFalsePositive = { onMarkFalsePositive(alert.id) },
+                        onDismissNeutral = { onDismissNeutral(alert.id) },
+                        onShowInfo = { onShowModelInfo(it) },
+                        currentProfile = currentAppProfile(alert.appId),
+                        onSetAppProfile = { profile -> onSetAppProfile(alert.appId, profile) }
+                    )
+                }
             }
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
@@ -943,10 +993,10 @@ private fun AlertsView(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = onPreviousPage, enabled = currentPage > 1) {
+                            OutlinedButton(onClick = onPreviousPage, enabled = currentPage > 1, modifier = Modifier.weight(1f)) {
                                 Text("Previous")
                             }
-                            Button(onClick = onNextPage, enabled = currentPage < totalPages) {
+                            Button(onClick = onNextPage, enabled = currentPage < totalPages, modifier = Modifier.weight(1f)) {
                                 Text("Next")
                             }
                         }
@@ -957,11 +1007,13 @@ private fun AlertsView(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SettingsView(
     config: EndpointConfig,
     deviceIdPseudo: String,
     statusMessage: String?,
+    runtimeHealth: RuntimeHealth,
     backendUrl: String,
     onBackendUrlChange: (String) -> Unit,
     onSaveBackendUrl: () -> Unit,
@@ -1011,42 +1063,61 @@ private fun SettingsView(
     onShowModelInfo: (String) -> Unit,
     onSetThemeMode: (ThemeMode) -> Unit,
     onSetDebugModeEnabled: (Boolean) -> Unit,
+    onSetTestModeEnabled: (Boolean) -> Unit,
     onSetPrivacyMode: (PrivacyMode) -> Unit,
     onSetCustomPrivacyOptions: (CustomPrivacyOptions) -> Unit,
     onToggleExport: (Boolean) -> Unit,
     onSyncPolicy: () -> Unit,
     onPingBackend: () -> Unit,
     onExportDataset: () -> Unit,
+    onExportAlerts: () -> Unit,
     onExportForensics: () -> Unit,
     onCaptureEvidence: () -> Unit,
     onFlushExportQueue: () -> Unit,
     onPurgeData: () -> Unit
 ) {
     var isTokenVisible by rememberSaveable { mutableStateOf(false) }
+    val serverOnline = config.lastServerPingStatus == "online"
+    val serverStatusLabel = when (config.lastServerPingStatus) {
+        "online" -> "Online"
+        "offline" -> "Offline"
+        "not_configured" -> "Not configured"
+        null -> "Unknown"
+        else -> config.lastServerPingStatus.replace('_', ' ').replaceFirstChar { it.uppercaseChar() }
+    }
+    val devicePresenceLabel = when (config.lastDeviceHeartbeatStatus) {
+        "online" -> "Visible"
+        "offline" -> "Offline"
+        "not_configured" -> "Not configured"
+        null -> "Unknown"
+        else -> config.lastDeviceHeartbeatStatus.replace('_', ' ').replaceFirstChar { it.uppercaseChar() }
+    }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(vertical = 16.dp, bottom = 24.dp)
+        contentPadding = PaddingValues(start = 0.dp, top = 16.dp, end = 0.dp, bottom = 24.dp)
     ) {
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text("Backend connection", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Set the server URL and token here. Server reachability, device presence, and policy sync all use these credentials.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     OutlinedTextField(
                         value = backendUrl,
                         onValueChange = onBackendUrlChange,
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Backend Base URL (HTTPS or local HTTP)") }
                     )
-                    Button(onClick = onSaveBackendUrl) {
-                        Text("Save backend URL")
-                    }
                     OutlinedTextField(
                         value = apiToken,
                         onValueChange = onApiTokenChange,
@@ -1062,25 +1133,81 @@ private fun SettingsView(
                         },
                         label = { Text("API token") }
                     )
-                    Button(onClick = onSaveApiToken) {
-                        Text("Save API token")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = onSaveBackendUrl, modifier = Modifier.weight(1f)) {
+                            Text("Save URL")
+                        }
+                        Button(onClick = onSaveApiToken, modifier = Modifier.weight(1f)) {
+                            Text("Save token")
+                        }
                     }
-                    Text(
-                        if (config.isConfigured()) "Backend config looks complete."
-                        else "Backend URL and token are both required.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        "Device policy ID: $deviceIdPseudo",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        "Use this ID when setting or debugging remote policy on the backend.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                if (config.isConfigured()) "Backend config looks complete."
+                                else "Backend URL and token are both required.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "Device policy ID: $deviceIdPseudo",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "Use this ID when setting or debugging remote policy on the backend.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "Server: $serverStatusLabel • ${formatOptionalTimestamp(config.lastServerPingEpoch)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (serverOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "Server detail: ${config.lastServerPingDetail ?: "none"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "Device presence: $devicePresenceLabel • ${formatOptionalTimestamp(config.lastDeviceHeartbeatEpoch)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "Device detail: ${config.lastDeviceHeartbeatDetail ?: "none"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "Last policy sync: ${formatOptionalTimestamp(config.lastPolicySyncEpoch)} • ${config.lastPolicySyncStatus ?: "never"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (!config.lastPolicyDiffSummary.isNullOrBlank()) {
+                                Text(
+                                    "Last applied policy diff: ${config.lastPolicyDiffSummary}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = onPingBackend, modifier = Modifier.weight(1f)) {
+                            Text("Ping ${serverStatusLabel}")
+                        }
+                        OutlinedButton(onClick = onSyncPolicy, modifier = Modifier.weight(1f)) {
+                            Text("Sync policy")
+                        }
+                    }
                 }
             }
         }
@@ -1187,6 +1314,26 @@ private fun SettingsView(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("Runtime availability", style = MaterialTheme.typography.labelLarge)
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                RuntimeHealthChip("Linear", runtimeHealth.linearAvailable)
+                                RuntimeHealthChip("TFLite", runtimeHealth.tfliteAvailable)
+                                RuntimeHealthChip("Remote", runtimeHealth.remoteConfigured)
+                            }
+                        }
+                    }
 
                     Text("Model blend weights", style = MaterialTheme.typography.labelLarge)
                     Text(
@@ -1375,87 +1522,49 @@ private fun SettingsView(
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Last export: ${formatOptionalTimestamp(config.lastExportSuccessEpoch)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "Last batch size: ${config.lastExportSentCount} • Last error: ${config.lastExportError ?: "none"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         Switch(
                             checked = config.exportEnabled,
                             onCheckedChange = onToggleExport,
                             enabled = true
                         )
                     }
-                    OutlinedButton(onClick = onPurgeData, modifier = Modifier.fillMaxWidth()) {
-                        Text("Delete data")
-                    }
-                }
-            }
-        }
-
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text("Backend connectivity", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Server status: ${config.lastServerPingStatus ?: "unknown"} • ${formatOptionalTimestamp(config.lastServerPingEpoch)}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "Server detail: ${config.lastServerPingDetail ?: "none"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        "Device presence: ${config.lastDeviceHeartbeatStatus ?: "unknown"} • ${formatOptionalTimestamp(config.lastDeviceHeartbeatEpoch)}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "Device detail: ${config.lastDeviceHeartbeatDetail ?: "none"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        "Last successful export: ${formatOptionalTimestamp(config.lastExportSuccessEpoch)}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "Last export batch size: ${config.lastExportSentCount}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "Last export error: ${config.lastExportError ?: "none"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        "Last policy sync: ${formatOptionalTimestamp(config.lastPolicySyncEpoch)} • ${config.lastPolicySyncStatus ?: "never"}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    if (!config.lastPolicyDiffSummary.isNullOrBlank()) {
-                        Text(
-                            "Last applied policy diff: ${config.lastPolicyDiffSummary}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onPingBackend, modifier = Modifier.weight(1f)) {
-                            Text("Ping server")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(onClick = onExportDataset, modifier = Modifier.weight(1f)) {
+                            Text("Export flows", style = MaterialTheme.typography.labelSmall)
                         }
-                        OutlinedButton(onClick = onSyncPolicy, modifier = Modifier.weight(1f)) {
-                            Text("Sync policy")
+                        OutlinedButton(onClick = onExportAlerts, modifier = Modifier.weight(1f)) {
+                            Text("Export alerts", style = MaterialTheme.typography.labelSmall)
                         }
                     }
-                    OutlinedButton(onClick = onFlushExportQueue, modifier = Modifier.fillMaxWidth()) {
-                        Text("Send queued events now")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(onClick = onFlushExportQueue, modifier = Modifier.weight(1f)) {
+                            Text("Send queued", style = MaterialTheme.typography.labelSmall)
+                        }
+                        OutlinedButton(onClick = onPurgeData, modifier = Modifier.weight(1f)) {
+                            Text("Delete data", style = MaterialTheme.typography.labelSmall)
+                        }
                     }
-                    Text(
-                        "Device presence refreshes automatically while the app is open and on the background heartbeat schedule.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
         }
@@ -1550,6 +1659,25 @@ private fun SettingsView(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
+                            Text("Test mode")
+                            Text(
+                                "Lower browser-risk thresholds for manual validation sessions and demonstration testing.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = config.testModeEnabled,
+                            onCheckedChange = onSetTestModeEnabled
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text("Debug mode")
                             Text(
                                 "Shows raw identifiers, destination details, model diagnostics, and debug actions.",
@@ -1564,8 +1692,16 @@ private fun SettingsView(
                     }
 
                     if (config.debugModeEnabled) {
-                        OutlinedButton(onClick = onFlushExportQueue, modifier = Modifier.fillMaxWidth()) {
-                            Text("Flush export queue now")
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(onClick = onExportForensics, modifier = Modifier.weight(1f)) {
+                                Text("Forensics bundle", style = MaterialTheme.typography.labelSmall)
+                            }
+                            OutlinedButton(onClick = onCaptureEvidence, modifier = Modifier.weight(1f)) {
+                                Text("Capture evidence", style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                     }
                 }
@@ -1619,6 +1755,7 @@ private fun ModelInfoChip(
             .defaultMinSize(minHeight = 40.dp)
             .border(width = 1.dp, color = borderColor, shape = shape)
             .background(color = containerColor, shape = shape)
+            .clip(shape)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongPress
@@ -1658,6 +1795,42 @@ private enum class AlertAction {
 }
 
 @Composable
+private fun PendingUndoCard(
+    pendingUndo: PendingUndoAction,
+    onUndoPendingAction: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = when (pendingUndo.action) {
+                    AlertAction.DANGEROUS -> "${pendingUndo.appLabel} marked dangerous."
+                    AlertAction.FALSE_POSITIVE -> "${pendingUndo.appLabel} marked false positive."
+                    AlertAction.NEUTRAL -> "${pendingUndo.appLabel} dismissed."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f)
+            )
+            OutlinedButton(
+                onClick = onUndoPendingAction,
+                modifier = Modifier.defaultMinSize(minHeight = 40.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Text("Undo", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
+@Composable
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 private fun AlertCard(
     alert: AnomalyAlert,
@@ -1684,19 +1857,28 @@ private fun AlertCard(
     val suppressionTokens = remember(alert.suppressionReason) {
         parseSuppressionTokens(alert.suppressionReason)
     }
+    val shortReason = remember(alert.explanation) { primaryAlertReason(alert.explanation) }
     val cardShape = RoundedCornerShape(18.dp)
     var detailsOpen by rememberSaveable(alert.id) { mutableStateOf(false) }
-    var exitAction by rememberSaveable(alert.id) { mutableStateOf<AlertAction?>(null) }
-    var isVisible by rememberSaveable(alert.id) { mutableStateOf(true) }
+    var showingShadowScore by rememberSaveable(alert.id) { mutableStateOf(false) }
+    val primaryChipLabel = "${modelDisplayName(alert.sourceModel)} ${formatDecimal(alert.responseScore)}"
+    val shadowChipLabel = alert.shadowModel?.let { model ->
+        "Shadow ${modelDisplayName(model)} ${formatDecimal(alert.shadowScore ?: 0.0)}"
+    }
     val dismissState = rememberSwipeToDismissBoxState(
         positionalThreshold = { distance -> distance * 0.35f },
         confirmValueChange = { value ->
-            exitAction = when (value) {
-                SwipeToDismissBoxValue.StartToEnd -> AlertAction.FALSE_POSITIVE
-                SwipeToDismissBoxValue.EndToStart -> AlertAction.DANGEROUS
-                SwipeToDismissBoxValue.Settled -> null
+            when (value) {
+                SwipeToDismissBoxValue.StartToEnd -> {
+                    onMarkFalsePositive()
+                    true
+                }
+                SwipeToDismissBoxValue.EndToStart -> {
+                    onMarkDangerous()
+                    true
+                }
+                SwipeToDismissBoxValue.Settled -> false
             }
-            exitAction != null
         }
     )
     val dismissDirection = dismissState.dismissDirection
@@ -1707,279 +1889,288 @@ private fun AlertCard(
     }
     val swipeBackgroundColor by animateColorAsState(targetValue = swipeTargetColor, label = "alertSwipeBackground")
 
-    LaunchedEffect(exitAction) {
-        when (exitAction) {
-            AlertAction.DANGEROUS -> {
-                isVisible = false
-                delay(220)
-                onMarkDangerous()
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = {
+            val label = when (dismissDirection) {
+                SwipeToDismissBoxValue.StartToEnd -> "False positive"
+                SwipeToDismissBoxValue.EndToStart -> "Dangerous"
+                SwipeToDismissBoxValue.Settled -> "Swipe right for false positive • left for dangerous"
             }
-
-            AlertAction.FALSE_POSITIVE -> {
-                isVisible = false
-                delay(220)
-                onMarkFalsePositive()
-            }
-
-            AlertAction.NEUTRAL -> {
-                isVisible = false
-                delay(220)
-                onDismissNeutral()
-            }
-
-            null -> Unit
-        }
-    }
-
-    AnimatedVisibility(
-        visible = isVisible,
-        exit = fadeOut() + shrinkVertically()
-    ) {
-        SwipeToDismissBox(
-            state = dismissState,
-            backgroundContent = {
-                val label = when (dismissDirection) {
-                    SwipeToDismissBoxValue.StartToEnd -> "False positive"
-                    SwipeToDismissBoxValue.EndToStart -> "Dangerous"
-                    SwipeToDismissBoxValue.Settled -> "Swipe right = false positive • left = dangerous"
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(cardShape)
-                        .background(swipeBackgroundColor)
-                        .padding(horizontal = 18.dp, vertical = 22.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        label,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (dismissDirection == SwipeToDismissBoxValue.EndToStart) {
-                            Color.White
-                        } else {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        }
-                    )
-                }
-            }
-        ) {
-            Card(
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .fillMaxSize()
                     .clip(cardShape)
-                    .combinedClickable(
-                        onClick = {},
-                        onLongClick = { detailsOpen = true }
-                    ),
-                shape = cardShape,
-                colors = CardDefaults.cardColors(
-                    containerColor = container,
-                    contentColor = contentColor
-                ),
-                border = BorderStroke(1.dp, accent)
+                    .background(swipeBackgroundColor)
+                    .padding(horizontal = 18.dp, vertical = 22.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
-                            Text(appLabel, style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                formatTimestamp(alert.createdAtMillis),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = contentColor.copy(alpha = 0.78f)
-                            )
+                Text(
+                    label,
+                    modifier = Modifier.align(
+                        when (dismissDirection) {
+                            SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
+                            SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
+                            SwipeToDismissBoxValue.Settled -> Alignment.Center
                         }
+                    ),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (dismissDirection == SwipeToDismissBoxValue.EndToStart) {
+                        Color.White
+                    } else {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    },
+                    maxLines = 1
+                )
+            }
+        }
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(cardShape)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = { detailsOpen = true }
+                ),
+            shape = cardShape,
+            colors = CardDefaults.cardColors(
+                containerColor = container,
+                contentColor = contentColor
+            ),
+            border = BorderStroke(1.dp, accent)
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
+                        Text(appLabel, style = MaterialTheme.typography.titleMedium)
                         Text(
-                            text = alert.severity.name,
-                            color = accent,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
+                            formatTimestamp(alert.createdAtMillis),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = contentColor.copy(alpha = 0.78f)
                         )
                     }
+                    Text(
+                        text = alert.severity.name,
+                        color = accent,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
 
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                Text(
+                    shortReason,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = contentColor.copy(alpha = 0.92f)
+                )
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    item {
+                        ModelInfoChip(
+                            label = primaryChipLabel,
+                            selected = !showingShadowScore,
+                            onClick = { showingShadowScore = false },
+                            onLongPress = { onShowInfo(alert.sourceModel) }
+                        )
+                    }
+                    if (!alert.shadowModel.isNullOrBlank()) {
                         item {
                             ModelInfoChip(
-                                label = modelDisplayName(alert.sourceModel),
-                                selected = true,
-                                onClick = {},
-                                onLongPress = { onShowInfo(alert.sourceModel) }
+                                label = shadowChipLabel ?: "Shadow ${modelDisplayName(alert.shadowModel.orEmpty())}",
+                                selected = showingShadowScore,
+                                onClick = { showingShadowScore = true },
+                                onLongPress = { onShowInfo(alert.shadowModel.orEmpty()) }
                             )
                         }
-                        if (!alert.shadowModel.isNullOrBlank()) {
-                            item {
-                                ModelInfoChip(
-                                    label = "Shadow ${modelDisplayName(alert.shadowModel.orEmpty())}",
-                                    selected = false,
-                                    onClick = {},
-                                    onLongPress = { onShowInfo(alert.shadowModel.orEmpty()) }
-                                )
-                            }
-                        }
                     }
+                }
 
+                Text(
+                    if (showingShadowScore && alert.shadowScore != null) {
+                        "Viewing shadow comparison score"
+                    } else {
+                        "Viewing primary response score"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = accent
+                )
+                Text(
+                    if (showingShadowScore && alert.shadowScore != null) {
+                        "Shadow score ${"%.3f".format(alert.shadowScore)} • Primary response ${"%.3f".format(alert.responseScore)}"
+                    } else {
+                        "Response ${"%.3f".format(alert.responseScore)} • Anomaly ${"%.3f".format(alert.baseAnomalyScore)} • Context ${"%.3f".format(alert.contextScore)}"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = contentColor.copy(alpha = 0.82f)
+                )
+                Text(
+                    "Confidence ${"%.0f".format(alert.confidence * 100)}% • Uncertainty ${"%.0f".format(alert.uncertainty * 100)}%",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = contentColor.copy(alpha = 0.78f)
+                )
+                if (!destinationSummary.isNullOrBlank()) {
                     Text(
-                        "Response ${"%.3f".format(alert.responseScore)} • Anomaly ${"%.3f".format(alert.baseAnomalyScore)} • Context ${"%.3f".format(alert.contextScore)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = contentColor.copy(alpha = 0.82f)
+                        destinationSummary,
+                        style = MaterialTheme.typography.bodySmall
                     )
+                }
+                if (alert.occurrenceCount > 1) {
                     Text(
-                        "Confidence ${"%.0f".format(alert.confidence * 100)}% • Uncertainty ${"%.0f".format(alert.uncertainty * 100)}%",
+                        "Recurring incident: ${alert.occurrenceCount} occurrences since ${formatTimestamp(alert.firstSeenMillis)}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                if (normalizedContributors.isNotEmpty()) {
+                    Text("Top contributors", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        if (showingShadowScore && alert.shadowScore != null) {
+                            "Shadow mode only has the comparison score. Contributor badges still reflect the primary alert."
+                        } else {
+                            "Each score is normalized to this alert's response score."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = contentColor.copy(alpha = 0.78f)
                     )
-                    if (!destinationSummary.isNullOrBlank()) {
-                        Text(
-                            destinationSummary,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    if (alert.occurrenceCount > 1) {
-                        Text(
-                            "Recurring incident: ${alert.occurrenceCount} occurrences since ${formatTimestamp(alert.firstSeenMillis)}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-
-                    if (normalizedContributors.isNotEmpty()) {
-                        Text("Top contributors", style = MaterialTheme.typography.labelLarge)
-                        Text(
-                            "Each score is normalized to this alert's response score.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = contentColor.copy(alpha = 0.78f)
-                        )
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            normalizedContributors.forEach { (feature, contribution) ->
-                                ModelInfoChip(
-                                    label = "${featureDisplayName(feature)} ${formatDecimal(contribution)}",
-                                    selected = false,
-                                    onClick = {},
-                                    onLongPress = { onShowInfo("feature:$feature") }
-                                )
-                            }
-                        }
-                    }
-
-                    val badgeKeys = buildList {
-                        if (alert.beaconScore > 0.0) add("signal:beacon")
-                        if (alert.driftScore > 0.0) add("signal:drift")
-                        if (suppressionTokens.isNotEmpty()) add("suppression:general")
-                        suppressionTokens.forEach { add("suppression:$it") }
-                    }
-                    if (badgeKeys.isNotEmpty()) {
-                        Text("Signals and guardrails", style = MaterialTheme.typography.labelLarge)
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            badgeKeys.forEach { key ->
-                                ModelInfoChip(
-                                    label = infoDisplayName(key),
-                                    selected = false,
-                                    onClick = {},
-                                    onLongPress = { onShowInfo(key) }
-                                )
-                            }
-                        }
-                    }
-
-                    if (alert.dataQualityWarnings.isNotEmpty()) {
-                        Text(
-                            "Data quality notes: ${alert.dataQualityWarnings.joinToString()}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = contentColor.copy(alpha = 0.78f)
-                        )
-                    }
-
-                    if (debugModeEnabled) {
-                        Text("Debug details", style = MaterialTheme.typography.labelLarge, color = accent)
-                        Text(
-                            "Alert ${alert.id.take(8)} • Window ${alert.featureWindowId.take(8)}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Text(
-                            "First seen ${formatTimestamp(alert.firstSeenMillis)} • Last seen ${formatTimestamp(alert.lastSeenMillis)}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Text(
-                            "Correlation ${alert.correlationKey.ifBlank { "none" }}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        if (!privacyModeEnabled) {
-                            val networkTarget = buildString {
-                                append("Target ")
-                                append(alert.destinationIp ?: "unknown-ip")
-                                alert.destinationPort?.let { append(":$it") }
-                                if (!alert.destinationHash.isNullOrBlank()) {
-                                    append(" • hash ${alert.destinationHash.take(12)}")
-                                }
-                            }
-                            Text(networkTarget, style = MaterialTheme.typography.bodySmall)
-                        }
-                        if (alert.triageNote.isNotBlank()) {
-                            Text("Triage note: ${alert.triageNote}", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-
-                    Text(
-                        "App profile",
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(AppProfile.values().toList()) { profile ->
-                            ModelInfoChip(
-                                label = profile.label(),
-                                selected = profile == currentProfile,
-                                onClick = { onSetAppProfile(profile) },
-                                onLongPress = { onShowInfo("profile:${profile.name.lowercase()}") }
-                            )
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Button(
-                            onClick = { exitAction = AlertAction.DANGEROUS },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Dangerous")
-                        }
-                        OutlinedButton(
-                            onClick = { exitAction = AlertAction.FALSE_POSITIVE },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                "False positive",
-                                maxLines = 1,
-                                softWrap = false,
-                                style = MaterialTheme.typography.labelMedium
+                        normalizedContributors.forEach { (feature, contribution) ->
+                            ModelInfoChip(
+                                label = "${featureDisplayName(feature)} ${formatDecimal(contribution)}",
+                                selected = false,
+                                onClick = {},
+                                onLongPress = { onShowInfo("feature:$feature") }
                             )
-                        }
-                        OutlinedButton(
-                            onClick = { exitAction = AlertAction.NEUTRAL },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Neutral")
                         }
                     }
                 }
+
+                val badgeKeys = buildList {
+                    if (alert.beaconScore > 0.0) add("signal:beacon")
+                    if (alert.driftScore > 0.0) add("signal:drift")
+                    if (suppressionTokens.isNotEmpty()) add("suppression:general")
+                    suppressionTokens.forEach { add("suppression:$it") }
+                }
+                if (badgeKeys.isNotEmpty()) {
+                    Text("Signals and guardrails", style = MaterialTheme.typography.labelLarge)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        badgeKeys.forEach { key ->
+                            ModelInfoChip(
+                                label = infoDisplayName(key),
+                                selected = false,
+                                onClick = {},
+                                onLongPress = { onShowInfo(key) }
+                            )
+                        }
+                    }
+                }
+
+                if (alert.dataQualityWarnings.isNotEmpty()) {
+                    Text(
+                        "Data quality notes: ${alert.dataQualityWarnings.joinToString()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = contentColor.copy(alpha = 0.78f)
+                    )
+                }
+
+                if (debugModeEnabled) {
+                    Text("Debug details", style = MaterialTheme.typography.labelLarge, color = accent)
+                    Text(
+                        "Alert ${alert.id.take(8)} • Window ${alert.featureWindowId.take(8)}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "First seen ${formatTimestamp(alert.firstSeenMillis)} • Last seen ${formatTimestamp(alert.lastSeenMillis)}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "Correlation ${alert.correlationKey.ifBlank { "none" }}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    if (!privacyModeEnabled) {
+                        val networkTarget = buildString {
+                            append("Target ")
+                            append(alert.destinationIp ?: "unknown-ip")
+                            alert.destinationPort?.let { append(":$it") }
+                            if (!alert.destinationHash.isNullOrBlank()) {
+                                append(" • hash ${alert.destinationHash.take(12)}")
+                            }
+                        }
+                        Text(networkTarget, style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (alert.triageNote.isNotBlank()) {
+                        Text("Triage note: ${alert.triageNote}", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+
+                Text(
+                    "App profile",
+                    style = MaterialTheme.typography.labelLarge
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(AppProfile.values().toList()) { profile ->
+                        ModelInfoChip(
+                            label = profile.label(),
+                            selected = profile == currentProfile,
+                            onClick = { onSetAppProfile(profile) },
+                            onLongPress = { onShowInfo("profile:${profile.name.lowercase()}") }
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = onMarkDangerous,
+                        modifier = Modifier
+                            .weight(1f)
+                            .defaultMinSize(minHeight = 42.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
+                    ) {
+                        Text("Dangerous", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    }
+                    OutlinedButton(
+                        onClick = onMarkFalsePositive,
+                        modifier = Modifier
+                            .weight(1f)
+                            .defaultMinSize(minHeight = 42.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            "False positive",
+                            maxLines = 1,
+                            softWrap = false,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = onDismissNeutral,
+                        modifier = Modifier
+                            .weight(1f)
+                            .defaultMinSize(minHeight = 42.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
+                    ) {
+                        Text("Neutral", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    }
+                }
+                }
             }
         }
-    }
 
     if (detailsOpen) {
         AlertDialog(
@@ -2177,11 +2368,33 @@ private fun normalizeContributors(contributions: Map<String, Double>, responseSc
     val positive = contributions.entries.filter { it.value > 0.0 }
     val total = positive.sumOf { it.value }
     if (total <= 1e-9) {
-        return positive.map { it.key to 0.0 }
+        return positive
+            .sortedByDescending { it.value }
+            .take(4)
+            .map { it.key to 0.0 }
     }
     return positive
         .sortedByDescending { it.value }
+        .take(4)
         .map { entry -> entry.key to ((entry.value / total) * responseScore).coerceIn(0.0, 1.0) }
+}
+
+private fun primaryAlertReason(explanation: String): String {
+    val normalized = explanation
+        .substringBefore(" Suppression:")
+        .substringBefore("Top contributors")
+        .trim()
+    return normalized.ifBlank { "Anomalous behavior detected." }
+}
+
+@Composable
+private fun RuntimeHealthChip(label: String, available: Boolean) {
+    ModelInfoChip(
+        label = "$label ${if (available) "ready" else "unavailable"}",
+        selected = available,
+        onClick = {},
+        onLongPress = {}
+    )
 }
 
 private fun suppressionDisplayName(raw: String): String = when {
@@ -2241,21 +2454,21 @@ private fun ThemeMode.label(): String = when (this) {
 
 private fun PrivacyMode.label(): String = when (this) {
     PrivacyMode.OFF -> "Off"
+    PrivacyMode.LOW -> "Low"
+    PrivacyMode.MEDIUM -> "Medium"
     PrivacyMode.STRICT -> "Strict"
-    PrivacyMode.BALANCED -> "Balanced"
-    PrivacyMode.RESEARCH -> "Research"
     PrivacyMode.CUSTOM -> "Custom"
 }
 
 private fun privacyModeDescription(mode: PrivacyMode): String = when (mode) {
     PrivacyMode.OFF ->
         "Exports normal app identifiers and destination context."
+    PrivacyMode.LOW ->
+        "Hashes raw IP addresses but keeps app identifiers and selected site context for lighter privacy with easier debugging."
+    PrivacyMode.MEDIUM ->
+        "Hashes app and IP identifiers while preserving operational metadata such as ports and feature summaries."
     PrivacyMode.STRICT ->
         "Hashes app and IP identifiers, removes site hints, and minimizes evidence fields."
-    PrivacyMode.BALANCED ->
-        "Hashes app and IP identifiers while preserving operational metadata such as ports and feature summaries."
-    PrivacyMode.RESEARCH ->
-        "Keeps app identifiers and selected context for experiments while still hashing raw IP addresses."
     PrivacyMode.CUSTOM ->
         "Lets you choose field-by-field export visibility while keeping the rest of the privacy pipeline intact."
 }
@@ -2317,18 +2530,18 @@ private fun isBrowserPackage(appId: String): Boolean = appId in BROWSER_APP_IDS
 private fun buildFlowPreviewText(deviceIdPseudo: String, config: EndpointConfig): String {
     val appId = when (config.privacyMode) {
         PrivacyMode.OFF -> "com.android.chrome"
-        PrivacyMode.STRICT, PrivacyMode.BALANCED -> "sha256(app_id)"
-        PrivacyMode.RESEARCH -> "com.android.chrome"
+        PrivacyMode.LOW -> "com.android.chrome"
+        PrivacyMode.MEDIUM, PrivacyMode.STRICT -> "sha256(app_id)"
         PrivacyMode.CUSTOM -> if (config.customPrivacy.includeAppId) "com.android.chrome" else "sha256(app_id)"
     }
     val srcIp = when (config.privacyMode) {
-        PrivacyMode.OFF, PrivacyMode.RESEARCH -> "10.0.0.2"
-        PrivacyMode.STRICT, PrivacyMode.BALANCED -> "sha256(src_ip)"
+        PrivacyMode.OFF -> "10.0.0.2"
+        PrivacyMode.LOW, PrivacyMode.MEDIUM, PrivacyMode.STRICT -> "sha256(src_ip)"
         PrivacyMode.CUSTOM -> if (config.customPrivacy.includeIpAddresses) "10.0.0.2" else "sha256(src_ip)"
     }
     val dstIp = when (config.privacyMode) {
-        PrivacyMode.OFF, PrivacyMode.RESEARCH -> "93.184.216.34"
-        PrivacyMode.STRICT, PrivacyMode.BALANCED -> "sha256(dst_ip)"
+        PrivacyMode.OFF -> "93.184.216.34"
+        PrivacyMode.LOW, PrivacyMode.MEDIUM, PrivacyMode.STRICT -> "sha256(dst_ip)"
         PrivacyMode.CUSTOM -> if (config.customPrivacy.includeIpAddresses) "93.184.216.34" else "sha256(dst_ip)"
     }
     val dstPort = when (config.privacyMode) {
@@ -2338,9 +2551,9 @@ private fun buildFlowPreviewText(deviceIdPseudo: String, config: EndpointConfig)
     }
     val explain = when (config.privacyMode) {
         PrivacyMode.OFF -> "[novelty_score, destination_diversity, periodic_beacon_score]"
+        PrivacyMode.LOW -> "[feature_window, site_hint, hashed IPs]"
+        PrivacyMode.MEDIUM -> "[feature_window, ports, protocol, hashed identifiers]"
         PrivacyMode.STRICT -> "[feature_window only, no site hint, minimal endpoint context]"
-        PrivacyMode.BALANCED -> "[feature_window, ports, protocol, hashed identifiers]"
-        PrivacyMode.RESEARCH -> "[feature_window, ports, protocol, selected research context]"
         PrivacyMode.CUSTOM ->
             if (config.customPrivacy.includeFeatureWindow) {
                 "[custom window export enabled]"
@@ -2363,21 +2576,22 @@ private fun buildFlowPreviewText(deviceIdPseudo: String, config: EndpointConfig)
 private fun buildAlertPreviewText(deviceIdPseudo: String, config: EndpointConfig): String {
     val appId = when (config.privacyMode) {
         PrivacyMode.OFF -> "com.android.chrome"
-        PrivacyMode.STRICT, PrivacyMode.BALANCED -> "sha256(app_id)"
-        PrivacyMode.RESEARCH -> "com.android.chrome"
+        PrivacyMode.LOW -> "com.android.chrome"
+        PrivacyMode.MEDIUM, PrivacyMode.STRICT -> "sha256(app_id)"
         PrivacyMode.CUSTOM -> if (config.customPrivacy.includeAppId) "com.android.chrome" else "sha256(app_id)"
     }
     val siteHint = when (config.privacyMode) {
         PrivacyMode.OFF -> "google.com"
+        PrivacyMode.LOW -> "google.com"
+        PrivacyMode.MEDIUM -> "removed"
         PrivacyMode.STRICT -> "removed"
-        PrivacyMode.BALANCED -> "removed"
-        PrivacyMode.RESEARCH -> "google.com"
         PrivacyMode.CUSTOM -> if (config.customPrivacy.includeSiteHint) "google.com" else "removed"
     }
     val destinationContext = when (config.privacyMode) {
+        PrivacyMode.LOW -> "site and risk context retained"
+        PrivacyMode.MEDIUM -> "risk summary retained"
         PrivacyMode.STRICT -> "minimal risk context only"
-        PrivacyMode.BALANCED -> "risk summary retained"
-        PrivacyMode.OFF, PrivacyMode.RESEARCH -> "site and risk context retained"
+        PrivacyMode.OFF -> "site and risk context retained"
         PrivacyMode.CUSTOM ->
             if (config.customPrivacy.includeFeatureWindow) "custom feature window retained" else "feature window removed"
     }
@@ -2428,6 +2642,13 @@ private fun featureDisplayName(feature: String): String = when (feature) {
     "inter_packet_gap_mean_log", "inter_packet_gap_mean" -> "Inter-packet gap"
     "payload_mean_log", "payload_mean" -> "Payload size"
     "load_mean_log", "load_mean" -> "Traffic load"
+    "ttl_metrics_present" -> "TTL visibility"
+    "transport_metrics_present" -> "Transport metrics visibility"
+    "data_quality_penalty" -> "Data-quality penalty"
+    "hour_of_day_sin", "hour_of_day_cos" -> "Time-of-day pattern"
+    "phishing_domain_pattern" -> "Phishing-style host"
+    "credential_lure_pattern" -> "Credential-lure host"
+    "tracking_destination" -> "Tracking destination"
     else -> feature.replace('_', ' ').replaceFirstChar { it.uppercaseChar() }
 }
 
@@ -2465,6 +2686,13 @@ private fun featureExplanation(feature: String): String = when (feature) {
     "inter_packet_gap_mean_log", "inter_packet_gap_mean" -> "Packet spacing differs from normal behavior"
     "payload_mean_log", "payload_mean" -> "Payload sizing differs from normal behavior"
     "load_mean_log", "load_mean" -> "Traffic load differs from normal behavior"
+    "ttl_metrics_present" -> "TTL metadata became newly available or disappeared for this traffic"
+    "transport_metrics_present" -> "Transport-side metadata availability changed for this traffic"
+    "data_quality_penalty" -> "The final score was adjusted because the captured metadata quality was lower than normal"
+    "hour_of_day_sin", "hour_of_day_cos" -> "The activity landed in an unusual time-of-day pattern for this app"
+    "phishing_domain_pattern" -> "The destination hostname matched phishing-style domain heuristics"
+    "credential_lure_pattern" -> "The destination hostname resembled a login, verify, or credential-lure pattern"
+    "tracking_destination" -> "The destination matched tracking, advertising, or telemetry heuristics"
     else -> "Contribution changed from the app's baseline"
 }
 

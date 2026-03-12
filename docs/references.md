@@ -69,10 +69,23 @@ The paper should compare at least these model families:
 | Westermo network traffic dataset | https://github.com/westermo/network-traffic-dataset | Rich open attack/anomaly source. |
 | Android Spyware Detection Through a VPN-Based App | https://data.mendeley.com/datasets/mhvgtywrxf/1 | Android/mobile malware-oriented traffic. |
 | SDNCampus application-flow dataset | https://data.mendeley.com/datasets/wvp9tksn72/1 | Benign app diversity. |
+| ITC-Net-Blend-60 scenario E | https://data.mendeley.com/datasets/gdtnnfyr7s/2 | Benign Android app diversity and hard benign negatives for privacy/leakage work. |
 | PARROT2025_mitmproxy | https://zenodo.org/records/16368932 | Mobile/browser behavior enrichment. |
 | Android Mischief Dataset | https://data.mendeley.com/datasets/xbx2j63xfd/2 | Android RAT traffic with benign and malicious phases. |
 | CIC-AndMal2017 | https://www.unb.ca/cic/datasets/andmal2017.html | Official Android malware traffic and flow benchmark on real devices. |
 | Labeled Multi-Stage Android APT Datasets | https://data.mendeley.com/datasets/bdtn9vj7d7/3 | Android device-behavior dataset for multi-stage attack evaluation. |
+
+## Public-only corpus note
+The default thesis corpus is public-only and should be described explicitly as a merge of:
+
+- Westermo
+- Android Spyware
+- Android Mischief
+- SDNCampus
+- ITC-Net-Blend-60 scenario E
+- CIC-AndMal2017
+
+Use the Android APT dataset and PARROT as auxiliary slices when they help a specific experiment, but keep the main thesis tables tied to the six-dataset public corpus unless there is a strong methodological reason to expand it.
 
 ## Citation policy
 - Prefer the paper or official project page over secondary summaries.

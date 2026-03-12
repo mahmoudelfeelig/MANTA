@@ -10,13 +10,27 @@ Use this checklist before public demos, thesis submission, or distribution of co
 
 ## Raw vs derived data policy
 - Raw packet captures and locally collected private traffic are internal research assets by default.
+- Public, license-compatible datasets are preferred for thesis artifacts whenever they cover the same evaluation need.
+- The default thesis path is now a public-only corpus; private collection is optional, not required.
 - Derived datasets for experiments should be generated from scripts, not edited manually.
 - Derived privacy views should be explicitly labeled, for example:
-  - `full`
-  - `pseudonymous`
-  - `semantic-private`
+  - `off`
+  - `low`
+  - `medium`
   - `strict`
 - If a dataset cannot be redistributed, publish only transformation scripts, manifests, and reproducibility metadata.
+
+## Public dataset inventory
+| Dataset | License / terms | Publication guidance |
+|---|---|---|
+| Westermo network traffic dataset | `CC BY 4.0` | Safe to cite and use as part of the public thesis corpus; redistribute only under the dataset terms. |
+| Android Spyware Detection Through a VPN-Based App | `CC BY 4.0` | Safe to cite and use in the public thesis corpus. |
+| Android Mischief Dataset | `CC BY 4.0` | Safe to cite and use in the public thesis corpus. |
+| SDNCampus application-flow dataset | `CC BY 4.0` | Safe to cite and use in the public thesis corpus. |
+| ITC-Net-Blend-60 scenario E | `CC BY 4.0` | Safe to cite and use in the public thesis corpus and privacy-leakage experiments. |
+| CIC-AndMal2017 | Public research dataset from CIC | Use for experiments and citation, but treat redistribution more conservatively than the CC BY datasets. |
+| PARROT2025_mitmproxy | See Zenodo record metadata | Use as an auxiliary public dataset only after confirming the exact record terms in the archived metadata. |
+| Labeled Multi-Stage Android APT Datasets | `CC BY 4.0` | Safe to cite and use as an auxiliary suspicious-behavior dataset. |
 
 ## Dependency compliance checklist
 - [x] project-level notice file maintained
@@ -31,7 +45,7 @@ Use this checklist before public demos, thesis submission, or distribution of co
 - [ ] external dataset terms archived with access dates
 - [ ] redistribution rights confirmed for every published derived artifact
 - [ ] thesis citations prepared for every external dataset used
-- [ ] local capture consent and storage policy documented for private collection campaigns
+- [ ] local capture consent and storage policy documented if any private collection is used
 - [ ] raw-vs-derived separation enforced in collection and curation scripts
 
 ## Privacy-specific compliance checklist

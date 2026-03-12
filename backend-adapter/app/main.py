@@ -142,7 +142,7 @@ def _model_families_from_versions(versions: list) -> list[str]:
     return families
 
 
-def _train_remote_model_payload(device_id_pseudo: str, family: str = "logistic_regression") -> tuple[dict, int]:
+def _train_remote_model_payload(device_id_pseudo: str, family: str = "hybrid_dual_channel") -> tuple[dict, int]:
     existing = storage.get_remote_model(device_id_pseudo)
     if existing is None or str(existing.get("model_family") or existing.get("model_type") or "") != family:
         existing = default_remote_model(model_type=family)
@@ -152,7 +152,7 @@ def _train_remote_model_payload(device_id_pseudo: str, family: str = "logistic_r
     return trained, int(report["sample_count"])
 
 
-def _execute_remote_model_job(job_id: str, device_id_pseudo: str, family: str = "logistic_regression") -> None:
+def _execute_remote_model_job(job_id: str, device_id_pseudo: str, family: str = "hybrid_dual_channel") -> None:
     storage.mark_remote_model_job_running(job_id)
     try:
         model, sample_count = _train_remote_model_payload(device_id_pseudo, family=family)
@@ -629,7 +629,9 @@ _DASHBOARD_HTML = """
           Retraining updates the backend remote-assisted model for the selected device. Multiple remote model
           families can coexist in the registry, and activating a different version changes the current remote
           scorer for that device. This affects <code>remote_assisted</code> directly and the
-          <code>remote</code> contribution inside <code>ensemble_fusion</code>.
+          <code>remote</code> contribution inside <code>ensemble_fusion</code>. Live Android remote inference now
+          includes the portable window features plus transport/header-side metadata such as TTL gap, TCP flag
+          rates, TCP window mean, ACK timing, payload mean, load mean, and transport-metric availability.
         </p>
         <div class="toolbar" style="grid-template-columns: 1.2fr auto auto;">
           <label>
@@ -765,6 +767,12 @@ _DASHBOARD_HTML = """
       return JSON.stringify(payload);
     }
 
+    function alertsFromEvents(items) {
+      return items
+        .filter(item => item.event_type === "mobile_alert" && item.payload)
+        .map(item => item.payload);
+    }
+
     function renderEvents(items) {
       if (!items.length) {
         els.events.innerHTML = `<p class="muted">No events found for the current filter.</p>`;
@@ -790,7 +798,7 @@ _DASHBOARD_HTML = """
     function renderAlerts(items) {
       els.alertsCount.textContent = `${items.length} items`;
       if (!items.length) {
-        els.alerts.innerHTML = `<p class="muted">No alerts found.</p>`;
+        els.alerts.innerHTML = `<p class="muted">No alerts found. If the phone has local alerts but none appear here yet, enable backend export in the app and use Send queued.</p>`;
         return;
       }
       els.alerts.innerHTML = items.map(alert => `
@@ -853,8 +861,10 @@ _DASHBOARD_HTML = """
         ]);
 
         renderStats(health);
-        renderEvents(events.events || []);
-        renderAlerts(alerts.alerts || []);
+        const recentEvents = events.events || [];
+        const backendAlerts = alerts.alerts || [];
+        renderEvents(recentEvents);
+        renderAlerts(backendAlerts.length ? backendAlerts : alertsFromEvents(recentEvents));
         renderIncidents(incidents.incidents || []);
         els.quality.textContent = JSON.stringify(quality.quality || {}, null, 2);
         populateDevices(devices.devices || []);
@@ -1329,7 +1339,7 @@ def list_remote_model_jobs(
 def queue_remote_model_retrain(
     device_id_pseudo: str,
     background_tasks: BackgroundTasks,
-    family: Annotated[str, Query(pattern="^(logistic_regression|mahalanobis_covariance|hybrid_dual_channel)$")] = "logistic_regression",
+    family: Annotated[str, Query(pattern="^(logistic_regression|gradient_boosted_tree|mahalanobis_covariance|hybrid_dual_channel)$")] = "hybrid_dual_channel",
     _: None = Depends(auth_dependency),
 ):
     job_id = str(uuid.uuid4())
@@ -1346,7 +1356,7 @@ def queue_remote_model_retrain(
 @app.post("/api/v1/model/device/{device_id_pseudo}/retrain")
 def retrain_remote_model_immediately(
     device_id_pseudo: str,
-    family: Annotated[str, Query(pattern="^(logistic_regression|mahalanobis_covariance|hybrid_dual_channel)$")] = "logistic_regression",
+    family: Annotated[str, Query(pattern="^(logistic_regression|gradient_boosted_tree|mahalanobis_covariance|hybrid_dual_channel)$")] = "hybrid_dual_channel",
     _: None = Depends(auth_dependency),
 ):
     try:

@@ -8,7 +8,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .cache_utils import load_feature_windows_cached
 from .features import build_feature_windows, feature_matrix
+from .io_utils import read_csv_resilient
 
 
 def parse_args() -> argparse.Namespace:
@@ -38,8 +40,12 @@ def _timing_summary(values: list[float]) -> dict[str, float]:
 def main() -> None:
     args = parse_args()
     rng = np.random.default_rng(args.random_seed)
-    flows = pd.read_csv(args.input)
-    windows = build_feature_windows(flows)
+    flows = read_csv_resilient(args.input)
+    windows = load_feature_windows_cached(
+        args.input,
+        build_windows_fn=build_feature_windows,
+        read_frame_fn=read_csv_resilient,
+    )
 
     grouped = flows.copy()
     grouped["timestamp_end"] = pd.to_numeric(grouped["timestamp_end"], errors="coerce")

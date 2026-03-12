@@ -40,6 +40,12 @@ DATASETS = {
         "url": "https://data.mendeley.com/datasets/xbx2j63xfd/2",
         "notes": "Manual download required. Contains Android RAT network traffic PCAPs plus benign traffic context.",
     },
+    "itc_net_blend60_scenario_e": {
+        "license": "CC BY 4.0",
+        "mode": "manual",
+        "url": "https://data.mendeley.com/datasets/gdtnnfyr7s/2",
+        "notes": "Manual download required. Benign Android app traffic dataset across 60 applications, useful for privacy leakage, app diversity, and hard benign negatives.",
+    },
     "cicandmal2017_android": {
         "license": "Public research dataset; cite the associated CIC paper",
         "mode": "manual",

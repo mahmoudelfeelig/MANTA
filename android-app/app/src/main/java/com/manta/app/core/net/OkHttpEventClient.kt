@@ -58,7 +58,20 @@ class OkHttpEventClient(
         runCatching {
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    error("Backend rejected event with status ${response.code}")
+                    val bodyText = response.body?.string().orEmpty().replace('\n', ' ').trim()
+                    val detail = bodyText.take(400).takeIf { it.isNotBlank() }
+                    error(
+                        buildString {
+                            append("Backend rejected ")
+                            append(eventType)
+                            append(" with status ")
+                            append(response.code)
+                            if (detail != null) {
+                                append(": ")
+                                append(detail)
+                            }
+                        }
+                    )
                 }
             }
         }.onFailure {

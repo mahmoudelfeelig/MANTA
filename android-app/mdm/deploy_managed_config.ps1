@@ -1,7 +1,7 @@
 param(
   [string]$BackendUrl = "https://manta.example.com",
   [string]$ApiToken = "REPLACE_WITH_TOKEN",
-  [string]$PrivacyMode = "BALANCED",
+  [string]$PrivacyMode = "MEDIUM",
   [string]$DetectionModel = "ensemble_fusion"
 )
 

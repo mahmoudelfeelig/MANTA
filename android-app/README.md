@@ -16,6 +16,7 @@
 - Adaptive thresholds (global + per-app override support).
 - Alert triage workflow (`OPEN`, `INVESTIGATING`, `RESOLVED`, `FALSE_POSITIVE`).
 - Policy sync worker for remote threshold/export/retention updates from backend.
+- Remote-assisted scoring now exports transport/header-side window metadata such as TTL gap, TCP flag rates, TCP window mean, ACK timing, payload mean, load mean, and transport-metric availability.
 
 ## Security defaults
 - Cleartext HTTP disabled by `network_security_config`.
@@ -37,7 +38,7 @@ Minimum configuration:
 - First capture start requires VPN permission grant.
 - Capture is blocked until consent is explicitly accepted in UI.
 - Export requires a backend URL and API token in settings.
-- Privacy modes include off, balanced, strict, research, and custom field-level export controls.
+- Privacy modes include off, low, medium, strict, and custom field-level export controls.
 - An exported automation receiver is available for adb-driven test orchestration.
 - Managed app restrictions are supported for Android Enterprise / EMM deployment via `mdm/managed-configurations.json`.
 - A bundled linear model is loaded from `app/src/main/assets/models/anomaly-linear.json`.

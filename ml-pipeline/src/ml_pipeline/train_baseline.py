@@ -10,7 +10,9 @@ from sklearn.ensemble import IsolationForest
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from .cache_utils import load_feature_windows_cached
 from .features import FEATURE_COLUMNS, build_feature_windows, feature_matrix
+from .io_utils import read_csv_resilient
 
 
 def parse_args() -> argparse.Namespace:
@@ -28,8 +30,11 @@ def main() -> None:
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    df = pd.read_csv(input_path)
-    windows = build_feature_windows(df)
+    windows = load_feature_windows_cached(
+        input_path,
+        build_windows_fn=build_feature_windows,
+        read_frame_fn=read_csv_resilient,
+    )
     X = feature_matrix(windows)
 
     model = Pipeline(

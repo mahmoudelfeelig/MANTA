@@ -44,10 +44,13 @@ MANTA is evaluated as an anomaly-first hybrid IDS for encrypted mobile and endpo
 
 The privacy tiers are compared against the same benchmark split.
 
-- `PSEUDONYMOUS`: no hard degradation gate, should be approximately equal to full
-- `SEMANTIC_PRIVATE`: no more than `5%` relative drop in `roc_auc` or `pr_auc`
-- `STRICT`: no more than `10%` relative drop in `roc_auc` or `pr_auc`
-- `CUSTOM`: must document the exact field mask and compare against the nearest stricter standard tier
+- The anomaly/privacy utility benchmarks should use the grouped source-aware split keyed by dataset source, environment, app family, and time bucket whenever the corpus metadata supports it.
+- The app re-identification leakage benchmark should use a per-app grouped holdout over dataset/environment/session/time groups, not a plain random row split, so it still tests re-identification of known apps across disjoint captures.
+
+- `low`: no hard degradation gate, should be approximately equal to off
+- `medium`: no more than `5%` relative drop in `roc_auc` or `pr_auc`
+- `strict`: no more than `10%` relative drop in `roc_auc` or `pr_auc`
+- `custom`: must document the exact field mask and compare against the nearest stricter standard tier
 
 ## Reliability gates
 - Export queue success rate in soak/replay testing: `>= 99%`
@@ -73,7 +76,9 @@ The privacy tiers are compared against the same benchmark split.
 Every thesis-grade run should archive:
 - config snapshot
 - dataset manifest
+- evaluation protocol matrix
 - privacy tier or custom mask
+- privacy gate verdict
 - model family and version
 - training/evaluation reports
 - replay/integration results

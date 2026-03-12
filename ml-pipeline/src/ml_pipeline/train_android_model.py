@@ -2,18 +2,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import average_precision_score, f1_score, precision_score, recall_score, roc_auc_score
-from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from .cache_utils import load_feature_windows_cached
+from .dataset_metadata import compute_source_balance_weights, hard_example_weight
 from .features import FEATURE_COLUMNS, build_feature_windows, feature_matrix
+from .io_utils import read_csv_resilient
+from .metrics import binary_classification_metrics, per_group_binary_metrics
 from .progress import PhaseProgress
+from .splits import source_aware_train_test_split
 
 
 def parse_args() -> argparse.Namespace:
@@ -42,61 +47,49 @@ def main() -> None:
     args = parse_args()
     progress = PhaseProgress("Android linear training")
     progress.update(5, "Loading flow CSV")
-    df = pd.read_csv(args.input)
     progress.update(18, "Building feature windows")
-    windows = build_feature_windows(df)
+    windows = load_feature_windows_cached(
+        args.input,
+        build_windows_fn=build_feature_windows,
+        read_frame_fn=read_csv_resilient,
+    )
     if "label" not in windows.columns:
         raise SystemExit("Input must include label or is_anomaly column for supervised Android model training")
 
-    progress.update(30, "Preparing train/test split")
-    sorted_windows = windows.sort_values("window_bucket", kind="mergesort").reset_index(drop=True)
-    split_index = max(1, int(len(sorted_windows) * (1.0 - args.test_ratio)))
-    train_df = sorted_windows.iloc[:split_index].copy()
-    test_df = sorted_windows.iloc[split_index:].copy()
-    if test_df.empty:
-        raise SystemExit("Not enough rows to build a non-empty test split")
-
-    all_labels = sorted_windows["label"].fillna(0).astype(int)
-    if all_labels.nunique() < 2:
+    progress.update(30, "Preparing source-aware holdout split")
+    if windows["label"].fillna(0).astype(int).nunique() < 2:
         raise SystemExit("Input does not contain at least two classes after window aggregation")
-
-    # Prefer time-aware split, but recover when it collapses to a single class in training.
-    if train_df["label"].fillna(0).astype(int).nunique() < 2:
-        class_counts = all_labels.value_counts()
-        can_stratify = bool(not class_counts.empty and class_counts.min() >= 2)
-        stratify_labels = all_labels if can_stratify else None
-        train_df, test_df = train_test_split(
-            sorted_windows,
-            test_size=args.test_ratio,
-            random_state=args.random_seed,
-            stratify=stratify_labels,
-        )
-        train_df = train_df.reset_index(drop=True)
-        test_df = test_df.reset_index(drop=True)
-
-    # Guarantee that training sees both classes when they exist globally.
-    train_labels = train_df["label"].fillna(0).astype(int)
-    all_classes = set(all_labels.unique().tolist())
-    train_classes = set(train_labels.unique().tolist())
-    missing_train_classes = list(all_classes - train_classes)
-    if missing_train_classes:
-        for missing_class in missing_train_classes:
-            candidates = test_df[test_df["label"].fillna(0).astype(int) == missing_class]
-            if not candidates.empty:
-                moved = candidates.iloc[[0]]
-                test_df = test_df.drop(index=moved.index).reset_index(drop=True)
-                train_df = pd.concat([train_df, moved], ignore_index=True)
-
-    if test_df.empty:
-        raise SystemExit("Test split is empty after class-balance adjustment")
-
-    if train_df["label"].fillna(0).astype(int).nunique() < 2:
-        raise SystemExit("Training split has fewer than two classes; cannot train logistic model")
+    split = source_aware_train_test_split(
+        windows,
+        label_column="label",
+        test_size=args.test_ratio,
+        random_seed=args.random_seed,
+    )
+    train_df = windows.iloc[split.train_idx].reset_index(drop=True)
+    test_df = windows.iloc[split.test_idx].reset_index(drop=True)
 
     X_train = feature_matrix(train_df)
     y_train = train_df["label"].fillna(0).astype(int).to_numpy()
     X_test = feature_matrix(test_df)
     y_test = test_df["label"].fillna(0).astype(int).to_numpy()
+    source_weights = compute_source_balance_weights(train_df["dataset_source"])
+    sample_weights = np.asarray(
+        [
+            hard_example_weight(
+                label=int(label),
+                dataset_source=str(source),
+                app_family=str(family),
+            )
+            * float(source_weights.get(str(source), 1.0))
+            for label, source, family in zip(
+                y_train,
+                train_df["dataset_source"],
+                train_df["app_family"],
+                strict=False,
+            )
+        ],
+        dtype=float,
+    )
 
     progress.update(52, "Fitting logistic regression")
     pipeline = Pipeline(
@@ -105,12 +98,14 @@ def main() -> None:
             ("clf", LogisticRegression(max_iter=800, class_weight="balanced", random_state=args.random_seed)),
         ]
     )
-    pipeline.fit(X_train, y_train)
+    fit_start = time.perf_counter()
+    pipeline.fit(X_train, y_train, clf__sample_weight=sample_weights)
+    training_seconds = float(time.perf_counter() - fit_start)
 
     progress.update(78, "Evaluating model")
     scores = pipeline.predict_proba(X_test)[:, 1]
     threshold = _best_threshold(y_true=y_test, scores=scores)
-    pred = (scores >= threshold).astype(int)
+    metrics = binary_classification_metrics(y_test, scores, threshold)
 
     scaler: StandardScaler = pipeline.named_steps["scaler"]
     clf: LogisticRegression = pipeline.named_steps["clf"]
@@ -128,12 +123,11 @@ def main() -> None:
     report_payload = {
         "rows_train": int(len(train_df)),
         "rows_test": int(len(test_df)),
-        "threshold": threshold,
-        "precision": float(precision_score(y_test, pred, zero_division=0)),
-        "recall": float(recall_score(y_test, pred, zero_division=0)),
-        "f1": float(f1_score(y_test, pred, zero_division=0)),
-        "pr_auc": float(average_precision_score(y_test, scores)),
-        "roc_auc": float(roc_auc_score(y_test, scores)) if len(np.unique(y_test)) > 1 else None,
+        "split_strategy": split.strategy,
+        "split_summary": split.summary,
+        "training_seconds": training_seconds,
+        **metrics,
+        "per_source_metrics": per_group_binary_metrics(y_test, scores, test_df["dataset_source"], threshold, min_rows=24),
     }
 
     model_path = Path(args.output_model)

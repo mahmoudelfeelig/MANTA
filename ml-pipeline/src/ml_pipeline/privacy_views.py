@@ -10,33 +10,81 @@ from .features import FEATURE_COLUMNS, build_feature_windows
 
 
 PRIVACY_FEATURE_SETS: dict[str, list[str]] = {
-    "full": list(FEATURE_COLUMNS),
-    "pseudonymous": list(FEATURE_COLUMNS),
-    "semantic_private": [
+    "off": list(FEATURE_COLUMNS),
+    "low": list(FEATURE_COLUMNS),
+    "medium": [
         "activity_level_bucket",
         "volume_level_bucket",
         "balance_bucket",
         "burst_bucket",
-        "novelty_bucket",
         "change_bucket",
-        "diversity_bucket",
         "beacon_bucket",
+        "duration_bucket",
+        "byte_rate_bucket",
+        "packet_rate_bucket",
         "packet_imbalance_bucket",
         "small_flow_bucket",
-        "high_port_bucket",
         "hour_period",
         "is_weekend",
     ],
     "strict": [
         "activity_level_bucket",
         "balance_bucket",
-        "novelty_bucket",
+        "burst_bucket",
         "beacon_bucket",
+        "duration_bucket",
         "small_flow_bucket",
         "hour_period",
         "is_weekend",
     ],
 }
+
+PRIVACY_FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
+    "volume_shape": (
+        "activity_level_bucket",
+        "volume_level_bucket",
+        "duration_bucket",
+        "byte_rate_bucket",
+        "packet_rate_bucket",
+    ),
+    "timing_pattern": (
+        "burst_bucket",
+        "change_bucket",
+        "beacon_bucket",
+        "hour_period",
+        "is_weekend",
+    ),
+    "traffic_balance": (
+        "balance_bucket",
+        "packet_imbalance_bucket",
+        "small_flow_bucket",
+    ),
+}
+
+PRIVACY_VIEW_ALIASES: dict[str, str] = {
+    "full": "off",
+    "pseudonymous": "low",
+    "semantic_private": "medium",
+    "semantic-private": "medium",
+}
+
+PRIVACY_VIEW_CHOICES: tuple[str, ...] = tuple(sorted(set(PRIVACY_FEATURE_SETS) | set(PRIVACY_VIEW_ALIASES)))
+PRIVACY_METADATA_COLUMNS: tuple[str, ...] = (
+    "app_id",
+    "window_bucket",
+    "label",
+    "dataset_source",
+    "dataset_profile",
+    "dataset_variant",
+    "environment_id",
+    "session_id",
+    "app_family",
+)
+
+
+def canonical_privacy_view_name(name: str) -> str:
+    normalized = name.strip().lower()
+    return PRIVACY_VIEW_ALIASES.get(normalized, normalized)
 
 
 def stable_hash(value: object, salt: str = "manta") -> str:
@@ -83,6 +131,9 @@ def _derive_privacy_window_columns(windows: pd.DataFrame) -> pd.DataFrame:
         5,
         log_scale=True,
     )
+    derived["duration_bucket"] = _coarse_quantize(derived["mean_duration_ms"], 5, log_scale=True)
+    derived["byte_rate_bucket"] = _coarse_quantize(derived["byte_rate"], 5, log_scale=True)
+    derived["packet_rate_bucket"] = _coarse_quantize(derived["packet_rate"], 5, log_scale=True)
     derived["balance_bucket"] = np.round(pd.to_numeric(derived["outbound_ratio"], errors="coerce").fillna(0.0) * 4.0) / 4.0
     derived["burst_bucket"] = _coarse_quantize(derived["burstiness"], 5, log_scale=True)
     derived["novelty_bucket"] = np.round(pd.to_numeric(derived["novelty_score"], errors="coerce").fillna(0.0) * 4.0) / 4.0
@@ -96,25 +147,26 @@ def _derive_privacy_window_columns(windows: pd.DataFrame) -> pd.DataFrame:
 
 
 def derive_flow_privacy_view(flows: pd.DataFrame, view: str, salt: str = "manta") -> pd.DataFrame:
+    view = canonical_privacy_view_name(view)
     working = flows.copy()
-    if view == "full":
+    if view == "off":
         return working
     if "app_id" in working.columns:
         working["app_id"] = working["app_id"].astype(str).map(lambda value: stable_hash(value, salt=salt))
     for column in ("src_ip", "dst_ip", "destination_key"):
         if column in working.columns:
-            if view == "pseudonymous":
+            if view == "low":
                 working[column] = working[column].astype(str).map(lambda value: stable_hash(value, salt=salt))
             else:
                 working[column] = ""
-    if "dst_port" in working.columns and view in {"semantic_private", "strict"}:
+    if "dst_port" in working.columns and view in {"medium", "strict"}:
         bins = pd.cut(pd.to_numeric(working["dst_port"], errors="coerce").fillna(0), bins=[-1, 1023, 49151, 65535], labels=["system", "registered", "dynamic"])
         working["dst_port"] = bins.astype(str)
     if "protocol" in working.columns and view == "strict":
         working["protocol"] = working["protocol"].astype(str).str.upper().map(
             lambda value: "TCP_LIKE" if "TCP" in value else ("UDP_LIKE" if "UDP" in value else "OTHER")
         )
-    if view in {"semantic_private", "strict"}:
+    if view in {"medium", "strict"}:
         for column in ("site_hint", "dst_host", "dst_host_hash"):
             if column in working.columns:
                 working[column] = ""
@@ -123,14 +175,17 @@ def derive_flow_privacy_view(flows: pd.DataFrame, view: str, salt: str = "manta"
 
 def build_window_privacy_views(flows: pd.DataFrame) -> dict[str, pd.DataFrame]:
     windows = _derive_privacy_window_columns(build_feature_windows(flows))
+    return build_window_privacy_views_from_windows(windows)
+
+
+def build_window_privacy_views_from_windows(windows: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    windows = _derive_privacy_window_columns(windows)
     views: dict[str, pd.DataFrame] = {}
     for view_name, columns in PRIVACY_FEATURE_SETS.items():
         present = [column for column in columns if column in windows.columns]
         base = windows.copy()
-        keep = ["app_id", "window_bucket"]
-        if "label" in base.columns:
-            keep.append("label")
-        keep.extend(present)
+        keep = [column for column in PRIVACY_METADATA_COLUMNS if column in base.columns]
+        keep.extend(column for column in present if column not in keep)
         views[view_name] = base[keep].copy()
     return views
 

@@ -4,15 +4,19 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import os
 import platform
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pandas as pd
-
+from .cache_utils import FastModeConfig, load_feature_windows_cached
+from .features import build_feature_windows
+from .io_utils import read_csv_resilient
 from .progress import PhaseProgress
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run end-to-end baseline experiment suite")
@@ -21,12 +25,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--contamination", type=float, default=0.05)
     parser.add_argument("--model-threshold", type=float, default=0.5)
     parser.add_argument("--ids-threshold", type=float, default=0.55)
+    parser.add_argument("--cache-dir", default="", help="Optional cache directory for precomputed windows/views")
+    parser.add_argument("--parallel-jobs", type=int, default=1, help="Maximum parallel subprocesses for independent model/report steps")
+    parser.add_argument("--fast-mode", action="store_true", help="Use cached fast-mode sampled windows for iteration")
+    parser.add_argument("--max-total-windows", type=int, default=0)
+    parser.add_argument("--max-benign-windows", type=int, default=0)
+    parser.add_argument("--skip-evaluation-protocol", action="store_true", help="Skip the heavy multi-split evaluation-protocol report")
+    parser.add_argument("--allow-existing-output", action="store_true", help="Allow writing into an existing output directory")
+    parser.add_argument("--resume", action="store_true", help="Reuse already-finished step outputs inside an existing output directory")
     return parser.parse_args()
 
 
+def _run(cmd: list[str], *, env: dict[str, str]) -> None:
+    subprocess.run(cmd, check=True, env=env)
 
-def _run(cmd: list[str]) -> None:
-    subprocess.run(cmd, check=True)
+
+def _run_parallel(steps: list[tuple[str, list[str]]], *, env: dict[str, str], max_workers: int) -> None:
+    if max_workers <= 1 or len(steps) <= 1:
+        for _label, command in steps:
+            _run(command, env=env)
+        return
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(steps))) as executor:
+        futures = {executor.submit(_run, command, env=env): label for label, command in steps}
+        for future in as_completed(futures):
+            future.result()
 
 
 def _sha256_file(path: str) -> str:
@@ -65,21 +87,79 @@ def _dependency_versions() -> dict[str, str]:
 
 
 def _has_labels(path: str) -> bool:
-    sample = pd.read_csv(path, nrows=5)
+    sample = read_csv_resilient(path, nrows=5)
     return "label" in sample.columns or "is_anomaly" in sample.columns
 
+
+def _prepare_env(cache_dir: Path, fast_config: FastModeConfig) -> dict[str, str]:
+    env = os.environ.copy()
+    env["MANTA_CACHE_DIR"] = str(cache_dir)
+    env.setdefault("MANTA_PROGRESS_HEARTBEAT_SECONDS", "20")
+    if fast_config.enabled:
+        env["MANTA_FAST_MODE"] = "1"
+        env["MANTA_MAX_TOTAL_WINDOWS"] = str(fast_config.max_total_windows)
+        env["MANTA_MAX_BENIGN_WINDOWS"] = str(fast_config.max_benign_windows)
+        env["MANTA_FAST_RANDOM_SEED"] = str(fast_config.random_seed)
+    else:
+        env.pop("MANTA_FAST_MODE", None)
+        env.pop("MANTA_MAX_TOTAL_WINDOWS", None)
+        env.pop("MANTA_MAX_BENIGN_WINDOWS", None)
+        env.pop("MANTA_FAST_RANDOM_SEED", None)
+    return env
+
+
+def _all_exist(paths: list[Path]) -> bool:
+    return bool(paths) and all(path.exists() for path in paths)
 
 
 def main() -> None:
     args = parse_args()
     progress = PhaseProgress("Experiment suite")
-    output_dir = Path(args.output_dir)
+    output_dir = Path(args.output_dir).expanduser().resolve()
+    if output_dir.exists() and any(output_dir.iterdir()) and not (args.allow_existing_output or args.resume):
+        raise SystemExit(f"Output directory already exists and is not empty: {output_dir}. Use a new run directory or pass --allow-existing-output.")
     artifacts_dir = output_dir / "artifacts"
     reports_dir = output_dir / "reports"
-
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     reports_dir.mkdir(parents=True, exist_ok=True)
 
+    cache_dir = Path(args.cache_dir).expanduser().resolve() if args.cache_dir else (output_dir / "cache").resolve()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    fast_config = FastModeConfig(
+        enabled=args.fast_mode,
+        max_total_windows=int(args.max_total_windows),
+        max_benign_windows=int(args.max_benign_windows),
+        random_seed=42,
+    )
+    subprocess_env = _prepare_env(cache_dir, fast_config)
+
+    progress.update(1, "Warming feature-window cache")
+    load_feature_windows_cached(
+        args.input,
+        build_windows_fn=build_feature_windows,
+        read_frame_fn=read_csv_resilient,
+        explicit_cache_dir=cache_dir,
+        fast_config=fast_config,
+    )
+
+    dataset_manifest_cmd = [
+        sys.executable,
+        "-m",
+        "ml_pipeline.dataset_manifest",
+        "--input",
+        args.input,
+        "--output",
+        str(reports_dir / "dataset-manifest.json"),
+    ]
+    evaluation_protocol_cmd = [
+        sys.executable,
+        "-m",
+        "ml_pipeline.evaluation_protocol_report",
+        "--input",
+        args.input,
+        "--output",
+        str(reports_dir / "evaluation-protocol.json"),
+    ]
     train_cmd = [
         sys.executable,
         "-m",
@@ -91,7 +171,6 @@ def main() -> None:
         "--contamination",
         str(args.contamination),
     ]
-
     eval_cmd = [
         sys.executable,
         "-m",
@@ -120,7 +199,6 @@ def main() -> None:
         str(args.model_threshold),
         "--auto-threshold",
     ]
-
     compare_cmd = [
         sys.executable,
         "-m",
@@ -138,7 +216,15 @@ def main() -> None:
         "--windows-output",
         str(reports_dir / "window-comparison.csv"),
     ]
-
+    derive_privacy_cmd = [
+        sys.executable,
+        "-m",
+        "ml_pipeline.derive_privacy_views",
+        "--input",
+        args.input,
+        "--output-dir",
+        str(reports_dir / "privacy-views"),
+    ]
     privacy_cmd = [
         sys.executable,
         "-m",
@@ -149,15 +235,6 @@ def main() -> None:
         str(reports_dir / "privacy-ablation.json"),
         "--contamination",
         str(args.contamination),
-    ]
-    derive_privacy_cmd = [
-        sys.executable,
-        "-m",
-        "ml_pipeline.derive_privacy_views",
-        "--input",
-        args.input,
-        "--output-dir",
-        str(reports_dir / "privacy-views"),
     ]
     leakage_cmd = [
         sys.executable,
@@ -181,16 +258,17 @@ def main() -> None:
         "--output-csv",
         str(reports_dir / "privacy-pareto.csv"),
     ]
-    compare_families_cmd = [
+    privacy_gate_cmd = [
         sys.executable,
         "-m",
-        "ml_pipeline.compare_model_families",
-        "--input",
-        args.input,
-        "--output-dir",
-        str(reports_dir / "model-family-matrix"),
+        "ml_pipeline.privacy_gate_report",
+        "--ablation-report",
+        str(reports_dir / "privacy-ablation.json"),
+        "--leakage-report",
+        str(reports_dir / "privacy-leakage.json"),
+        "--output",
+        str(reports_dir / "privacy-gate.json"),
     ]
-
     drift_cmd = [
         sys.executable,
         "-m",
@@ -208,7 +286,6 @@ def main() -> None:
         "--score-column",
         "anomaly_score",
     ]
-
     policy_sim_cmd = [
         sys.executable,
         "-m",
@@ -226,7 +303,6 @@ def main() -> None:
         "--score-column",
         "anomaly_score",
     ]
-
     android_model_cmd = [
         sys.executable,
         "-m",
@@ -259,6 +335,17 @@ def main() -> None:
         str(artifacts_dir / "backend" / "remote-assisted-model.json"),
         "--output-report",
         str(reports_dir / "remote-assisted-model.json"),
+        "--model-family",
+        "hybrid_dual_channel",
+    ]
+    compare_families_cmd = [
+        sys.executable,
+        "-m",
+        "ml_pipeline.compare_model_families",
+        "--input",
+        args.input,
+        "--output-dir",
+        str(reports_dir / "model-family-matrix"),
     ]
     privacy_student_cmd = [
         sys.executable,
@@ -270,6 +357,8 @@ def main() -> None:
         str(artifacts_dir / "privacy" / "privacy-student.json"),
         "--output-report",
         str(reports_dir / "privacy-student-report.json"),
+        "--student-view",
+        "medium",
     ]
     federated_cmd = [
         sys.executable,
@@ -277,8 +366,21 @@ def main() -> None:
         "ml_pipeline.simulate_federated_rounds",
         "--input",
         args.input,
+        "--view",
+        "medium",
+        "--student-model",
+        str(artifacts_dir / "privacy" / "privacy-student.json"),
         "--output-report",
         str(reports_dir / "federated-report.json"),
+    ]
+    performance_cmd = [
+        sys.executable,
+        "-m",
+        "ml_pipeline.benchmark_performance",
+        "--input",
+        args.input,
+        "--output",
+        str(reports_dir / "performance-gates.json"),
     ]
     full_matrix_cmd = [
         sys.executable,
@@ -296,49 +398,107 @@ def main() -> None:
         str(reports_dir / "federated-report.json"),
         "--family-comparison-report",
         str(reports_dir / "model-family-matrix" / "comparison-summary.json"),
+        "--privacy-gate-report",
+        str(reports_dir / "privacy-gate.json"),
+        "--performance-report",
+        str(reports_dir / "performance-gates.json"),
+        "--dataset-manifest",
+        str(reports_dir / "dataset-manifest.json"),
         "--output",
         str(reports_dir / "full-model-matrix.json"),
     ]
-    performance_cmd = [
-        sys.executable,
-        "-m",
-        "ml_pipeline.benchmark_performance",
-        "--input",
-        args.input,
-        "--output",
-        str(reports_dir / "performance-gates.json"),
-    ]
-
-    base_steps = [
-        ("baseline training", train_cmd),
-        ("baseline evaluation", eval_cmd),
-        ("baseline comparison", compare_cmd),
-        ("privacy-view derivation", derive_privacy_cmd),
-        ("privacy ablation", privacy_cmd),
-        ("privacy leakage", leakage_cmd),
-        ("privacy Pareto summary", pareto_cmd),
-        ("drift report", drift_cmd),
-        ("policy simulation", policy_sim_cmd),
-    ]
+    step_outputs: dict[str, list[Path]] = {
+        "dataset manifest": [reports_dir / "dataset-manifest.json"],
+        "evaluation protocol": [reports_dir / "evaluation-protocol.json"],
+        "baseline training": [artifacts_dir / "baseline" / "baseline_model.joblib"],
+        "baseline evaluation": [reports_dir / "evaluation.json", reports_dir / "windows-scored.csv"],
+        "baseline comparison": [reports_dir / "comparison.json"],
+        "privacy-view derivation": [reports_dir / "privacy-views" / "manifest.json"],
+        "privacy ablation": [reports_dir / "privacy-ablation.json"],
+        "privacy leakage": [reports_dir / "privacy-leakage.json"],
+        "privacy Pareto summary": [reports_dir / "privacy-pareto.json", reports_dir / "privacy-pareto.csv"],
+        "privacy gate report": [reports_dir / "privacy-gate.json"],
+        "drift report": [reports_dir / "drift-report.json"],
+        "policy simulation": [reports_dir / "policy-simulation.json"],
+        "android linear model": [reports_dir / "android-model-evaluation.json", artifacts_dir / "android" / "anomaly-linear.json"],
+        "tflite autoencoder": [reports_dir / "tflite-autoencoder-evaluation.json", artifacts_dir / "tflite" / "anomaly.tflite"],
+        "remote model": [reports_dir / "remote-assisted-model.json", artifacts_dir / "backend" / "remote-assisted-model.json"],
+        "remote family comparison": [reports_dir / "model-family-matrix" / "comparison-summary.json"],
+        "privacy student": [reports_dir / "privacy-student-report.json", artifacts_dir / "privacy" / "privacy-student.json"],
+        "federated simulation": [reports_dir / "federated-report.json"],
+        "performance benchmark": [reports_dir / "performance-gates.json"],
+        "full model matrix": [reports_dir / "full-model-matrix.json"],
+    }
 
     labels_present = _has_labels(args.input)
+
+    progress.update(10, "Dataset manifest")
+    if args.resume and _all_exist(step_outputs["dataset manifest"]):
+        progress.update(12, "Dataset manifest already present")
+    else:
+        _run(dataset_manifest_cmd, env=subprocess_env)
+    if not args.skip_evaluation_protocol:
+        progress.update(14, "Evaluation protocol")
+        if args.resume and _all_exist(step_outputs["evaluation protocol"]):
+            progress.update(16, "Evaluation protocol already present")
+        else:
+            _run(evaluation_protocol_cmd, env=subprocess_env)
+
+    progress.update(20, "Baseline training")
+    if not (args.resume and _all_exist(step_outputs["baseline training"])):
+        _run(train_cmd, env=subprocess_env)
+    progress.update(28, "Baseline evaluation")
+    if not (args.resume and _all_exist(step_outputs["baseline evaluation"])):
+        _run(eval_cmd, env=subprocess_env)
+    progress.update(34, "Baseline comparison")
+    if not (args.resume and _all_exist(step_outputs["baseline comparison"])):
+        _run(compare_cmd, env=subprocess_env)
+
+    progress.update(40, "Privacy view + utility/leakage group")
+    privacy_group = [
+        (label, command)
+        for label, command in [
+            ("privacy-view derivation", derive_privacy_cmd),
+            ("privacy ablation", privacy_cmd),
+            ("privacy leakage", leakage_cmd),
+        ]
+        if not (args.resume and _all_exist(step_outputs[label]))
+    ]
+    if privacy_group:
+        _run_parallel(privacy_group, env=subprocess_env, max_workers=args.parallel_jobs)
+    progress.update(50, "Privacy summaries")
+    if not (args.resume and _all_exist(step_outputs["privacy Pareto summary"])):
+        _run(pareto_cmd, env=subprocess_env)
+    if not (args.resume and _all_exist(step_outputs["privacy gate report"])):
+        _run(privacy_gate_cmd, env=subprocess_env)
+    progress.update(58, "Drift and policy simulation")
+    if not (args.resume and _all_exist(step_outputs["drift report"])):
+        _run(drift_cmd, env=subprocess_env)
+    if not (args.resume and _all_exist(step_outputs["policy simulation"])):
+        _run(policy_sim_cmd, env=subprocess_env)
+
     if labels_present:
-        base_steps.extend(
-            [
+        progress.update(66, "Model training group")
+        model_group = [
+            (label, command)
+            for label, command in [
                 ("android linear model", android_model_cmd),
                 ("tflite autoencoder", tflite_cmd),
                 ("remote model", remote_cmd),
                 ("remote family comparison", compare_families_cmd),
                 ("privacy student", privacy_student_cmd),
-                ("federated simulation", federated_cmd),
-                ("full model matrix", full_matrix_cmd),
                 ("performance benchmark", performance_cmd),
             ]
-        )
-    total_steps = max(1, len(base_steps) + 1)
-    for index, (label, command) in enumerate(base_steps, start=1):
-        progress.update(((index - 1) / total_steps) * 100.0, label)
-        _run(command)
+            if not (args.resume and _all_exist(step_outputs[label]))
+        ]
+        if model_group:
+            _run_parallel(model_group, env=subprocess_env, max_workers=args.parallel_jobs)
+        progress.update(88, "Federated simulation")
+        if not (args.resume and _all_exist(step_outputs["federated simulation"])):
+            _run(federated_cmd, env=subprocess_env)
+        progress.update(94, "Full model matrix")
+        if not (args.resume and _all_exist(step_outputs["full model matrix"])):
+            _run(full_matrix_cmd, env=subprocess_env)
 
     manifest = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -346,38 +506,27 @@ def main() -> None:
         "platform": platform.platform(),
         "git_commit": _git_commit(),
         "dependency_versions": _dependency_versions(),
-        "train_cmd": train_cmd,
-        "eval_cmd": eval_cmd,
-        "compare_cmd": compare_cmd,
-        "derive_privacy_cmd": derive_privacy_cmd,
-        "privacy_cmd": privacy_cmd,
-        "leakage_cmd": leakage_cmd,
-        "pareto_cmd": pareto_cmd,
-        "drift_cmd": drift_cmd,
-        "policy_sim_cmd": policy_sim_cmd,
-        "android_model_cmd": android_model_cmd if labels_present else None,
-        "tflite_cmd": tflite_cmd if labels_present else None,
-        "remote_cmd": remote_cmd if labels_present else None,
-        "compare_families_cmd": compare_families_cmd if labels_present else None,
-        "privacy_student_cmd": privacy_student_cmd if labels_present else None,
-        "federated_cmd": federated_cmd if labels_present else None,
-        "full_matrix_cmd": full_matrix_cmd if labels_present else None,
-        "performance_cmd": performance_cmd if labels_present else None,
         "input": args.input,
         "input_sha256": _sha256_file(args.input),
         "output_dir": str(output_dir),
+        "cache_dir": str(cache_dir),
+        "fast_mode": fast_config.__dict__,
+        "parallel_jobs": int(args.parallel_jobs),
         "contamination": args.contamination,
         "model_threshold": args.model_threshold,
         "ids_threshold": args.ids_threshold,
         "labels_present": labels_present,
+        "skip_evaluation_protocol": bool(args.skip_evaluation_protocol),
+        "resume": bool(args.resume),
     }
     (reports_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     archive_script = Path(__file__).resolve().parents[3] / "tools" / "archive_experiment_evidence.py"
     archive_target = output_dir / "manta-evidence.zip"
-    progress.update(((total_steps - 1) / total_steps) * 100.0, "archiving experiment evidence")
+    progress.update(98, "Archiving experiment evidence")
     subprocess.run(
         [sys.executable, str(archive_script), "--input-dir", str(output_dir), "--output-zip", str(archive_target)],
         check=True,
+        env=subprocess_env,
     )
     progress.update(100, "Completed")
 

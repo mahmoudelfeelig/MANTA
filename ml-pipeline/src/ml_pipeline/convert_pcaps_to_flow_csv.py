@@ -6,10 +6,13 @@ import io
 import ipaddress
 import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 import sys
+
+from .dataset_metadata import derive_app_family, infer_dataset_source, infer_dataset_variant, infer_environment_id, infer_session_id
 
 
 FIELDS = [
@@ -35,6 +38,11 @@ FIELDS = [
 class FlowAccumulator:
     app_id: str
     label: int
+    dataset_source: str
+    dataset_profile: str
+    dataset_variant: str
+    environment_id: str
+    session_id: str
     protocol: str
     local_ip: str
     local_port: int
@@ -58,12 +66,14 @@ class CaptureIssue:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Convert PCAP captures into MANTA canonical flow CSV using tshark")
-    parser.add_argument("--profile", choices=["parrot", "android_spyware"], required=True)
+    parser.add_argument("--profile", choices=["parrot", "android_spyware", "android_mischief", "itc_net_blend"], required=True)
     parser.add_argument("--input-dir", required=True, help="Directory containing .pcap files")
     parser.add_argument("--glob", default="*.pcap", help="Glob for PCAP files under input-dir")
     parser.add_argument("--output", required=True, help="Canonical CSV output path")
     parser.add_argument("--report", required=True, help="JSON-free CSV conversion report path")
     parser.add_argument("--tshark", default="tshark", help="Path to tshark executable")
+    parser.add_argument("--jobs", type=int, default=1, help="Number of parallel tshark workers")
+    parser.add_argument("--reuse-existing", action="store_true", help="Skip conversion when the output and report are newer than all matching PCAPs")
     return parser.parse_args()
 
 
@@ -108,15 +118,20 @@ def infer_app_id(path: Path, profile: str) -> str:
     if profile == "parrot":
         stem = re.sub(r"_\d{4}-\d{2}-\d{2}-\d{4}_\d+$", "", stem)
         return stem.strip()
+    if profile == "itc_net_blend":
+        stem = re.sub(r"_final$", "", stem, flags=re.IGNORECASE)
+        stem = re.sub(r"([A-E])\d+$", "", stem)
+        normalized = re.sub(r"[^a-z0-9]+", "_", stem.lower()).strip("_")
+        return normalized or "unknown_android_app"
     normalized = re.sub(r"[^a-z0-9]+", "_", stem.lower()).strip("_")
     return normalized or "unknown_spyware_capture"
 
 
 def infer_label(path: Path, profile: str) -> int:
-    if profile == "parrot":
+    if profile in {"parrot", "itc_net_blend"}:
         return 0
     stem = path.stem.lower()
-    return 0 if "normal" in stem else 1
+    return 0 if ("normal" in stem or "benign" in stem) else 1
 
 
 def run_tshark(tshark: str, path: Path) -> tuple[list[dict[str, str]], str | None]:
@@ -156,6 +171,10 @@ def convert_capture(path: Path, profile: str, tshark: str) -> tuple[list[FlowAcc
     local_ip = infer_capture_local_ip(rows)
     app_id = infer_app_id(path=path, profile=profile)
     label = infer_label(path=path, profile=profile)
+    dataset_source = infer_dataset_source(profile, path)
+    dataset_variant = infer_dataset_variant(path)
+    environment_id = infer_environment_id(path, profile=profile)
+    session_id = infer_session_id(path, profile=profile)
     flows: dict[tuple[str, int, str, int, str], FlowAccumulator] = {}
 
     for row in rows:
@@ -199,6 +218,11 @@ def convert_capture(path: Path, profile: str, tshark: str) -> tuple[list[FlowAcc
             flow = FlowAccumulator(
                 app_id=app_id,
                 label=label,
+                dataset_source=dataset_source,
+                dataset_profile=profile,
+                dataset_variant=dataset_variant,
+                environment_id=environment_id,
+                session_id=session_id,
                 protocol=protocol,
                 local_ip=local_endpoint_ip,
                 local_port=local_port,
@@ -254,6 +278,12 @@ def write_output(
                 "protocol": item.protocol,
                 "dst_port": item.remote_port,
                 "duration_ms": int(max(0.0, (item.end_ts - item.start_ts) * 1000.0)),
+                "dataset_source": item.dataset_source,
+                "dataset_profile": item.dataset_profile,
+                "dataset_variant": item.dataset_variant,
+                "environment_id": item.environment_id,
+                "session_id": item.session_id,
+                "app_family": derive_app_family(item.app_id),
             }
         )
 
@@ -274,6 +304,12 @@ def write_output(
                 "protocol",
                 "dst_port",
                 "duration_ms",
+                "dataset_source",
+                "dataset_profile",
+                "dataset_variant",
+                "environment_id",
+                "session_id",
+                "app_family",
             ],
         )
         writer.writeheader()
@@ -296,6 +332,13 @@ def resolve_pcaps(input_dir: Path, pattern: str) -> list[Path]:
     return sorted(path for path in input_dir.rglob(pattern) if path.is_file())
 
 
+def _conversion_fresh(pcaps: list[Path], output: Path, report: Path) -> bool:
+    if not pcaps or not output.exists() or not report.exists():
+        return False
+    newest_input = max(path.stat().st_mtime_ns for path in pcaps)
+    return output.stat().st_mtime_ns >= newest_input and report.stat().st_mtime_ns >= newest_input
+
+
 def main() -> None:
     args = parse_args()
     input_dir = Path(args.input_dir).expanduser().resolve()
@@ -304,23 +347,53 @@ def main() -> None:
     pcaps = resolve_pcaps(input_dir=input_dir, pattern=args.glob)
     if not pcaps:
         raise SystemExit(f"No PCAP files matched {args.glob!r} under {input_dir}")
+    if args.reuse_existing and _conversion_fresh(pcaps, output, report):
+        print(f"Reusing existing conversion outputs: {output}")
+        return
 
     flows: list[FlowAccumulator] = []
     issues: list[CaptureIssue] = []
     processed_pcaps = 0
     skipped_pcaps = 0
-    for pcap in pcaps:
-        try:
-            converted, warning = convert_capture(path=pcap, profile=args.profile, tshark=args.tshark)
-            flows.extend(converted)
-            processed_pcaps += 1
-            if warning:
-                issues.append(CaptureIssue(path=str(pcap), severity="warning", message=warning))
-                print(f"[warn] {pcap.name}: tshark reported a non-fatal warning", file=sys.stderr)
-        except RuntimeError as exc:
-            skipped_pcaps += 1
-            issues.append(CaptureIssue(path=str(pcap), severity="skipped", message=str(exc)))
-            print(f"[skip] {pcap.name}: {exc}", file=sys.stderr)
+    total_pcaps = len(pcaps)
+
+    def _convert_one(pcap: Path) -> tuple[Path, list[FlowAccumulator], str | None]:
+        converted, warning = convert_capture(path=pcap, profile=args.profile, tshark=args.tshark)
+        return pcap, converted, warning
+
+    if args.jobs <= 1:
+        for index, pcap in enumerate(pcaps, start=1):
+            try:
+                pcap_path, converted, warning = _convert_one(pcap)
+                flows.extend(converted)
+                processed_pcaps += 1
+                print(f"[{index}/{total_pcaps}] converted {pcap_path.name} -> {len(converted)} rows", flush=True)
+                if warning:
+                    issues.append(CaptureIssue(path=str(pcap_path), severity="warning", message=warning))
+                    print(f"[warn] {pcap_path.name}: tshark reported a non-fatal warning", file=sys.stderr)
+            except RuntimeError as exc:
+                skipped_pcaps += 1
+                issues.append(CaptureIssue(path=str(pcap), severity="skipped", message=str(exc)))
+                print(f"[skip] {pcap.name}: {exc}", file=sys.stderr)
+    else:
+        with ThreadPoolExecutor(max_workers=min(args.jobs, total_pcaps)) as executor:
+            futures = {executor.submit(_convert_one, pcap): pcap for pcap in pcaps}
+            completed = 0
+            for future in as_completed(futures):
+                pcap = futures[future]
+                completed += 1
+                try:
+                    pcap_path, converted, warning = future.result()
+                    flows.extend(converted)
+                    processed_pcaps += 1
+                    print(f"[{completed}/{total_pcaps}] converted {pcap_path.name} -> {len(converted)} rows", flush=True)
+                    if warning:
+                        issues.append(CaptureIssue(path=str(pcap_path), severity="warning", message=warning))
+                        print(f"[warn] {pcap_path.name}: tshark reported a non-fatal warning", file=sys.stderr)
+                except RuntimeError as exc:
+                    skipped_pcaps += 1
+                    issues.append(CaptureIssue(path=str(pcap), severity="skipped", message=str(exc)))
+                    print(f"[skip] {pcap.name}: {exc}", file=sys.stderr)
     if not flows:
         raise SystemExit("No convertible IP flows were found in the selected PCAP set")
     write_output(

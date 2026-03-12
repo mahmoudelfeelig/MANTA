@@ -19,8 +19,10 @@ from sklearn.metrics import (
 )
 
 from .calibration import calibrate_thresholds
+from .cache_utils import load_feature_windows_cached
 from .explain import compute_feature_contributions
 from .features import build_feature_windows, feature_matrix
+from .io_utils import read_csv_resilient
 
 
 def parse_args() -> argparse.Namespace:
@@ -83,8 +85,11 @@ def main() -> None:
     args = parse_args()
     model = joblib.load(Path(args.artifacts) / "baseline_model.joblib")
 
-    df = pd.read_csv(args.input)
-    windows = build_feature_windows(df)
+    windows = load_feature_windows_cached(
+        args.input,
+        build_windows_fn=build_feature_windows,
+        read_frame_fn=read_csv_resilient,
+    )
     X = feature_matrix(windows)
 
     decision = -model.decision_function(X)

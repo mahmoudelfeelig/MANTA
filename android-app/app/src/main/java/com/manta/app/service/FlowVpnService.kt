@@ -131,7 +131,8 @@ class FlowVpnService : VpnService() {
                 if (flushed.isNotEmpty()) {
                     serviceScope.launch {
                         flushed.forEach { flow ->
-                            repository.persistFlow(flow)
+                            runCatching { repository.persistFlow(flow) }
+                                .onFailure { error -> Log.e(TAG, "persistFlow failed", error) }
                         }
                     }
                 }
@@ -166,7 +167,10 @@ class FlowVpnService : VpnService() {
         val pendingFlows = flowAggregator?.flushAll(System.currentTimeMillis()).orEmpty()
         if (pendingFlows.isNotEmpty()) {
             serviceScope.launch {
-                pendingFlows.forEach { repository.persistFlow(it) }
+                pendingFlows.forEach { flow ->
+                    runCatching { repository.persistFlow(flow) }
+                        .onFailure { error -> Log.e(TAG, "persistFlow failed during flush", error) }
+                }
             }
         }
         flowAggregator = null

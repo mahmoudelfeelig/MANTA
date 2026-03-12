@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .dataset_metadata import derive_app_family
+
 
 PORTABLE_FEATURE_COLUMNS = [
     "flow_count",
@@ -74,6 +76,16 @@ def _text_series(frame: pd.DataFrame, column: str, default: str) -> pd.Series:
     return pd.Series([default] * len(frame), index=frame.index, dtype="object")
 
 
+def _dominant_text(group: pd.DataFrame, column: str, default: str) -> str:
+    if column not in group.columns:
+        return default
+    values = group[column].astype(str).replace({"": default}).fillna(default)
+    if values.empty:
+        return default
+    counts = values.value_counts()
+    return str(counts.index[0]) if not counts.empty else default
+
+
 def build_feature_windows(df: pd.DataFrame, window_seconds: int = 60) -> pd.DataFrame:
     validate_flow_df(df)
 
@@ -115,6 +127,7 @@ def build_feature_windows(df: pd.DataFrame, window_seconds: int = 60) -> pd.Data
 
         row: dict[str, float | int | str] = {
             "app_id": str(app_id),
+            "app_family": derive_app_family(str(app_id)),
             "window_bucket": int(bucket),
             "flow_count": flow_count,
             "total_bytes_out": total_bytes_out,
@@ -139,6 +152,11 @@ def build_feature_windows(df: pd.DataFrame, window_seconds: int = 60) -> pd.Data
             "packet_imbalance": float(packet_imbalance),
             "small_flow_ratio": float(group["small_flow"].mean()),
             "high_port_ratio": float(group["high_port"].mean()),
+            "dataset_source": _dominant_text(group, "dataset_source", "unknown_source"),
+            "dataset_profile": _dominant_text(group, "dataset_profile", "unknown_profile"),
+            "dataset_variant": _dominant_text(group, "dataset_variant", "unknown_variant"),
+            "environment_id": _dominant_text(group, "environment_id", "unknown_environment"),
+            "session_id": _dominant_text(group, "session_id", "unknown_session"),
         }
 
         label_cols = [col for col in ["label", "is_anomaly"] if col in group.columns]

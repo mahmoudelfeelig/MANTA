@@ -3,12 +3,15 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from .cache_utils import load_remote_windows_cached
 from .features import build_feature_windows, validate_flow_df
+from .io_utils import read_csv_resilient
 from .progress import PhaseProgress
 
 
@@ -20,9 +23,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--window-seconds", type=int, default=60, help="Feature window size in seconds")
     parser.add_argument(
         "--model-family",
-        default="logistic_regression",
-        choices=["logistic_regression", "mahalanobis_covariance", "hybrid_dual_channel"],
-        help="Remote model family to train",
+        default="hybrid_dual_channel",
+        choices=["logistic_regression", "gradient_boosted_tree", "mahalanobis_covariance", "hybrid_dual_channel"],
+        help="Remote model family to train; hybrid_dual_channel is the default thesis primary",
     )
     return parser.parse_args()
 
@@ -176,6 +179,12 @@ def build_remote_windows(df: pd.DataFrame, window_seconds: int) -> pd.DataFrame:
                     payload_present,
                     inter_packet_present,
                 ),
+                "dataset_source": str(base_row.get("dataset_source", "unknown_source")),
+                "dataset_profile": str(base_row.get("dataset_profile", "unknown_profile")),
+                "dataset_variant": str(base_row.get("dataset_variant", "unknown_variant")),
+                "environment_id": str(base_row.get("environment_id", "unknown_environment")),
+                "session_id": str(base_row.get("session_id", "unknown_session")),
+                "app_family": str(base_row.get("app_family", "other_app")),
                 "label": int(pd.to_numeric(group["label"], errors="coerce").fillna(0).astype(int).max()) if "label" in group.columns else 0,
             }
         )
@@ -191,9 +200,13 @@ def main() -> None:
     output_report_path = Path(args.output_report).expanduser().resolve()
 
     progress.update(5, "Loading flow CSV")
-    flows = pd.read_csv(input_path)
     progress.update(18, "Building remote feature windows")
-    windows = build_remote_windows(flows, window_seconds=args.window_seconds)
+    windows = load_remote_windows_cached(
+        input_path,
+        build_remote_windows_fn=build_remote_windows,
+        read_frame_fn=read_csv_resilient,
+        window_seconds=args.window_seconds,
+    )
     if "label" not in windows.columns or windows["label"].nunique() < 2:
         raise ValueError("Remote backend training requires both benign and anomalous labels in the normalized dataset.")
 
@@ -243,11 +256,20 @@ def main() -> None:
             },
             "site_hint": None,
             "label": int(row.label),
+            "dataset_source": str(row.dataset_source),
+            "dataset_profile": str(row.dataset_profile),
+            "dataset_variant": str(row.dataset_variant),
+            "environment_id": str(row.environment_id),
+            "session_id": str(row.session_id),
+            "app_family": str(row.app_family),
+            "window_bucket": int(row.window_bucket),
         }
         for row in windows.itertuples(index=False)
     ]
     progress.update(56, "Training model")
+    fit_start = time.perf_counter()
     model, report = module.train_remote_model(samples=samples, model_type=args.model_family)
+    training_seconds = float(time.perf_counter() - fit_start)
     output_model_path.parent.mkdir(parents=True, exist_ok=True)
     output_report_path.parent.mkdir(parents=True, exist_ok=True)
     progress.update(88, "Writing model and report")
@@ -256,9 +278,11 @@ def main() -> None:
         json.dumps(
             {
                 "input": str(input_path),
-                "rows": int(len(flows)),
+                "model_family": args.model_family,
+                "rows": int(len(read_csv_resilient(input_path))),
                 "windows": int(len(windows)),
                 "window_seconds": args.window_seconds,
+                "training_seconds": training_seconds,
                 "label_counts": windows["label"].value_counts().to_dict(),
                 "training_report": report,
             },

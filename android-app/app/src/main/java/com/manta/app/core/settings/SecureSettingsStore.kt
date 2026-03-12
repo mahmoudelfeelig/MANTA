@@ -30,6 +30,7 @@ private const val KEY_FALSE_POSITIVE_BUDGET = "false_positive_budget_per_app_day
 private const val KEY_DRIFT_HIGH_THRESHOLD = "drift_high_threshold"
 private const val KEY_THEME_MODE = "theme_mode"
 private const val KEY_DEBUG_MODE_ENABLED = "debug_mode_enabled"
+private const val KEY_TEST_MODE_ENABLED = "test_mode_enabled"
 private const val KEY_PRIVACY_MODE_ENABLED = "privacy_mode_enabled"
 private const val KEY_PRIVACY_MODE = "privacy_mode"
 private const val KEY_FUSION_STATISTICAL_WEIGHT = "fusion_statistical_weight"
@@ -90,9 +91,9 @@ enum class AppProfile {
 
 enum class PrivacyMode {
     OFF,
+    LOW,
+    MEDIUM,
     STRICT,
-    BALANCED,
-    RESEARCH,
     CUSTOM
 }
 
@@ -212,6 +213,7 @@ data class EndpointConfig(
     val driftHighThreshold: Double,
     val themeMode: ThemeMode,
     val debugModeEnabled: Boolean,
+    val testModeEnabled: Boolean,
     val privacyMode: PrivacyMode,
     val fusionWeights: FusionWeights,
     val lastExportSuccessEpoch: Long,
@@ -302,7 +304,7 @@ class SecureSettingsStore(context: Context) {
         }
         if (!prefs.contains(KEY_PRIVACY_MODE)) {
             val defaultMode = if (prefs.getBoolean(KEY_PRIVACY_MODE_ENABLED, false)) {
-                PrivacyMode.BALANCED.name
+                PrivacyMode.MEDIUM.name
             } else {
                 PrivacyMode.OFF.name
             }
@@ -383,6 +385,7 @@ class SecureSettingsStore(context: Context) {
             driftHighThreshold = prefs.getString(KEY_DRIFT_HIGH_THRESHOLD, "0.65")?.toDoubleOrNull()?.coerceIn(0.1, 1.0) ?: 0.65,
             themeMode = sanitizeThemeMode(prefs.getString(KEY_THEME_MODE, ThemeMode.SYSTEM.name)),
             debugModeEnabled = prefs.getBoolean(KEY_DEBUG_MODE_ENABLED, false),
+            testModeEnabled = prefs.getBoolean(KEY_TEST_MODE_ENABLED, false),
             privacyMode = sanitizePrivacyMode(
                 prefs.getString(KEY_PRIVACY_MODE, null),
                 prefs.getBoolean(KEY_PRIVACY_MODE_ENABLED, false)
@@ -475,10 +478,15 @@ class SecureSettingsStore(context: Context) {
         configState.value = readConfig()
     }
 
+    fun setTestModeEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_TEST_MODE_ENABLED, value).apply()
+        configState.value = readConfig()
+    }
+
     fun setPrivacyModeEnabled(value: Boolean) {
         prefs.edit()
             .putBoolean(KEY_PRIVACY_MODE_ENABLED, value)
-            .putString(KEY_PRIVACY_MODE, if (value) PrivacyMode.BALANCED.name else PrivacyMode.OFF.name)
+            .putString(KEY_PRIVACY_MODE, if (value) PrivacyMode.MEDIUM.name else PrivacyMode.OFF.name)
             .apply()
         configState.value = readConfig()
     }
@@ -625,6 +633,7 @@ class SecureSettingsStore(context: Context) {
             .putString(KEY_DRIFT_HIGH_THRESHOLD, roundWeight(policy.driftHighThreshold.coerceIn(0.1, 1.0)))
             .putString(KEY_THEME_MODE, sanitizeThemeMode(policy.themeMode).name)
             .putBoolean(KEY_DEBUG_MODE_ENABLED, policy.debugModeEnabled)
+            .putBoolean(KEY_TEST_MODE_ENABLED, readConfig().testModeEnabled)
             .putString(KEY_FUSION_STATISTICAL_WEIGHT, roundWeight(fusion.statistical))
             .putString(KEY_FUSION_MULTIVARIATE_WEIGHT, roundWeight(fusion.multivariate))
             .putString(KEY_FUSION_SEQUENCE_WEIGHT, roundWeight(fusion.sequence))
@@ -762,10 +771,16 @@ class SecureSettingsStore(context: Context) {
     }
 
     private fun sanitizePrivacyMode(mode: String?, legacyEnabled: Boolean): PrivacyMode {
-        return runCatching {
-            PrivacyMode.valueOf(mode?.trim().orEmpty())
-        }.getOrElse {
-            if (legacyEnabled) PrivacyMode.BALANCED else PrivacyMode.OFF
+        val normalized = mode?.trim().orEmpty().uppercase()
+        return when (normalized) {
+            PrivacyMode.OFF.name -> PrivacyMode.OFF
+            PrivacyMode.LOW.name,
+            "RESEARCH" -> PrivacyMode.LOW
+            PrivacyMode.MEDIUM.name,
+            "BALANCED" -> PrivacyMode.MEDIUM
+            PrivacyMode.STRICT.name -> PrivacyMode.STRICT
+            PrivacyMode.CUSTOM.name -> PrivacyMode.CUSTOM
+            else -> if (legacyEnabled) PrivacyMode.MEDIUM else PrivacyMode.OFF
         }
     }
 
@@ -809,6 +824,9 @@ class SecureSettingsStore(context: Context) {
         }
         if (before.debugModeEnabled != after.debugModeEnabled) {
             changes += "debug ${before.debugModeEnabled} -> ${after.debugModeEnabled}"
+        }
+        if (before.testModeEnabled != after.testModeEnabled) {
+            changes += "test mode ${before.testModeEnabled} -> ${after.testModeEnabled}"
         }
         if (before.ablateVolumeFeatures != after.ablateVolumeFeatures) {
             changes += "disable volume features ${before.ablateVolumeFeatures} -> ${after.ablateVolumeFeatures}"

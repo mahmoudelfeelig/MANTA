@@ -527,14 +527,15 @@
           </div>
         </div>
         <div class="hint-box" style="margin-bottom:12px;">
-          Retraining updates the backend remote-assisted model for the primary selected device. Multiple remote model families can coexist in the registry, and activating a different version changes the current remote scorer for that device. This affects <span class="mono">remote_assisted</span> directly and the remote contribution inside <span class="mono">ensemble_fusion</span>, while the local <span class="mono">multivariate</span> mode remains the covariance-aware on-device baseline.
+          Retraining updates the backend remote-assisted model for the primary selected device. Multiple remote model families can coexist in the registry, and activating a different version changes the current remote scorer for that device. This affects <span class="mono">remote_assisted</span> directly and the remote contribution inside <span class="mono">ensemble_fusion</span>, while the local <span class="mono">multivariate</span> mode remains the covariance-aware on-device baseline. Live Android remote inference now includes the portable window features plus transport/header-side metadata such as TTL gap, TCP flag rates, TCP window mean, ACK timing, payload mean, load mean, and transport-metric availability.
         </div>
         <label style="display:grid; gap:6px; margin-bottom:12px; max-width:320px;">
           <span class="label">Retrain / import family</span>
           <select id="remoteModelFamily">
-            <option value="logistic_regression">logistic_regression</option>
-            <option value="mahalanobis_covariance">mahalanobis_covariance</option>
             <option value="hybrid_dual_channel">hybrid_dual_channel</option>
+            <option value="logistic_regression">logistic_regression</option>
+            <option value="gradient_boosted_tree">gradient_boosted_tree</option>
+            <option value="mahalanobis_covariance">mahalanobis_covariance</option>
           </select>
         </label>
         <pre id="remoteModel">No model loaded.</pre>
@@ -899,6 +900,12 @@
       return JSON.stringify(payload);
     }
 
+    function alertsFromEvents(items) {
+      return items
+        .filter(item => item.event_type === "mobile_alert" && item.payload)
+        .map(item => item.payload);
+    }
+
     function renderEvents(items) {
       state.filteredEvents = items;
       const { pageItems, page, totalPages } = paginate(items, state.eventsPage);
@@ -975,7 +982,7 @@
       els.alertsPrevBtn.disabled = page <= 1;
       els.alertsNextBtn.disabled = page >= totalPages;
       if (!pageItems.length) {
-        els.alerts.innerHTML = `<div class="empty">No alerts match the current filters.</div>`;
+        els.alerts.innerHTML = `<div class="empty">No alerts match the current filters. If the phone has local alerts but none appear here yet, enable backend export in the app and use Send queued.</div>`;
         return;
       }
       els.alerts.innerHTML = pageItems.map(alert => {
@@ -1081,6 +1088,36 @@
       const message = error instanceof Error ? error.message : String(error);
       els.policyEditorOutput.textContent = `Error: ${message}`;
       els.remoteModel.textContent = `Error: ${message}`;
+    }
+
+    function formatNumber(value, digits = 3) {
+      return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "-";
+    }
+
+    function summarizeRemoteModelPayload(payload) {
+      const model = payload?.model || {};
+      const report = model?.training_report || payload?.training_report || {};
+      const metrics = report?.metrics || {};
+      const lines = [
+        `family: ${model?.model_family || model?.model_type || payload?.family || "unknown"}`,
+        `version: ${model?.version ?? "-"}`,
+        `recommended_threshold: ${formatNumber(model?.recommended_threshold ?? model?.meta_threshold)}`,
+        `f1: ${formatNumber(metrics?.f1)}`,
+        `pr_auc: ${formatNumber(metrics?.pr_auc)}`,
+        `roc_auc: ${formatNumber(metrics?.roc_auc)}`,
+        `ece: ${formatNumber(metrics?.ece)}`,
+        `brier_score: ${formatNumber(metrics?.brier_score)}`,
+        `split: ${metrics?.split || "-"}`,
+      ];
+      if (metrics?.threshold_stability_std !== undefined) {
+        lines.push(`threshold_stability_std: ${formatNumber(metrics?.threshold_stability_std)}`);
+      }
+      if (metrics?.per_source_metrics) {
+        lines.push(`per_source_groups: ${Object.keys(metrics.per_source_metrics).length}`);
+      }
+      lines.push("");
+      lines.push(JSON.stringify(payload, null, 2));
+      return lines.join("\n");
     }
 
     function initializeCollapsiblePanels() {
@@ -1256,7 +1293,8 @@
 
       renderHealth(health);
       state.allEvents = Array.isArray(events.events) ? events.events : [];
-      state.allAlerts = Array.isArray(alerts.alerts) ? alerts.alerts : [];
+      const backendAlerts = Array.isArray(alerts.alerts) ? alerts.alerts : [];
+      state.allAlerts = backendAlerts.length ? backendAlerts : alertsFromEvents(state.allEvents);
       renderEvents(applyEventFilters(state.allEvents));
       renderAlerts(applyAlertFilters(state.allAlerts));
       renderIncidents(incidents.incidents || []);
@@ -1314,7 +1352,7 @@
         api(`/api/v1/model/device/${encodeURIComponent(deviceId)}/registry?limit=20`),
         api(`/api/v1/model/device/${encodeURIComponent(deviceId)}/jobs?limit=20`)
       ]);
-      els.remoteModel.textContent = JSON.stringify(modelPayload, null, 2);
+      els.remoteModel.textContent = summarizeRemoteModelPayload(modelPayload);
       els.remoteRegistry.textContent = JSON.stringify(registryPayload, null, 2);
       els.remoteJobs.textContent = JSON.stringify(jobsPayload, null, 2);
     }
@@ -1474,6 +1512,9 @@
     els.removeSelectedDevicesBtn.addEventListener("click", () => removeSelectedDevices().catch(showGlobalError));
 
     initializeCollapsiblePanels();
+    if (els.remoteModelFamily) {
+      els.remoteModelFamily.value = "hybrid_dual_channel";
+    }
     refreshAll().catch(showGlobalError);
     window.setInterval(() => {
       refreshAll().catch(() => {});

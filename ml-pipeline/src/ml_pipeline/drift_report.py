@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .io_utils import read_csv_resilient
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate concept-drift report from scored windows")
@@ -62,7 +64,7 @@ def main() -> None:
     input_path = Path(args.input)
     output_path = Path(args.output)
 
-    df = pd.read_csv(input_path)
+    df = read_csv_resilient(input_path)
     _require_column(df, args.app_column)
     _require_column(df, args.score_column)
     time_column = _resolve_time_column(df, args.time_column)

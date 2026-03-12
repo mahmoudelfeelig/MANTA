@@ -9,8 +9,10 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, f1_score, precision_score, recall_score, roc_auc_score
 
+from .cache_utils import load_feature_windows_cached
 from .evaluate import normalize_scores
 from .features import build_feature_windows, feature_matrix
+from .io_utils import read_csv_resilient
 from .ids_baseline import score_ids_baseline
 
 
@@ -40,8 +42,11 @@ def main() -> None:
     args = parse_args()
     model = joblib.load(Path(args.artifacts) / "baseline_model.joblib")
 
-    df = pd.read_csv(args.input)
-    windows = build_feature_windows(df)
+    windows = load_feature_windows_cached(
+        args.input,
+        build_windows_fn=build_feature_windows,
+        read_frame_fn=read_csv_resilient,
+    )
     X = feature_matrix(windows)
 
     ml_scores = normalize_scores(-model.decision_function(X))

@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
                 val hasMoreAlerts by viewModel.hasMoreAlerts.collectAsState()
                 val isLoadingMoreAlerts by viewModel.isLoadingMoreAlerts.collectAsState()
                 val statusMessage by viewModel.statusMessage.collectAsState()
+                val runtimeHealth by viewModel.runtimeHealth.collectAsState()
                 val deviceIdPseudo = viewModel.deviceIdPseudo()
 
                 MainScreen(
@@ -58,6 +59,7 @@ class MainActivity : ComponentActivity() {
                     hasMoreAlerts = hasMoreAlerts,
                     isLoadingMoreAlerts = isLoadingMoreAlerts,
                     statusMessage = statusMessage,
+                    runtimeHealth = runtimeHealth,
                     onSaveBackendUrl = viewModel::setBackendUrl,
                     onSaveApiToken = viewModel::setApiToken,
                     onToggleExport = viewModel::setExportEnabled,
@@ -70,12 +72,14 @@ class MainActivity : ComponentActivity() {
                     onSetShadowModel = viewModel::setShadowModel,
                     onSetThemeMode = viewModel::setThemeMode,
                     onSetDebugModeEnabled = viewModel::setDebugModeEnabled,
+                    onSetTestModeEnabled = viewModel::setTestModeEnabled,
                     onSetPrivacyMode = viewModel::setPrivacyMode,
                     onSetCustomPrivacyOptions = viewModel::setCustomPrivacyOptions,
                     onSyncPolicy = viewModel::syncPolicy,
                     onPingBackend = viewModel::pingBackend,
                     onAcceptConsent = viewModel::acceptConsent,
                     onExportDataset = viewModel::exportDatasetSnapshot,
+                    onExportAlerts = viewModel::exportAlertsJson,
                     onExportForensics = viewModel::exportForensicsBundle,
                     onCaptureEvidence = ::captureEvidenceSnapshot,
                     onFlushExportQueue = viewModel::flushExportQueueNow,
@@ -152,6 +156,7 @@ class MainActivity : ComponentActivity() {
                     .put("export_enabled", config.exportEnabled)
                     .put("privacy_mode", config.privacyMode.name.lowercase())
                     .put("debug_mode_enabled", config.debugModeEnabled)
+                    .put("test_mode_enabled", config.testModeEnabled)
                     .put("detection_model", config.detectionModel)
                     .put("shadow_model", config.shadowModel)
                     .put("threshold_low", config.lowThreshold)

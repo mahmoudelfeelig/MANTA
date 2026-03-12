@@ -8,5 +8,15 @@ data class PacketMetadata(
     val dstIp: String,
     val dstPort: Int,
     val bytes: Int,
-    val outbound: Boolean
+    val outbound: Boolean,
+    val hostHint: String? = null,
+    val payloadBytes: Int = 0,
+    val hopLimit: Int? = null,
+    val fragmented: Boolean = false,
+    val synFlag: Boolean = false,
+    val rstFlag: Boolean = false,
+    val ackFlag: Boolean = false,
+    val finFlag: Boolean = false,
+    val pshFlag: Boolean = false,
+    val tcpWindowSize: Int? = null
 )

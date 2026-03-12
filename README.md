@@ -46,7 +46,7 @@ pytest -q -s tests
 ### Android app
 - Open `android-app/` in Android Studio.
 - Configure the backend URL and token in the app.
-- Choose the privacy tier you want for local-only, pseudonymous, semantic-private, strict, research, or custom export behavior.
+- Choose the privacy tier you want for local-only, off, low, medium, strict, or custom export behavior.
 - Accept consent, start capture, and validate alerts, export, and policy sync.
 
 ## Project Direction

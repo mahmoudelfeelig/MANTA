@@ -20,7 +20,22 @@ data class RawFlowEntity(
     val packetsIn: Int,
     val durationMillis: Long,
     val destinationHash: String,
-    val destinationNovelty: Double
+    val destinationNovelty: Double,
+    val siteHint: String? = null,
+    val ttlGap: Double = 0.0,
+    val ttlMetricsPresent: Double = 0.0,
+    val synRateTotal: Double = 0.0,
+    val rstRateTotal: Double = 0.0,
+    val ackRateTotal: Double = 0.0,
+    val finRateTotal: Double = 0.0,
+    val pshRateTotal: Double = 0.0,
+    val fragmentRateTotal: Double = 0.0,
+    val tcpWindowMean: Double = 0.0,
+    val ackDelayMean: Double = 0.0,
+    val interPacketGapMean: Double = 0.0,
+    val payloadMean: Double = 0.0,
+    val loadMean: Double = 0.0,
+    val transportMetricsPresent: Double = 0.0
 )
 
 @Entity(tableName = "feature_windows")
@@ -54,6 +69,20 @@ data class FeatureWindowEntity(
     val dayOfWeek: Int = 1,
     val isWeekend: Boolean = false,
     val dataQualityScore: Double = 1.0,
+    val ttlGap: Double = 0.0,
+    val ttlMetricsPresent: Double = 0.0,
+    val synRateTotal: Double = 0.0,
+    val rstRateTotal: Double = 0.0,
+    val ackRateTotal: Double = 0.0,
+    val finRateTotal: Double = 0.0,
+    val pshRateTotal: Double = 0.0,
+    val fragmentRateTotal: Double = 0.0,
+    val tcpWindowMean: Double = 0.0,
+    val ackDelayMean: Double = 0.0,
+    val interPacketGapMean: Double = 0.0,
+    val payloadMean: Double = 0.0,
+    val loadMean: Double = 0.0,
+    val transportMetricsPresent: Double = 0.0,
     val sampledByGuardrail: Boolean = false,
     val processingCostMillis: Double = 0.0
 )

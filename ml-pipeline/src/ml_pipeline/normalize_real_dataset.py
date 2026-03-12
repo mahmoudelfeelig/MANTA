@@ -8,6 +8,15 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .dataset_metadata import (
+    add_flow_metadata,
+    infer_dataset_source,
+    infer_dataset_variant,
+    infer_environment_id,
+    infer_session_id,
+)
+from .io_utils import read_csv_resilient
+
 
 DEFAULT_ALIASES = {
     "timestamp_end": [
@@ -110,6 +119,11 @@ DEFAULT_ALIASES = {
 
 PROFILE_ALIASES = {
     "generic_flow": DEFAULT_ALIASES,
+    "parrot": DEFAULT_ALIASES,
+    "android_spyware": DEFAULT_ALIASES,
+    "android_mischief": DEFAULT_ALIASES,
+    "itc_net_blend": DEFAULT_ALIASES,
+    "android_apt_behavior": DEFAULT_ALIASES,
     "cicflowmeter": {
         **DEFAULT_ALIASES,
         "timestamp_end": DEFAULT_ALIASES["timestamp_end"] + ["timestamp_start"],
@@ -215,9 +229,9 @@ def canonicalize_columns(frame: pd.DataFrame) -> pd.DataFrame:
 def read_frame(path: Path) -> pd.DataFrame:
     suffix = path.suffix.lower()
     if suffix == ".csv":
-        return pd.read_csv(path)
+        return read_csv_resilient(path)
     if suffix in {".tsv", ".txt"}:
-        return pd.read_csv(path, sep="\t")
+        return read_csv_resilient(path, sep="\t")
     if suffix == ".parquet":
         return pd.read_parquet(path)
     raise ValueError(f"Unsupported input format: {path.suffix}")
@@ -513,6 +527,14 @@ def main() -> None:
         }
     ).dropna(subset=["timestamp_end"])
 
+    canonical = add_flow_metadata(
+        canonical,
+        dataset_source=infer_dataset_source(args.profile, input_path),
+        dataset_profile=args.profile,
+        dataset_variant=infer_dataset_variant(input_path),
+        environment_id=infer_environment_id(input_path, profile=args.profile),
+        session_id=infer_session_id(input_path, profile=args.profile),
+    )
     canonical = canonical.sort_values("timestamp_end", kind="mergesort").reset_index(drop=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)

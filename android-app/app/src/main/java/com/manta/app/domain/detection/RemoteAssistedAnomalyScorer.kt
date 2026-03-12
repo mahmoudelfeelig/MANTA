@@ -43,8 +43,8 @@ class RemoteAssistedAnomalyScorer(
         val customPrivacy = config.customPrivacy
         val exportedAppId = when (config.privacyMode) {
             PrivacyMode.OFF -> window.appId
-            PrivacyMode.STRICT, PrivacyMode.BALANCED -> CryptoUtils.sha256("$deviceSalt:${window.appId}")
-            PrivacyMode.RESEARCH -> window.appId
+            PrivacyMode.LOW -> window.appId
+            PrivacyMode.MEDIUM, PrivacyMode.STRICT -> CryptoUtils.sha256("$deviceSalt:${window.appId}")
             PrivacyMode.CUSTOM -> if (customPrivacy.includeAppId) window.appId else CryptoUtils.sha256("$deviceSalt:${window.appId}")
         }
 
@@ -54,8 +54,8 @@ class RemoteAssistedAnomalyScorer(
             .put(
                 "site_hint",
                 when (config.privacyMode) {
-                    PrivacyMode.OFF, PrivacyMode.RESEARCH -> window.siteHint
-                    PrivacyMode.STRICT, PrivacyMode.BALANCED -> null
+                    PrivacyMode.OFF, PrivacyMode.LOW -> window.siteHint
+                    PrivacyMode.MEDIUM, PrivacyMode.STRICT -> null
                     PrivacyMode.CUSTOM -> window.siteHint.takeIf { customPrivacy.includeSiteHint }
                 }
             )
@@ -86,6 +86,20 @@ class RemoteAssistedAnomalyScorer(
                     .put("hour_of_day", window.hourOfDay)
                     .put("is_weekend", window.isWeekend)
                     .put("data_quality_score", window.dataQualityScore)
+                    .put("ttl_gap", window.ttlGap)
+                    .put("ttl_metrics_present", window.ttlMetricsPresent)
+                    .put("syn_rate_total", window.synRateTotal)
+                    .put("rst_rate_total", window.rstRateTotal)
+                    .put("ack_rate_total", window.ackRateTotal)
+                    .put("fin_rate_total", window.finRateTotal)
+                    .put("psh_rate_total", window.pshRateTotal)
+                    .put("fragment_rate_total", window.fragmentRateTotal)
+                    .put("tcp_window_mean", window.tcpWindowMean)
+                    .put("ack_delay_mean", window.ackDelayMean)
+                    .put("inter_packet_gap_mean", window.interPacketGapMean)
+                    .put("payload_mean", window.payloadMean)
+                    .put("load_mean", window.loadMean)
+                    .put("transport_metrics_present", window.transportMetricsPresent)
             )
             .toString()
 

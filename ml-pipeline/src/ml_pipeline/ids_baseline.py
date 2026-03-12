@@ -8,7 +8,9 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, f1_score, precision_score, recall_score, roc_auc_score
 
+from .cache_utils import load_feature_windows_cached
 from .features import build_feature_windows
+from .io_utils import read_csv_resilient
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,8 +59,11 @@ def _classification_metrics(y_true: np.ndarray, y_pred: np.ndarray, scores: np.n
 
 def main() -> None:
     args = parse_args()
-    df = pd.read_csv(args.input)
-    windows = build_feature_windows(df)
+    windows = load_feature_windows_cached(
+        args.input,
+        build_windows_fn=build_feature_windows,
+        read_frame_fn=read_csv_resilient,
+    )
     scores = score_ids_baseline(windows)
     predictions = (scores >= args.threshold).astype(int)
 

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.manta.app.core.model.AnomalyAlert
+import com.manta.app.core.model.RuntimeHealth
 import com.manta.app.core.model.TriageStatus
 import com.manta.app.core.model.ThresholdProfile
 import com.manta.app.core.settings.AppProfile
@@ -33,10 +34,13 @@ class MainViewModel(
     val isLoadingMoreAlerts: StateFlow<Boolean> = _isLoadingMoreAlerts
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage
+    private val _runtimeHealth = MutableStateFlow(container.runtimeHealth())
+    val runtimeHealth: StateFlow<RuntimeHealth> = _runtimeHealth
     init {
         viewModelScope.launch {
             while (true) {
                 refreshAlerts(isLoadMore = false)
+                _runtimeHealth.value = container.runtimeHealth()
                 delay(5_000)
             }
         }
@@ -108,10 +112,21 @@ class MainViewModel(
 
     fun setDebugModeEnabled(enabled: Boolean) {
         container.settingsStore.setDebugModeEnabled(enabled)
+        _runtimeHealth.value = container.runtimeHealth()
         _statusMessage.value = if (enabled) {
             "Debug mode enabled. Extra local diagnostics are now visible."
         } else {
             "Debug mode disabled."
+        }
+    }
+
+    fun setTestModeEnabled(enabled: Boolean) {
+        container.settingsStore.setTestModeEnabled(enabled)
+        _runtimeHealth.value = container.runtimeHealth()
+        _statusMessage.value = if (enabled) {
+            "Test mode enabled. Browser-risk validation uses lower alert thresholds."
+        } else {
+            "Test mode disabled."
         }
     }
 
@@ -196,12 +211,19 @@ class MainViewModel(
 
     fun flushExportQueueNow() {
         viewModelScope.launch {
+            val backfilled = container.repository.backfillRecentExports()
             val sent = container.repository.processExportQueue(container.eventClient)
             val connectivity = runCatching { refreshBackendConnection(showStatus = false) }.getOrNull()
             val suffix = connectivity?.getOrNull()?.let { " $it" }
                 ?: connectivity?.exceptionOrNull()?.message?.let { " Backend check failed: $it" }
                 ?: ""
-            _statusMessage.value = "Manual export flush processed $sent event(s).$suffix"
+            _statusMessage.value = buildString {
+                append("Manual export flush processed $sent event(s).")
+                if (backfilled > 0) {
+                    append(" Backfilled $backfilled recent local item(s).")
+                }
+                append(suffix)
+            }
         }
     }
 
@@ -286,6 +308,16 @@ class MainViewModel(
             _statusMessage.value = result.fold(
                 onSuccess = { path -> "Dataset snapshot exported: $path" },
                 onFailure = { error -> "Export failed: ${error.message}" }
+            )
+        }
+    }
+
+    fun exportAlertsJson(maxRows: Int = 25_000) {
+        viewModelScope.launch {
+            val result = container.repository.exportLatestAlertsJson(maxRows = maxRows)
+            _statusMessage.value = result.fold(
+                onSuccess = { path -> "Alerts export written: $path" },
+                onFailure = { error -> "Alerts export failed: ${error.message}" }
             )
         }
     }

@@ -23,8 +23,8 @@ object IpfixMapper {
     ): String {
         val exportedAppId = when (privacyMode) {
             PrivacyMode.OFF -> flow.appId
-            PrivacyMode.STRICT, PrivacyMode.BALANCED -> CryptoUtils.sha256("$deviceSalt:${flow.appId}")
-            PrivacyMode.RESEARCH -> flow.appId
+            PrivacyMode.LOW -> flow.appId
+            PrivacyMode.MEDIUM, PrivacyMode.STRICT -> CryptoUtils.sha256("$deviceSalt:${flow.appId}")
             PrivacyMode.CUSTOM ->
                 if (customPrivacy.includeAppId) flow.appId else CryptoUtils.sha256("$deviceSalt:${flow.appId}")
         }
@@ -82,7 +82,7 @@ object IpfixMapper {
             json.put("anomaly_score", anomalyScore)
         }
         if (explainTopFeatures.isNotEmpty()) {
-            json.put("explain_top_features", explainTopFeatures)
+            json.put("explain_top_features", JSONArray(explainTopFeatures))
         }
         return json.toString()
     }
@@ -100,8 +100,8 @@ object IpfixMapper {
         customPrivacy: CustomPrivacyOptions
     ): String? {
         return when (privacyMode) {
-            PrivacyMode.OFF, PrivacyMode.RESEARCH -> siteHint
-            PrivacyMode.STRICT, PrivacyMode.BALANCED -> null
+            PrivacyMode.OFF, PrivacyMode.LOW -> siteHint
+            PrivacyMode.MEDIUM, PrivacyMode.STRICT -> null
             PrivacyMode.CUSTOM -> siteHint.takeIf { customPrivacy.includeSiteHint }
         }
     }

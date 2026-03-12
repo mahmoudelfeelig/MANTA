@@ -93,3 +93,39 @@ def test_train_hybrid_remote_model_returns_component_reports() -> None:
     assert "components" in report
     assert report["components"]["anomaly_model"]["model_family"] == "mahalanobis_covariance"
     assert report["components"]["context_model"]["model_family"] == "logistic_regression"
+    assert report["components"]["tree_model"]["model_family"] == "gradient_boosted_tree"
+
+
+def test_train_gradient_boosted_tree_remote_model_scores() -> None:
+    samples = []
+    for index in range(40):
+        benign = index < 20
+        samples.append(
+            {
+                "window_features": _window(
+                    flow_count=5 if benign else 24,
+                    novelty=0.06 if benign else 0.91,
+                    beacon=0.08 if benign else 0.86,
+                    diversity=0.14 if benign else 0.79,
+                    byte_rate=160.0 if benign else 2400.0,
+                    site_hint="example.com" if benign else "login-badssl.com",
+                ),
+                "site_hint": "example.com" if benign else "login-badssl.com",
+                "label": 0 if benign else 1,
+                "dataset_source": "sdncampus_flow_statistics" if benign else "android_spyware_mendeley",
+                "environment_id": "lab_wifi",
+                "session_id": f"session_{index // 5}",
+                "app_family": "browser" if benign else "malware",
+                "window_bucket": index,
+            }
+        )
+
+    model, report = train_remote_model(samples=samples, model_type="gradient_boosted_tree")
+    scored = score_remote_model(
+        model=model,
+        feature_window=_window(flow_count=26, novelty=0.92, beacon=0.88, diversity=0.82, byte_rate=2600.0),
+        site_hint="login-badssl.com",
+    )
+    assert model["model_family"] == "gradient_boosted_tree"
+    assert report["model_family"] == "gradient_boosted_tree"
+    assert scored["score"] > 0.0

@@ -17,6 +17,7 @@ class TfliteAnomalyScorer(
 ) : AnomalyScorer {
 
     private val featureNames = FeatureWindow.portableFeatureOrder
+    private val interpreterThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
 
     private val interpreter: Interpreter? by lazy {
         runCatching {
@@ -28,7 +29,9 @@ class TfliteAnomalyScorer(
                     afd.startOffset,
                     afd.declaredLength
                 )
-                Interpreter(model, Interpreter.Options().setNumThreads(2))
+                Interpreter(model, Interpreter.Options().setNumThreads(interpreterThreads)).apply {
+                    allocateTensors()
+                }
             }
         }.getOrNull()
     }
@@ -55,7 +58,23 @@ class TfliteAnomalyScorer(
         inputBuffer.rewind()
 
         val output = Array(1) { FloatArray(1) }
-        interpreter.run(inputBuffer, output)
+        val succeeded = runCatching {
+            interpreter.run(inputBuffer, output)
+        }.isSuccess
+        if (!succeeded) {
+            return AnomalyScoreResult(
+                score = 0.0,
+                topFeatures = listOf("tflite_failed"),
+                featureContributions = contributions,
+                source = "tflite-unavailable",
+                confidence = 0.0,
+                uncertainty = 1.0,
+                diagnostics = mapOf(
+                    "inference_threads" to interpreterThreads.toDouble(),
+                    "raw_output" to 0.0
+                )
+            )
+        }
 
         val topFeatures = contributions.entries
             .sortedByDescending { it.value }
@@ -72,7 +91,8 @@ class TfliteAnomalyScorer(
             confidence = confidence,
             uncertainty = (1.0 - confidence).coerceIn(0.0, 1.0),
             diagnostics = mapOf(
-                "raw_output" to output[0][0].toDouble()
+                "raw_output" to output[0][0].toDouble(),
+                "inference_threads" to interpreterThreads.toDouble()
             )
         )
     }
