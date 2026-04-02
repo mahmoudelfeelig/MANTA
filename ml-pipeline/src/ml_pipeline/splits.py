@@ -29,7 +29,9 @@ def add_split_metadata(frame: pd.DataFrame) -> pd.DataFrame:
         enriched["session_id"] = enriched["dataset_variant"].astype(str)
     if "app_family" not in enriched.columns:
         enriched["app_family"] = enriched["app_id"].astype(str).map(derive_app_family) if "app_id" in enriched.columns else "other_app"
-    if "window_bucket" in enriched.columns:
+    if "time_fold" in enriched.columns:
+        enriched["time_fold"] = enriched["time_fold"].astype(str).fillna("0")
+    elif "window_bucket" in enriched.columns:
         enriched["time_fold"] = (pd.to_numeric(enriched["window_bucket"], errors="coerce").fillna(0).astype("int64") // 240).astype(str)
     elif "timestamp_end" in enriched.columns:
         enriched["time_fold"] = (pd.to_numeric(enriched["timestamp_end"], errors="coerce").fillna(0).astype("int64") // (4 * 60 * 60 * 1000)).astype(str)

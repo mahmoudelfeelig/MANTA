@@ -94,7 +94,7 @@ def _has_labels(path: str) -> bool:
 def _prepare_env(cache_dir: Path, fast_config: FastModeConfig) -> dict[str, str]:
     env = os.environ.copy()
     env["MANTA_CACHE_DIR"] = str(cache_dir)
-    env.setdefault("MANTA_PROGRESS_HEARTBEAT_SECONDS", "20")
+    env.setdefault("MANTA_PROGRESS_HEARTBEAT_SECONDS", "300")
     if fast_config.enabled:
         env["MANTA_FAST_MODE"] = "1"
         env["MANTA_MAX_TOTAL_WINDOWS"] = str(fast_config.max_total_windows)
@@ -245,6 +245,15 @@ def main() -> None:
         "--output",
         str(reports_dir / "privacy-leakage.json"),
     ]
+    traffic_fingerprint_cmd = [
+        sys.executable,
+        "-m",
+        "ml_pipeline.traffic_fingerprint_benchmark",
+        "--input",
+        args.input,
+        "--output",
+        str(reports_dir / "traffic-fingerprint.json"),
+    ]
     pareto_cmd = [
         sys.executable,
         "-m",
@@ -266,6 +275,8 @@ def main() -> None:
         str(reports_dir / "privacy-ablation.json"),
         "--leakage-report",
         str(reports_dir / "privacy-leakage.json"),
+        "--traffic-fingerprint-report",
+        str(reports_dir / "traffic-fingerprint.json"),
         "--output",
         str(reports_dir / "privacy-gate.json"),
     ]
@@ -404,6 +415,8 @@ def main() -> None:
         str(reports_dir / "performance-gates.json"),
         "--dataset-manifest",
         str(reports_dir / "dataset-manifest.json"),
+        "--traffic-fingerprint-report",
+        str(reports_dir / "traffic-fingerprint.json"),
         "--output",
         str(reports_dir / "full-model-matrix.json"),
     ]
@@ -416,6 +429,7 @@ def main() -> None:
         "privacy-view derivation": [reports_dir / "privacy-views" / "manifest.json"],
         "privacy ablation": [reports_dir / "privacy-ablation.json"],
         "privacy leakage": [reports_dir / "privacy-leakage.json"],
+        "traffic fingerprint": [reports_dir / "traffic-fingerprint.json"],
         "privacy Pareto summary": [reports_dir / "privacy-pareto.json", reports_dir / "privacy-pareto.csv"],
         "privacy gate report": [reports_dir / "privacy-gate.json"],
         "drift report": [reports_dir / "drift-report.json"],
@@ -454,13 +468,14 @@ def main() -> None:
     if not (args.resume and _all_exist(step_outputs["baseline comparison"])):
         _run(compare_cmd, env=subprocess_env)
 
-    progress.update(40, "Privacy view + utility/leakage group")
+    progress.update(40, "Privacy view + attack-audit group")
     privacy_group = [
         (label, command)
         for label, command in [
             ("privacy-view derivation", derive_privacy_cmd),
             ("privacy ablation", privacy_cmd),
             ("privacy leakage", leakage_cmd),
+            ("traffic fingerprint", traffic_fingerprint_cmd),
         ]
         if not (args.resume and _all_exist(step_outputs[label]))
     ]

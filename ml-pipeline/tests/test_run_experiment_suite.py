@@ -60,6 +60,7 @@ def test_run_experiment_suite_creates_reports(tmp_path: Path) -> None:
     dataset_manifest = output_dir / "reports" / "dataset-manifest.json"
     evaluation_protocol = output_dir / "reports" / "evaluation-protocol.json"
     privacy_gate = output_dir / "reports" / "privacy-gate.json"
+    traffic_fingerprint = output_dir / "reports" / "traffic-fingerprint.json"
     manifest = output_dir / "reports" / "manifest.json"
 
     assert eval_report.exists()
@@ -83,6 +84,7 @@ def test_run_experiment_suite_creates_reports(tmp_path: Path) -> None:
     assert dataset_manifest.exists()
     assert evaluation_protocol.exists()
     assert privacy_gate.exists()
+    assert traffic_fingerprint.exists()
     assert manifest.exists()
 
     parsed = json.loads(eval_report.read_text(encoding="utf-8"))

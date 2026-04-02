@@ -13,8 +13,8 @@ class PhaseProgress:
         self._last_message = "starting"
         self._start = time.monotonic()
         self._done = threading.Event()
-        heartbeat_seconds = int(os.getenv("MANTA_PROGRESS_HEARTBEAT_SECONDS", "30") or 30)
-        self._heartbeat_seconds = max(10, heartbeat_seconds)
+        heartbeat_seconds = int(os.getenv("MANTA_PROGRESS_HEARTBEAT_SECONDS", "300") or 300)
+        self._heartbeat_seconds = max(300, heartbeat_seconds)
         self._thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
         self._thread.start()
 

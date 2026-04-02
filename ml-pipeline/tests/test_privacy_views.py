@@ -39,3 +39,18 @@ def test_window_privacy_views_preserve_dataset_metadata() -> None:
         assert "session_id" in view.columns
         assert "app_family" in view.columns
         assert set(view["dataset_source"]) == {"sdncampus_flow_statistics"}
+
+    medium = views["medium"]
+    strict = views["strict"]
+    for sensitive in [
+        "novelty_score",
+        "destination_diversity",
+        "periodic_beacon_score",
+        "high_port_ratio",
+        "destination_concentration",
+        "destination_transition_entropy",
+    ]:
+        assert sensitive not in medium.columns
+        assert sensitive not in strict.columns
+    assert "activity_dp_bucket" in medium.columns
+    assert "stability_dp_bucket" in strict.columns

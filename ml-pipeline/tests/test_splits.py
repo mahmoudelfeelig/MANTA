@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ml_pipeline.splits import source_aware_train_test_split
+from ml_pipeline.splits import add_split_metadata, source_aware_train_test_split
 
 
 def test_source_aware_split_falls_back_when_metadata_groups_collapse() -> None:
@@ -33,3 +33,23 @@ def test_source_aware_split_falls_back_when_metadata_groups_collapse() -> None:
         "stratified_random_fallback",
         "random_fallback",
     }
+
+
+def test_add_split_metadata_preserves_existing_time_fold() -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "app_id": "com.browser.alpha",
+                "label": 0,
+                "dataset_source": "sdncampus_flow_statistics",
+                "environment_id": "campus_wifi",
+                "session_id": "session-1",
+                "app_family": "browser",
+                "time_fold": "custom-fold",
+            }
+        ]
+    )
+
+    enriched = add_split_metadata(frame)
+
+    assert enriched.loc[0, "time_fold"] == "custom-fold"

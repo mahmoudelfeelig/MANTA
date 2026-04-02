@@ -13,51 +13,50 @@ PRIVACY_FEATURE_SETS: dict[str, list[str]] = {
     "off": list(FEATURE_COLUMNS),
     "low": list(FEATURE_COLUMNS),
     "medium": [
-        "activity_level_bucket",
-        "volume_level_bucket",
-        "balance_bucket",
-        "burst_bucket",
-        "change_bucket",
-        "beacon_bucket",
-        "duration_bucket",
-        "byte_rate_bucket",
-        "packet_rate_bucket",
-        "packet_imbalance_bucket",
-        "small_flow_bucket",
-        "hour_period",
+        "activity_dp_bucket",
+        "volume_dp_bucket",
+        "duration_dp_bucket",
+        "rate_dp_bucket",
+        "burst_dp_bucket",
+        "balance_super_bucket",
+        "small_flow_super_bucket",
+        "packet_imbalance_super_bucket",
+        "temporal_regime",
         "is_weekend",
+        "stability_dp_bucket",
+        "shape_profile_bucket",
     ],
     "strict": [
-        "activity_level_bucket",
-        "balance_bucket",
-        "burst_bucket",
-        "beacon_bucket",
-        "duration_bucket",
-        "small_flow_bucket",
-        "hour_period",
+        "activity_dp_bucket",
+        "volume_dp_bucket",
+        "duration_dp_bucket",
+        "balance_super_bucket",
+        "small_flow_super_bucket",
+        "packet_imbalance_super_bucket",
+        "temporal_regime",
+        "stability_dp_bucket",
         "is_weekend",
     ],
 }
 
 PRIVACY_FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
     "volume_shape": (
-        "activity_level_bucket",
-        "volume_level_bucket",
-        "duration_bucket",
-        "byte_rate_bucket",
-        "packet_rate_bucket",
+        "activity_dp_bucket",
+        "volume_dp_bucket",
+        "duration_dp_bucket",
+        "rate_dp_bucket",
+        "burst_dp_bucket",
     ),
-    "timing_pattern": (
-        "burst_bucket",
-        "change_bucket",
-        "beacon_bucket",
-        "hour_period",
+    "temporal_context": (
+        "temporal_regime",
         "is_weekend",
+        "stability_dp_bucket",
     ),
     "traffic_balance": (
-        "balance_bucket",
-        "packet_imbalance_bucket",
-        "small_flow_bucket",
+        "balance_super_bucket",
+        "packet_imbalance_super_bucket",
+        "small_flow_super_bucket",
+        "shape_profile_bucket",
     ),
 }
 
@@ -106,8 +105,42 @@ def _coarse_quantize(series: pd.Series, buckets: int, *, log_scale: bool = False
     return pd.Series(normalized, index=series.index, dtype=float)
 
 
+def _group_distribution_quantize(
+    series: pd.Series,
+    groups: pd.Series,
+    buckets: int,
+    *,
+    log_scale: bool = False,
+) -> pd.Series:
+    values = pd.to_numeric(series, errors="coerce").fillna(0.0).astype(float)
+    if log_scale:
+        values = np.log1p(values.clip(lower=0.0))
+    normalized_groups = groups.astype(str).fillna("global").replace({"": "global", "nan": "global", "None": "global"})
+    result = pd.Series(np.zeros(len(values), dtype=float), index=series.index)
+    for group_name, group_index in normalized_groups.groupby(normalized_groups, sort=False).groups.items():
+        group_values = values.loc[group_index]
+        if group_values.nunique(dropna=False) <= 1:
+            result.loc[group_index] = 0.0
+            continue
+        ranks = group_values.rank(method="average", pct=True).fillna(0.0).to_numpy(dtype=float)
+        bucket_ids = np.floor(np.clip(ranks, 0.0, 0.999999) * buckets).astype(int)
+        if buckets <= 1:
+            normalized = np.zeros(len(bucket_ids), dtype=float)
+        else:
+            normalized = bucket_ids / float(buckets - 1)
+        result.loc[group_index] = normalized
+    return result.astype(float)
+
+
+def _super_bucket(series: pd.Series, steps: int) -> pd.Series:
+    values = pd.to_numeric(series, errors="coerce").fillna(0.0).clip(lower=0.0, upper=1.0)
+    scaled = np.round(values.to_numpy(dtype=float) * float(steps)) / float(max(1, steps))
+    return pd.Series(np.clip(scaled, 0.0, 1.0), index=series.index, dtype=float)
+
+
 def _derive_privacy_window_columns(windows: pd.DataFrame) -> pd.DataFrame:
     derived = windows.copy()
+    source_groups = derived["dataset_source"] if "dataset_source" in derived.columns else pd.Series(["global"] * len(derived), index=derived.index)
     bucket_seconds = pd.to_numeric(derived["window_bucket"], errors="coerce").fillna(0).astype("int64") * 60
     timestamps = pd.to_datetime(bucket_seconds, unit="s", utc=True)
     hours = timestamps.dt.hour.fillna(0).astype(int)
@@ -125,6 +158,18 @@ def _derive_privacy_window_columns(windows: pd.DataFrame) -> pd.DataFrame:
         dtype=float,
     )
     derived["is_weekend"] = timestamps.dt.dayofweek.isin([5, 6]).astype(float)
+    derived["temporal_regime"] = pd.Series(
+        np.select(
+            [
+                (hours >= 0) & (hours < 7),
+                (hours >= 7) & (hours < 19),
+            ],
+            [0.0, 0.5],
+            default=1.0,
+        ),
+        index=derived.index,
+        dtype=float,
+    )
     derived["activity_level_bucket"] = _coarse_quantize(derived["flow_count"], 5)
     derived["volume_level_bucket"] = _coarse_quantize(
         derived["total_bytes_out"] + derived["total_bytes_in"],
@@ -143,6 +188,33 @@ def _derive_privacy_window_columns(windows: pd.DataFrame) -> pd.DataFrame:
     derived["packet_imbalance_bucket"] = np.round(pd.to_numeric(derived["packet_imbalance"], errors="coerce").fillna(0.0) * 4.0) / 4.0
     derived["small_flow_bucket"] = np.round(pd.to_numeric(derived["small_flow_ratio"], errors="coerce").fillna(0.0) * 4.0) / 4.0
     derived["high_port_bucket"] = np.round(pd.to_numeric(derived["high_port_ratio"], errors="coerce").fillna(0.0) * 4.0) / 4.0
+    derived["activity_dp_bucket"] = _group_distribution_quantize(derived["flow_count"], source_groups, 4, log_scale=True)
+    derived["volume_dp_bucket"] = _group_distribution_quantize(
+        derived["total_bytes_out"] + derived["total_bytes_in"],
+        source_groups,
+        4,
+        log_scale=True,
+    )
+    derived["duration_dp_bucket"] = _group_distribution_quantize(derived["mean_duration_ms"], source_groups, 4, log_scale=True)
+    byte_rate_dp = _group_distribution_quantize(derived["byte_rate"], source_groups, 4, log_scale=True)
+    packet_rate_dp = _group_distribution_quantize(derived["packet_rate"], source_groups, 4, log_scale=True)
+    derived["rate_dp_bucket"] = np.round(((byte_rate_dp + packet_rate_dp) * 0.5) * 4.0) / 4.0
+    derived["burst_dp_bucket"] = _group_distribution_quantize(derived["burstiness"], source_groups, 4, log_scale=True)
+    stability_signal = (
+        pd.to_numeric(derived.get("flow_count_deviation", 0.0), errors="coerce").fillna(0.0) +
+        pd.to_numeric(derived.get("byte_rate_deviation", 0.0), errors="coerce").fillna(0.0) +
+        pd.to_numeric(derived.get("duration_jitter", 0.0), errors="coerce").fillna(0.0).clip(lower=0.0).map(np.log1p)
+    ) / 3.0
+    derived["stability_dp_bucket"] = _group_distribution_quantize(stability_signal, source_groups, 4, log_scale=False)
+    derived["balance_super_bucket"] = _super_bucket(derived["outbound_ratio"], 2)
+    derived["small_flow_super_bucket"] = _super_bucket(derived["small_flow_ratio"], 2)
+    derived["packet_imbalance_super_bucket"] = _super_bucket(derived["packet_imbalance"], 2)
+    shape_signal = (
+        pd.to_numeric(derived["small_flow_ratio"], errors="coerce").fillna(0.0) +
+        pd.to_numeric(derived["packet_imbalance"], errors="coerce").fillna(0.0) +
+        pd.to_numeric(derived.get("flow_size_iqr", 0.0), errors="coerce").fillna(0.0).clip(lower=0.0).map(np.log1p)
+    ) / 3.0
+    derived["shape_profile_bucket"] = _group_distribution_quantize(shape_signal, source_groups, 4, log_scale=False)
     return derived
 
 

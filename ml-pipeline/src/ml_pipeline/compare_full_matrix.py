@@ -16,6 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--privacy-gate-report", default="")
     parser.add_argument("--performance-report", default="")
     parser.add_argument("--dataset-manifest", default="")
+    parser.add_argument("--traffic-fingerprint-report", default="")
     parser.add_argument("--output", required=True)
     return parser.parse_args()
 
@@ -60,6 +61,7 @@ def main() -> None:
     privacy_gate = _load(args.privacy_gate_report) if args.privacy_gate_report else {}
     performance = _load(args.performance_report) if args.performance_report else {}
     dataset_manifest = _load(args.dataset_manifest) if args.dataset_manifest else {}
+    traffic_fingerprint = _load(args.traffic_fingerprint_report) if args.traffic_fingerprint_report else {}
 
     remote_metrics = (remote.get("training_report") or {}).get("metrics", {})
     remote_family = remote.get("model_family") or (remote.get("training_report") or {}).get("model_family")
@@ -120,6 +122,8 @@ def main() -> None:
         "federated_view": federated.get("view"),
         "federated_representation": federated.get("representation"),
         "privacy_gate_verdicts": privacy_gate.get("verdicts"),
+        "observer_inference_audit": privacy_gate.get("observer_inference_audit"),
+        "traffic_fingerprint_strongest_task": traffic_fingerprint.get("strongest_task"),
         "dataset_public_only_protocol_ready": dataset_manifest.get("public_only_protocol_ready"),
     }
 

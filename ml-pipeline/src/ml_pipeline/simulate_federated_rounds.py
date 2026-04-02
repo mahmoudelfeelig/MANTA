@@ -54,6 +54,11 @@ def _encode_with_student(features: np.ndarray, student_model: dict[str, object])
         w = np.asarray(layer_weights[0], dtype=float)
         b = np.asarray(layer_weights[1], dtype=float)
         current = _relu(current @ w + b)
+    latent_mean = np.asarray(student_model.get("latent_mean") or [0.0] * current.shape[1], dtype=float)
+    latent_scale = np.asarray(student_model.get("latent_scale") or [1.0] * current.shape[1], dtype=float)
+    if latent_mean.shape[0] == current.shape[1] and latent_scale.shape[0] == current.shape[1]:
+        safe_scale = np.where(np.abs(latent_scale) <= 1e-6, 1.0, latent_scale)
+        current = (current - latent_mean) / safe_scale
     return current
 
 

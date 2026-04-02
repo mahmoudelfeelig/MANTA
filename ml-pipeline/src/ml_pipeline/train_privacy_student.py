@@ -34,13 +34,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dropout-rate", type=float, default=0.30)
     parser.add_argument("--primary-adversary-target", choices=("auto", "app_id", "app_family"), default="app_family")
     parser.add_argument("--adversary-weight", type=float, default=0.45, help="Primary app/app-family adversary weight")
+    parser.add_argument("--app-id-adversary-weight", type=float, default=0.18)
+    parser.add_argument("--app-family-adversary-weight", type=float, default=0.45)
     parser.add_argument("--source-adversary-weight", type=float, default=0.24)
     parser.add_argument("--context-adversary-weight", type=float, default=0.16)
     parser.add_argument("--destination-adversary-weight", type=float, default=0.18)
     parser.add_argument("--teacher-weight", type=float, default=0.45)
+    parser.add_argument("--reconstruction-weight", type=float, default=0.30)
+    parser.add_argument("--pretrain-epochs", type=int, default=8)
     parser.add_argument("--noise-std", type=float, default=0.08)
     parser.add_argument("--l2-regularization", type=float, default=1e-4)
     parser.add_argument("--max-app-adversary-classes", type=int, default=512)
+    parser.add_argument("--max-app-id-adversary-classes", type=int, default=256)
     parser.add_argument("--max-destination-adversary-classes", type=int, default=128)
     parser.add_argument("--destination-buckets", type=int, default=3)
     parser.add_argument("--latent-l1-weight", type=float, default=0.01)
@@ -100,6 +105,18 @@ def _balanced_class_sample_weights(labels: np.ndarray) -> np.ndarray:
     if mean_weight > 0:
         weights = weights / mean_weight
     return weights.astype(np.float32)
+
+
+def _capped_label_series(series: pd.Series, max_classes: int, *, other_label: str = "__other__") -> tuple[pd.Series, int, bool]:
+    values = series.astype(str).fillna(other_label)
+    original_count = int(values.nunique())
+    limit = int(max_classes)
+    if limit <= 0 or original_count <= limit:
+        return values, original_count, False
+    keep_count = max(1, limit - 1)
+    keep = set(values.value_counts().index[:keep_count].tolist())
+    capped = values.where(values.isin(keep), other_label)
+    return capped, original_count, True
 
 
 def _adversary_metrics(labels: np.ndarray, probs: np.ndarray | None, target_name: str, class_count: int) -> dict[str, float | int | str | None]:
@@ -174,15 +191,27 @@ def main() -> None:
     original_app_class_count = int(full["app_id"].astype(str).nunique())
     primary_adversary_target = args.primary_adversary_target
     if primary_adversary_target == "auto":
-        primary_adversary_target = "app_id"
-    primary_series = full["app_id"].astype(str) if primary_adversary_target == "app_id" else full["app_family"].astype(str)
-    if primary_adversary_target == "app_id" and args.max_app_adversary_classes > 0 and int(primary_series.nunique()) > args.max_app_adversary_classes:
         primary_adversary_target = "app_family"
-        primary_series = full["app_family"].astype(str)
-    primary_encoder = LabelEncoder()
-    primary_labels = primary_encoder.fit_transform(primary_series)
-    train_primary_labels = primary_labels[train_idx]
-    test_primary_labels = primary_labels[test_idx]
+    effective_app_id_weight = float(args.app_id_adversary_weight)
+    effective_app_family_weight = float(args.app_family_adversary_weight)
+    if primary_adversary_target == "app_id":
+        effective_app_id_weight = max(effective_app_id_weight, float(args.adversary_weight))
+    elif primary_adversary_target == "app_family":
+        effective_app_family_weight = max(effective_app_family_weight, float(args.adversary_weight))
+
+    app_id_series, original_app_id_class_count, app_id_capped = _capped_label_series(
+        full["app_id"].astype(str),
+        args.max_app_id_adversary_classes if args.max_app_id_adversary_classes > 0 else args.max_app_adversary_classes,
+    )
+    app_family_series = full["app_family"].astype(str)
+    app_id_encoder = LabelEncoder()
+    app_id_labels = app_id_encoder.fit_transform(app_id_series)
+    train_app_id_labels = app_id_labels[train_idx]
+    test_app_id_labels = app_id_labels[test_idx]
+    app_family_encoder = LabelEncoder()
+    app_family_labels = app_family_encoder.fit_transform(app_family_series)
+    train_app_family_labels = app_family_labels[train_idx]
+    test_app_family_labels = app_family_labels[test_idx]
     source_encoder = LabelEncoder()
     source_labels = source_encoder.fit_transform(full["dataset_source"].astype(str))
     train_source_labels = source_labels[train_idx]
@@ -214,7 +243,8 @@ def main() -> None:
         ],
         dtype=np.float32,
     )
-    primary_sample_weights = _balanced_class_sample_weights(train_primary_labels)
+    app_id_sample_weights = _balanced_class_sample_weights(train_app_id_labels)
+    app_family_sample_weights = _balanced_class_sample_weights(train_app_family_labels)
     source_sample_weights = _balanced_class_sample_weights(train_source_labels)
     context_sample_weights = _balanced_class_sample_weights(train_context_labels)
     destination_sample_weights = _balanced_class_sample_weights(train_destination_labels)
@@ -254,13 +284,53 @@ def main() -> None:
 
     regularizer = tf.keras.regularizers.L2(args.l2_regularization)
     inputs = tf.keras.Input(shape=(len(student_features),), name="student_features")
-    x = tf.keras.layers.GaussianNoise(args.noise_std, name="noise")(inputs)
-    x = tf.keras.layers.Dropout(args.dropout_rate * 0.4, name="input_dropout")(x)
-    x = tf.keras.layers.Dense(64, activation="relu", kernel_regularizer=regularizer, name="dense_1")(x)
-    x = tf.keras.layers.Dense(32, activation="relu", kernel_regularizer=regularizer, name="dense_2")(x)
-    x = tf.keras.layers.Dropout(args.dropout_rate, name="dropout")(x)
-    latent_raw = tf.keras.layers.Dense(args.latent_dim, activation="relu", kernel_regularizer=regularizer, name="latent")(x)
-    latent = LatentPenalty(args.latent_l1_weight, args.latent_covariance_weight)(latent_raw)
+    noise_layer = tf.keras.layers.GaussianNoise(args.noise_std, name="noise")
+    input_dropout_layer = tf.keras.layers.Dropout(args.dropout_rate * 0.4, name="input_dropout")
+    dense_1_layer = tf.keras.layers.Dense(64, activation="relu", kernel_regularizer=regularizer, name="dense_1")
+    dense_2_layer = tf.keras.layers.Dense(32, activation="relu", kernel_regularizer=regularizer, name="dense_2")
+    dropout_layer = tf.keras.layers.Dropout(args.dropout_rate, name="dropout")
+    latent_layer = tf.keras.layers.Dense(args.latent_dim, activation="relu", kernel_regularizer=regularizer, name="latent")
+    latent_penalty_layer = LatentPenalty(args.latent_l1_weight, args.latent_covariance_weight)
+    decoder_dense_1_layer = tf.keras.layers.Dense(32, activation="relu", kernel_regularizer=regularizer, name="decoder_dense_1")
+    decoder_dense_2_layer = tf.keras.layers.Dense(64, activation="relu", kernel_regularizer=regularizer, name="decoder_dense_2")
+    reconstruction_layer = tf.keras.layers.Dense(len(student_features), activation="linear", name="reconstruction")
+
+    x = noise_layer(inputs)
+    x = input_dropout_layer(x)
+    x = dense_1_layer(x)
+    x = dense_2_layer(x)
+    x = dropout_layer(x)
+    latent_raw = latent_layer(x)
+    latent = latent_penalty_layer(latent_raw)
+    reconstructed_hidden = decoder_dense_1_layer(latent)
+    reconstructed_hidden = decoder_dense_2_layer(reconstructed_hidden)
+    reconstruction_output = reconstruction_layer(reconstructed_hidden)
+
+    if args.pretrain_epochs > 0 and len(train_x) > 0:
+        progress.update(46, f"Reconstruction pretraining ({args.pretrain_epochs} epochs)")
+        pretrain_model = tf.keras.Model(inputs=inputs, outputs=reconstruction_output)
+        pretrain_model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
+            loss=tf.keras.losses.MeanSquaredError(),
+        )
+        pretrain_callbacks = [
+            tf.keras.callbacks.EarlyStopping(
+                monitor="val_loss",
+                mode="min",
+                patience=3,
+                restore_best_weights=True,
+                min_delta=1e-4,
+            )
+        ]
+        pretrain_model.fit(
+            train_x,
+            train_x,
+            validation_split=0.1,
+            epochs=args.pretrain_epochs,
+            batch_size=args.batch_size,
+            verbose=0,
+            callbacks=pretrain_callbacks,
+        )
 
     detector = tf.keras.layers.Dense(24, activation="relu", kernel_regularizer=regularizer, name="detector_hidden")(latent)
     detector = tf.keras.layers.Dropout(args.dropout_rate * 0.5, name="detector_dropout")(detector)
@@ -270,22 +340,31 @@ def main() -> None:
     outputs: dict[str, tf.Tensor] = {
         "detection": detection_output,
         "teacher_distill": teacher_output,
+        "reconstruction": reconstruction_output,
     }
     losses: dict[str, object] = {
         "detection": tf.keras.losses.BinaryCrossentropy(),
         "teacher_distill": tf.keras.losses.MeanSquaredError(),
+        "reconstruction": tf.keras.losses.MeanSquaredError(),
     }
     loss_weights: dict[str, float] = {
         "detection": 1.0,
         "teacher_distill": float(args.teacher_weight),
+        "reconstruction": float(args.reconstruction_weight),
     }
 
-    if len(primary_encoder.classes_) > 1:
-        reversed_latent = GradientReversal(args.adversary_weight)(latent)
-        adversary = tf.keras.layers.Dense(48, activation="relu", kernel_regularizer=regularizer, name="primary_adversary_hidden")(reversed_latent)
-        outputs["primary_adversary"] = tf.keras.layers.Dense(len(primary_encoder.classes_), activation="softmax", name="primary_adversary")(adversary)
-        losses["primary_adversary"] = tf.keras.losses.SparseCategoricalCrossentropy()
-        loss_weights["primary_adversary"] = float(args.adversary_weight)
+    if effective_app_id_weight > 0.0 and len(app_id_encoder.classes_) > 1:
+        app_id_reversal = GradientReversal(effective_app_id_weight)(latent)
+        app_id_hidden = tf.keras.layers.Dense(48, activation="relu", kernel_regularizer=regularizer, name="app_id_adversary_hidden")(app_id_reversal)
+        outputs["app_id_adversary"] = tf.keras.layers.Dense(len(app_id_encoder.classes_), activation="softmax", name="app_id_adversary")(app_id_hidden)
+        losses["app_id_adversary"] = tf.keras.losses.SparseCategoricalCrossentropy()
+        loss_weights["app_id_adversary"] = float(effective_app_id_weight)
+    if effective_app_family_weight > 0.0 and len(app_family_encoder.classes_) > 1:
+        app_family_reversal = GradientReversal(effective_app_family_weight)(latent)
+        app_family_hidden = tf.keras.layers.Dense(32, activation="relu", kernel_regularizer=regularizer, name="app_family_adversary_hidden")(app_family_reversal)
+        outputs["app_family_adversary"] = tf.keras.layers.Dense(len(app_family_encoder.classes_), activation="softmax", name="app_family_adversary")(app_family_hidden)
+        losses["app_family_adversary"] = tf.keras.losses.SparseCategoricalCrossentropy()
+        loss_weights["app_family_adversary"] = float(effective_app_family_weight)
     if len(source_encoder.classes_) > 1:
         source_reversal = GradientReversal(args.source_adversary_weight)(latent)
         source_head = tf.keras.layers.Dense(32, activation="relu", kernel_regularizer=regularizer, name="source_adversary_hidden")(source_reversal)
@@ -318,15 +397,19 @@ def main() -> None:
     fit_targets: dict[str, np.ndarray] = {
         "detection": y_train.astype(np.float32),
         "teacher_distill": teacher_scores_train.astype(np.float32),
+        "reconstruction": train_x.astype(np.float32),
     }
-    uniform_sample_weights = np.ones(len(train_x), dtype=np.float32)
     fit_sample_weights: dict[str, np.ndarray] = {
         "detection": detection_sample_weights,
         "teacher_distill": detection_sample_weights,
+        "reconstruction": detection_sample_weights,
     }
-    if "primary_adversary" in outputs:
-        fit_targets["primary_adversary"] = train_primary_labels.astype(np.int32)
-        fit_sample_weights["primary_adversary"] = primary_sample_weights
+    if "app_id_adversary" in outputs:
+        fit_targets["app_id_adversary"] = train_app_id_labels.astype(np.int32)
+        fit_sample_weights["app_id_adversary"] = app_id_sample_weights
+    if "app_family_adversary" in outputs:
+        fit_targets["app_family_adversary"] = train_app_family_labels.astype(np.int32)
+        fit_sample_weights["app_family_adversary"] = app_family_sample_weights
     if "dataset_source" in outputs:
         fit_targets["dataset_source"] = train_source_labels.astype(np.int32)
         fit_sample_weights["dataset_source"] = source_sample_weights
@@ -356,15 +439,23 @@ def main() -> None:
     student_scores_test = ((0.65 * detector_scores_test) + (0.35 * distill_scores_test)).astype(float)
     threshold = _best_threshold(y_test, student_scores_test)
     primary_metrics = binary_classification_metrics(y_test, student_scores_test, threshold)
-
-    primary_probs = np.asarray(predictions["primary_adversary"], dtype=float) if "primary_adversary" in predictions else None
+    reconstruction_test = np.asarray(predictions["reconstruction"], dtype=float) if "reconstruction" in predictions else None
+    app_id_probs = np.asarray(predictions["app_id_adversary"], dtype=float) if "app_id_adversary" in predictions else None
+    app_family_probs = np.asarray(predictions["app_family_adversary"], dtype=float) if "app_family_adversary" in predictions else None
     source_probs = np.asarray(predictions["dataset_source"], dtype=float) if "dataset_source" in predictions else None
     context_probs = np.asarray(predictions["context_bucket"], dtype=float) if "context_bucket" in predictions else None
     destination_probs = np.asarray(predictions["destination_behavior"], dtype=float) if "destination_behavior" in predictions else None
-    primary_metrics_report = _adversary_metrics(test_primary_labels, primary_probs, primary_adversary_target, int(len(primary_encoder.classes_)))
+    app_id_metrics_report = _adversary_metrics(test_app_id_labels, app_id_probs, "app_id", int(len(app_id_encoder.classes_)))
+    app_family_metrics_report = _adversary_metrics(test_app_family_labels, app_family_probs, "app_family", int(len(app_family_encoder.classes_)))
     source_metrics_report = _adversary_metrics(test_source_labels, source_probs, "dataset_source", int(len(source_encoder.classes_)))
     context_metrics_report = _adversary_metrics(test_context_labels, context_probs, "context_bucket", int(len(context_encoder.classes_)))
     destination_metrics_report = _adversary_metrics(test_destination_labels, destination_probs, "destination_behavior", int(len(destination_encoder.classes_)))
+    primary_metrics_report = app_id_metrics_report if primary_adversary_target == "app_id" else app_family_metrics_report
+    encoder_model = tf.keras.Model(inputs=inputs, outputs=latent)
+    latent_train = np.asarray(encoder_model.predict(train_x, verbose=0, batch_size=min(args.batch_size, 1024)), dtype=float)
+    latent_mean = latent_train.mean(axis=0) if latent_train.size else np.zeros(args.latent_dim, dtype=float)
+    latent_scale = latent_train.std(axis=0) if latent_train.size else np.ones(args.latent_dim, dtype=float)
+    latent_scale = np.where(latent_scale <= 1e-6, 1.0, latent_scale)
 
     model_payload = {
         "model_type": "privacy_adversarial_student",
@@ -372,14 +463,20 @@ def main() -> None:
         "feature_order": student_features,
         "scaler_mean": scaler.mean_.astype(float).tolist(),
         "scaler_scale": scaler.scale_.astype(float).tolist(),
+        "latent_mean": latent_mean.astype(float).tolist(),
+        "latent_scale": latent_scale.astype(float).tolist(),
         "latent_dim": int(args.latent_dim),
         "dropout_rate": float(args.dropout_rate),
         "primary_adversary_target": primary_adversary_target,
         "adversary_weight": float(args.adversary_weight),
+        "app_id_adversary_weight": float(effective_app_id_weight),
+        "app_family_adversary_weight": float(effective_app_family_weight),
         "source_adversary_weight": float(args.source_adversary_weight),
         "context_adversary_weight": float(args.context_adversary_weight),
         "destination_adversary_weight": float(args.destination_adversary_weight),
         "teacher_weight": float(args.teacher_weight),
+        "reconstruction_weight": float(args.reconstruction_weight),
+        "pretrain_epochs": int(args.pretrain_epochs),
         "noise_std": float(args.noise_std),
         "l2_regularization": float(args.l2_regularization),
         "latent_l1_weight": float(args.latent_l1_weight),
@@ -387,9 +484,15 @@ def main() -> None:
         "app_adversary_target": primary_adversary_target,
         "primary_adversary_requested": args.primary_adversary_target,
         "original_app_class_count": original_app_class_count,
-        "app_adversary_class_count": int(len(primary_encoder.classes_)),
+        "original_app_id_class_count": original_app_id_class_count,
+        "app_id_classes_capped": bool(app_id_capped),
+        "app_adversary_class_count": int(len(app_id_encoder.classes_ if primary_adversary_target == "app_id" else app_family_encoder.classes_)),
+        "app_id_adversary_class_count": int(len(app_id_encoder.classes_)),
+        "app_family_adversary_class_count": int(len(app_family_encoder.classes_)),
         "destination_behavior_class_count": int(len(destination_encoder.classes_)),
-        "classes_primary_adversary": primary_encoder.classes_.astype(str).tolist(),
+        "classes_primary_adversary": (app_id_encoder.classes_ if primary_adversary_target == "app_id" else app_family_encoder.classes_).astype(str).tolist(),
+        "classes_app_id_adversary": app_id_encoder.classes_.astype(str).tolist(),
+        "classes_app_family_adversary": app_family_encoder.classes_.astype(str).tolist(),
         "classes_dataset_source": source_encoder.classes_.astype(str).tolist(),
         "classes_context_bucket": context_encoder.classes_.astype(str).tolist(),
         "classes_destination_behavior": destination_encoder.classes_.astype(str).tolist(),
@@ -409,17 +512,26 @@ def main() -> None:
         "app_adversary_target": primary_adversary_target,
         "primary_adversary_requested": args.primary_adversary_target,
         "original_app_class_count": original_app_class_count,
-        "app_adversary_class_count": int(len(primary_encoder.classes_)),
+        "original_app_id_class_count": original_app_id_class_count,
+        "app_id_classes_capped": bool(app_id_capped),
+        "app_adversary_class_count": int(len(app_id_encoder.classes_ if primary_adversary_target == "app_id" else app_family_encoder.classes_)),
+        "app_id_adversary_class_count": int(len(app_id_encoder.classes_)),
+        "app_family_adversary_class_count": int(len(app_family_encoder.classes_)),
         "destination_behavior_class_count": int(len(destination_encoder.classes_)),
         **primary_metrics,
         "teacher_student_mse": float(mean_squared_error(teacher_scores_test, student_scores_test)),
         "detector_only_mse": float(mean_squared_error(teacher_scores_test, detector_scores_test)),
+        "reconstruction_mse": float(mean_squared_error(test_x, reconstruction_test)) if reconstruction_test is not None else None,
         "app_adversary_accuracy": primary_metrics_report["accuracy"],
+        "app_id_adversary_accuracy": app_id_metrics_report["accuracy"],
+        "app_family_adversary_accuracy": app_family_metrics_report["accuracy"],
         "dataset_source_adversary_accuracy": source_metrics_report["accuracy"],
         "context_adversary_accuracy": context_metrics_report["accuracy"],
         "destination_behavior_adversary_accuracy": destination_metrics_report["accuracy"],
         "adversary_metrics": {
             "primary": primary_metrics_report,
+            "app_id": app_id_metrics_report,
+            "app_family": app_family_metrics_report,
             "dataset_source": source_metrics_report,
             "context_bucket": context_metrics_report,
             "destination_behavior": destination_metrics_report,
@@ -427,11 +539,11 @@ def main() -> None:
         "leakage_summary": {
             "max_accuracy": max(
                 metric.get("accuracy") or 0.0
-                for metric in [primary_metrics_report, source_metrics_report, context_metrics_report, destination_metrics_report]
+                for metric in [app_id_metrics_report, app_family_metrics_report, source_metrics_report, context_metrics_report, destination_metrics_report]
             ),
             "max_leakage_advantage": max(
                 metric.get("leakage_advantage") or 0.0
-                for metric in [primary_metrics_report, source_metrics_report, context_metrics_report, destination_metrics_report]
+                for metric in [app_id_metrics_report, app_family_metrics_report, source_metrics_report, context_metrics_report, destination_metrics_report]
             ),
         },
         "per_source_metrics": per_group_binary_metrics(y_test, student_scores_test, test_full["dataset_source"], threshold, min_rows=24),

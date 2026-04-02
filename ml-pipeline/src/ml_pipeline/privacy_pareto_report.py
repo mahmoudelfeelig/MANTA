@@ -28,7 +28,9 @@ def main() -> None:
                 "pr_auc": metrics.get("pr_auc"),
                 "roc_auc": metrics.get("roc_auc"),
                 "app_reidentification_accuracy": leakage_metrics.get("app_reidentification_accuracy"),
+                "normalized_app_reidentification": leakage_metrics.get("normalized_app_reidentification"),
                 "macro_f1_leakage": leakage_metrics.get("macro_f1"),
+                "strongest_app_reidentification_model": leakage_metrics.get("strongest_app_reidentification_model"),
             }
         )
     payload = {"rows": rows}
@@ -44,7 +46,7 @@ def main() -> None:
             lines.append(",".join("" if row[key] is None else str(row[key]) for key in headers))
         output_csv.write_text("\n".join(lines) + "\n", encoding="utf-8")
     else:
-        output_csv.write_text("view,f1,pr_auc,roc_auc,app_reidentification_accuracy,macro_f1_leakage\n", encoding="utf-8")
+        output_csv.write_text("view,f1,pr_auc,roc_auc,app_reidentification_accuracy,normalized_app_reidentification,macro_f1_leakage,strongest_app_reidentification_model\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

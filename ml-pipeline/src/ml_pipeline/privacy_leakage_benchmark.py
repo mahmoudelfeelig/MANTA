@@ -4,148 +4,150 @@ import argparse
 import json
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score
-from sklearn.multiclass import OneVsRestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import LabelEncoder
 
 from .cache_utils import load_privacy_views_cached
 from .features import build_feature_windows
 from .io_utils import read_csv_resilient
+from .privacy_attack_utils import (
+    ATTACK_MODEL_CHOICES,
+    build_context_bucket,
+    build_destination_behavior_bucket,
+    evaluate_feature_group_attacks,
+    evaluate_multiclass_models,
+    evaluate_open_world_unknown_detection,
+    grouped_label_holdout_split,
+    parse_attack_model_names,
+)
 from .progress import PhaseProgress
 from .privacy_views import PRIVACY_FEATURE_GROUPS, PRIVACY_FEATURE_SETS, build_window_privacy_views_from_windows
 from .splits import add_split_metadata
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Benchmark privacy leakage by app re-identification from exported features")
+    parser = argparse.ArgumentParser(description="Benchmark privacy leakage by re-identification and context inference from exported features")
     parser.add_argument("--input", required=True, help="Canonical flow CSV input")
     parser.add_argument("--output", required=True, help="Output JSON report")
     parser.add_argument("--min-class-rows", type=int, default=20)
     parser.add_argument("--max-class-rows", type=int, default=400)
+    parser.add_argument("--destination-buckets", type=int, default=3)
+    parser.add_argument("--open-world-ratio", type=float, default=0.25)
+    parser.add_argument("--attack-models", default=",".join(ATTACK_MODEL_CHOICES))
     parser.add_argument("--random-seed", type=int, default=42)
     return parser.parse_args()
 
 
-def _build_leakage_classifier(random_seed: int) -> Pipeline:
-    return Pipeline(
-        steps=[
-            ("scaler", StandardScaler()),
-            (
-                "clf",
-                OneVsRestClassifier(
-                    LogisticRegression(
-                        max_iter=400,
-                        random_state=random_seed,
-                        tol=1e-3,
-                    ),
-                    n_jobs=-1,
-                ),
-            ),
-        ]
-    )
-
-
-def _grouped_app_holdout_split(
+def _prepare_task_frame(
     frame: pd.DataFrame,
     *,
-    app_column: str = "app_id",
-    test_size: float = 0.3,
-    random_seed: int = 42,
-) -> tuple[np.ndarray, np.ndarray, str, dict[str, object]]:
-    enriched = add_split_metadata(frame).reset_index(drop=True)
-    rng = np.random.default_rng(random_seed)
-    class_values = enriched[app_column].astype(str)
-    group_keys = (
-        enriched["dataset_source"].astype(str) + "|" +
-        enriched["environment_id"].astype(str) + "|" +
-        enriched["session_id"].astype(str) + "|" +
-        enriched["time_fold"].astype(str)
-    )
-    train_idx: list[int] = []
-    test_idx: list[int] = []
-    group_strategy_used = False
-
-    for app_id in sorted(class_values.unique().tolist()):
-        class_mask = class_values == app_id
-        class_indices = np.flatnonzero(class_mask.to_numpy())
-        if len(class_indices) < 2:
-            continue
-        class_groups = group_keys.iloc[class_indices].reset_index(drop=True)
-        unique_groups = class_groups.unique().tolist()
-
-        selected_test: np.ndarray | None = None
-        if len(unique_groups) >= 2:
-            shuffled_groups = rng.permutation(unique_groups).tolist()
-            target_rows = max(1, int(round(len(class_indices) * test_size)))
-            chosen_groups: set[str] = set()
-            chosen_count = 0
-            for group_name in shuffled_groups:
-                group_rows = class_indices[(class_groups.to_numpy(dtype=object) == group_name)]
-                remaining_rows = len(class_indices) - (chosen_count + len(group_rows))
-                if remaining_rows < 1:
-                    continue
-                chosen_groups.add(str(group_name))
-                chosen_count += len(group_rows)
-                if chosen_count >= target_rows and len(chosen_groups) < len(unique_groups):
-                    break
-            if chosen_groups and len(chosen_groups) < len(unique_groups):
-                mask = class_groups.isin(chosen_groups).to_numpy()
-                selected_test = class_indices[mask]
-                group_strategy_used = True
-
-        if selected_test is None or len(selected_test) == 0 or len(selected_test) >= len(class_indices):
-            test_count = min(max(1, int(round(len(class_indices) * test_size))), len(class_indices) - 1)
-            permutation = rng.permutation(class_indices)
-            selected_test = permutation[:test_count]
-
-        selected_train = np.setdiff1d(class_indices, selected_test, assume_unique=False)
-        if len(selected_train) == 0 or len(selected_test) == 0:
-            fallback_train, fallback_test = train_test_split(
-                class_indices,
-                test_size=test_size,
-                random_state=random_seed,
-                shuffle=True,
-            )
-            selected_train = np.asarray(fallback_train, dtype=int)
-            selected_test = np.asarray(fallback_test, dtype=int)
-
-        train_idx.extend(selected_train.astype(int).tolist())
-        test_idx.extend(selected_test.astype(int).tolist())
-
-    train_arr = np.asarray(sorted(set(train_idx)), dtype=int)
-    test_arr = np.asarray(sorted(set(test_idx)), dtype=int)
-    if len(train_arr) == 0 or len(test_arr) == 0:
-        encoded = LabelEncoder().fit_transform(class_values)
-        train_arr, test_arr = train_test_split(
-            np.arange(len(enriched)),
-            test_size=test_size,
-            random_state=random_seed,
-            stratify=encoded,
+    target_column: str,
+    min_class_rows: int,
+    max_class_rows: int,
+) -> pd.DataFrame:
+    counts = frame[target_column].astype(str).value_counts()
+    keep = counts[counts >= min_class_rows].index if min_class_rows > 0 else counts.index
+    filtered = frame[frame[target_column].astype(str).isin(keep)].copy()
+    if max_class_rows > 0 and not filtered.empty:
+        filtered = (
+            filtered.groupby(filtered[target_column].astype(str), sort=False, group_keys=False)
+            .head(max_class_rows)
+            .reset_index(drop=True)
         )
-        strategy = "stratified_random_fallback"
-    else:
-        strategy = "per_app_group_holdout" if group_strategy_used else "per_app_row_holdout"
+    return filtered
 
-    train_frame = enriched.iloc[train_arr]
-    test_frame = enriched.iloc[test_arr]
-    summary = {
-        "rows_train": int(len(train_frame)),
-        "rows_test": int(len(test_frame)),
-        "train_dataset_sources": sorted(train_frame["dataset_source"].astype(str).unique().tolist()),
-        "test_dataset_sources": sorted(test_frame["dataset_source"].astype(str).unique().tolist()),
-        "train_group_count": int(train_frame[["dataset_source", "environment_id", "session_id", "time_fold"]].drop_duplicates().shape[0]),
-        "test_group_count": int(test_frame[["dataset_source", "environment_id", "session_id", "time_fold"]].drop_duplicates().shape[0]),
+
+def _task_payload(
+    frame: pd.DataFrame,
+    *,
+    target_column: str,
+    task_name: str,
+    feature_columns: list[str],
+    group_columns: tuple[str, ...],
+    attack_models: tuple[str, ...],
+    random_seed: int,
+    min_class_rows: int,
+    max_class_rows: int,
+    include_open_world: bool,
+    open_world_ratio: float,
+) -> dict[str, object] | None:
+    filtered = _prepare_task_frame(
+        frame,
+        target_column=target_column,
+        min_class_rows=min_class_rows,
+        max_class_rows=max_class_rows,
+    )
+    if filtered[target_column].astype(str).nunique() < 2 or len(filtered) < max(16, min_class_rows * 2):
+        return None
+
+    split = grouped_label_holdout_split(
+        filtered,
+        target=filtered[target_column].astype(str),
+        label_name=task_name,
+        group_columns=group_columns,
+        test_size=0.3,
+        random_seed=random_seed,
+    )
+    encoder = LabelEncoder()
+    labels = encoder.fit_transform(filtered[target_column].astype(str))
+    train_x = filtered.iloc[split.train_idx][feature_columns].fillna(0.0)
+    test_x = filtered.iloc[split.test_idx][feature_columns].fillna(0.0)
+    train_y = labels[split.train_idx]
+    test_y = labels[split.test_idx]
+    model_results, strongest = evaluate_multiclass_models(
+        train_x,
+        test_x,
+        train_y,
+        test_y,
+        model_names=attack_models,
+        random_seed=random_seed,
+    )
+    if strongest is None:
+        return {
+            "target_column": target_column,
+            "rows_train": int(len(train_x)),
+            "rows_test": int(len(test_x)),
+            "class_count": int(len(encoder.classes_)),
+            "split_strategy": split.strategy,
+            "split_summary": split.summary,
+            "models": model_results,
+        }
+
+    payload: dict[str, object] = {
+        "target_column": target_column,
+        "rows_train": int(len(train_x)),
+        "rows_test": int(len(test_x)),
+        "class_count": int(len(encoder.classes_)),
+        "split_strategy": split.strategy,
+        "split_summary": split.summary,
+        "strongest_model": strongest,
+        "models": model_results,
     }
-    return train_arr, test_arr, strategy, summary
+    if task_name == "app_id":
+        payload["feature_group_results"] = evaluate_feature_group_attacks(
+            filtered,
+            feature_groups=PRIVACY_FEATURE_GROUPS,
+            train_idx=split.train_idx,
+            test_idx=split.test_idx,
+            labels=labels,
+            random_seed=random_seed,
+        )
+        if include_open_world:
+            payload["open_world"] = evaluate_open_world_unknown_detection(
+                filtered,
+                feature_columns=feature_columns,
+                target_column=target_column,
+                group_columns=group_columns,
+                model_names=attack_models,
+                random_seed=random_seed + 101,
+                unknown_ratio=open_world_ratio,
+            )
+    return payload
 
 
 def main() -> None:
     args = parse_args()
+    attack_models = parse_attack_model_names(args.attack_models)
     progress = PhaseProgress("Privacy leakage benchmark")
     progress.update(5, "Loading flow CSV")
     progress.update(15, "Building privacy views")
@@ -155,66 +157,108 @@ def main() -> None:
         build_privacy_views_from_windows_fn=build_window_privacy_views_from_windows,
         read_frame_fn=read_csv_resilient,
     )
-    results: dict[str, dict[str, float | int]] = {}
+    reference = add_split_metadata(views["off"]).reset_index(drop=True)
+    context_bucket = build_context_bucket(reference).astype(str)
+    destination_behavior = build_destination_behavior_bucket(reference, args.destination_buckets).astype(str)
+
+    results: dict[str, dict[str, object]] = {}
     total_views = max(1, len(views))
-    for index, (view_name, frame) in enumerate(views.items(), start=1):
+    for index, (view_name, raw_view) in enumerate(views.items(), start=1):
         progress.update(20 + (60 * (index - 1) / total_views), f"Evaluating {view_name}")
-        counts = frame["app_id"].astype(str).value_counts()
-        keep = counts[counts >= args.min_class_rows].index
-        filtered = frame[frame["app_id"].astype(str).isin(keep)].copy()
-        if args.max_class_rows > 0:
-            filtered = (
-                filtered.groupby(filtered["app_id"].astype(str), group_keys=False, sort=False)
-                .apply(lambda group: group.head(args.max_class_rows))
-                .reset_index(drop=True)
-            )
-        if len(filtered) < args.min_class_rows * 2:
-            continue
-        y_encoder = LabelEncoder()
-        y = y_encoder.fit_transform(filtered["app_id"].astype(str))
-        feature_columns = [column for column in PRIVACY_FEATURE_SETS[view_name] if column in filtered.columns]
+        frame = add_split_metadata(raw_view).reset_index(drop=True)
+        if len(frame) != len(reference):
+            raise SystemExit(f"Privacy view '{view_name}' is misaligned with the reference off-view rows.")
+        feature_columns = [column for column in PRIVACY_FEATURE_SETS[view_name] if column in frame.columns]
         if not feature_columns:
             raise SystemExit(f"Privacy view '{view_name}' has no usable feature columns. Delete stale privacy caches or rerun with the patched cache validation.")
-        train_idx, test_idx, split_strategy, split_summary = _grouped_app_holdout_split(
-            filtered,
-            app_column="app_id",
-            test_size=0.3,
-            random_seed=args.random_seed,
-        )
-        train_x = filtered.iloc[train_idx][feature_columns].fillna(0.0)
-        test_x = filtered.iloc[test_idx][feature_columns].fillna(0.0)
-        train_y = y[train_idx]
-        test_y = y[test_idx]
-        clf = _build_leakage_classifier(args.random_seed)
-        clf.fit(train_x, train_y)
-        pred = clf.predict(test_x)
-        feature_group_results: dict[str, dict[str, float | int]] = {}
-        for group_name, candidate_features in PRIVACY_FEATURE_GROUPS.items():
-            subset = [column for column in candidate_features if column in filtered.columns and column in feature_columns]
-            if not subset:
-                continue
-            group_train_x = filtered.iloc[train_idx][subset].fillna(0.0)
-            group_test_x = filtered.iloc[test_idx][subset].fillna(0.0)
-            group_clf = _build_leakage_classifier(args.random_seed)
-            group_clf.fit(group_train_x, train_y)
-            group_pred = group_clf.predict(group_test_x)
-            feature_group_results[group_name] = {
-                "feature_count": int(len(subset)),
-                "app_reidentification_accuracy": float(accuracy_score(test_y, group_pred)),
-                "macro_f1": float(f1_score(test_y, group_pred, average="macro")),
-            }
-        results[view_name] = {
-            "rows_train": int(len(train_x)),
-            "rows_test": int(len(test_x)),
-            "split_strategy": split_strategy,
-            "split_summary": split_summary,
-            "class_count": int(len(y_encoder.classes_)),
-            "app_reidentification_accuracy": float(accuracy_score(test_y, pred)),
-            "macro_f1": float(f1_score(test_y, pred, average="macro")),
-            "feature_group_results": feature_group_results,
+
+        frame["_target_app_id"] = reference["app_id"].astype(str).to_numpy()
+        frame["_target_app_family"] = reference["app_family"].astype(str).to_numpy()
+        frame["_target_dataset_source"] = reference["dataset_source"].astype(str).to_numpy()
+        frame["_target_context_bucket"] = context_bucket.to_numpy()
+        frame["_target_destination_behavior"] = destination_behavior.to_numpy()
+
+        task_specs = {
+            "app_id": {
+                "target_column": "_target_app_id",
+                "group_columns": ("dataset_source", "environment_id", "session_id", "time_fold"),
+                "include_open_world": True,
+            },
+            "app_family": {
+                "target_column": "_target_app_family",
+                "group_columns": ("dataset_source", "environment_id", "session_id", "time_fold"),
+                "include_open_world": False,
+            },
+            "dataset_source": {
+                "target_column": "_target_dataset_source",
+                "group_columns": ("environment_id", "session_id", "app_family", "time_fold"),
+                "include_open_world": False,
+            },
+            "context_bucket": {
+                "target_column": "_target_context_bucket",
+                "group_columns": ("dataset_source", "session_id", "app_family"),
+                "include_open_world": False,
+            },
+            "destination_behavior": {
+                "target_column": "_target_destination_behavior",
+                "group_columns": ("dataset_source", "environment_id", "session_id", "time_fold"),
+                "include_open_world": False,
+            },
         }
 
-    payload = {"benchmark": "app_reidentification_from_privacy_views", "results": results}
+        task_results: dict[str, dict[str, object]] = {}
+        for task_name, spec in task_specs.items():
+            payload = _task_payload(
+                frame,
+                target_column=str(spec["target_column"]),
+                task_name=task_name,
+                feature_columns=feature_columns,
+                group_columns=tuple(spec["group_columns"]),
+                attack_models=attack_models,
+                random_seed=args.random_seed + (index * 37),
+                min_class_rows=args.min_class_rows,
+                max_class_rows=args.max_class_rows,
+                include_open_world=bool(spec["include_open_world"]),
+                open_world_ratio=args.open_world_ratio,
+            )
+            if payload is not None:
+                task_results[task_name] = payload
+
+        app_task = task_results.get("app_id", {})
+        app_strongest = app_task.get("strongest_model") if isinstance(app_task, dict) else None
+        strongest_task = max(
+            [
+                {"task_name": task_name, **payload["strongest_model"]}
+                for task_name, payload in task_results.items()
+                if isinstance(payload.get("strongest_model"), dict)
+            ],
+            key=lambda row: (
+                float(row.get("normalized_leakage") or 0.0),
+                float(row.get("macro_f1") or 0.0),
+                float(row.get("accuracy") or 0.0),
+            ),
+            default=None,
+        )
+        results[view_name] = {
+            "rows_train": app_task.get("rows_train"),
+            "rows_test": app_task.get("rows_test"),
+            "split_strategy": app_task.get("split_strategy"),
+            "split_summary": app_task.get("split_summary"),
+            "class_count": app_task.get("class_count"),
+            "app_reidentification_accuracy": (app_strongest or {}).get("accuracy") if isinstance(app_strongest, dict) else None,
+            "macro_f1": (app_strongest or {}).get("macro_f1") if isinstance(app_strongest, dict) else None,
+            "normalized_app_reidentification": (app_strongest or {}).get("normalized_leakage") if isinstance(app_strongest, dict) else None,
+            "strongest_app_reidentification_model": (app_strongest or {}).get("model_name") if isinstance(app_strongest, dict) else None,
+            "feature_group_results": app_task.get("feature_group_results", {}) if isinstance(app_task, dict) else {},
+            "tasks": task_results,
+            "strongest_task": strongest_task,
+        }
+
+    payload = {
+        "benchmark": "privacy_inference_attack_suite",
+        "attack_models": list(attack_models),
+        "results": results,
+    }
     output_path = Path(args.output).expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

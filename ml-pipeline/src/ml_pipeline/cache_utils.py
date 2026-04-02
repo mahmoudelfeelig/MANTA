@@ -14,7 +14,7 @@ import pandas as pd
 from .dataset_metadata import derive_app_family
 
 
-CACHE_SCHEMA_VERSION = "manta-cache-v2"
+CACHE_SCHEMA_VERSION = "manta-cache-v3"
 
 
 @dataclass(frozen=True)
@@ -173,6 +173,45 @@ def _privacy_views_cache_valid(candidate: object) -> bool:
     return True
 
 
+def _feature_windows_cache_valid(candidate: object) -> bool:
+    from .features import FEATURE_COLUMNS
+
+    frame = pd.DataFrame(candidate)
+    if frame.empty:
+        return False
+    required_columns = {
+        "app_id",
+        "window_bucket",
+        "label",
+        "dataset_source",
+        "environment_id",
+        "session_id",
+        "app_family",
+        *FEATURE_COLUMNS,
+    }
+    return required_columns.issubset(frame.columns)
+
+
+def _remote_windows_cache_valid(candidate: object) -> bool:
+    frame = pd.DataFrame(candidate)
+    if frame.empty:
+        return False
+    required_columns = {
+        "app_id",
+        "window_bucket",
+        "flow_count",
+        "bytes_out",
+        "bytes_in",
+        "novelty_score",
+        "dataset_source",
+        "environment_id",
+        "session_id",
+        "app_family",
+        "transport_metrics_present",
+    }
+    return required_columns.issubset(frame.columns)
+
+
 def load_feature_windows_cached(
     input_path: str | Path,
     *,
@@ -189,6 +228,7 @@ def load_feature_windows_cached(
         full_cache,
         lambda: build_windows_fn(read_frame_fn(input_path), window_seconds),
         metadata={"type": "feature_windows", "window_seconds": window_seconds},
+        validator=_feature_windows_cache_valid,
     )
     full_frame = pd.DataFrame(full_windows)
     if not fast.enabled:
@@ -218,6 +258,7 @@ def load_remote_windows_cached(
         full_cache,
         lambda: build_remote_windows_fn(read_frame_fn(input_path), window_seconds),
         metadata={"type": "remote_windows", "window_seconds": window_seconds},
+        validator=_remote_windows_cache_valid,
     )
     full_frame = pd.DataFrame(full_windows)
     if not fast.enabled:

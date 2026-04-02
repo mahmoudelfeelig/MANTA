@@ -18,6 +18,7 @@ def test_privacy_leakage_benchmark_uses_grouped_app_holdout(tmp_path: Path) -> N
         ("com.browser.alpha", 0, "sdncampus_flow_statistics", "campus_wifi", "browser"),
         ("com.browser.beta", 0, "itc_net_blend60_scenario_e", "android_lab", "browser"),
         ("com.spyware.bad", 1, "android_spyware_mendeley", "malware_lab", "malware"),
+        ("com.telemetry.noisy", 0, "westermo_public", "campus_wifi", "telemetry"),
     ]
     for app_index, (app_id, label, source, environment, family) in enumerate(app_specs):
         for session_index in range(2):
@@ -65,3 +66,6 @@ def test_privacy_leakage_benchmark_uses_grouped_app_holdout(tmp_path: Path) -> N
     assert payload["results"]["off"]["split_strategy"] == "per_app_group_holdout"
     assert payload["results"]["off"]["rows_train"] > 0
     assert payload["results"]["off"]["rows_test"] > 0
+    assert payload["results"]["off"]["tasks"]["app_family"]["strongest_model"]["accuracy"] is not None
+    assert payload["results"]["off"]["normalized_app_reidentification"] is not None
+    assert payload["results"]["off"]["tasks"]["app_id"]["open_world"] is not None

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from ml_pipeline.features import build_feature_windows, feature_matrix
+from ml_pipeline.features import FEATURE_COLUMNS, build_feature_windows, feature_matrix
 
 
 def test_build_feature_windows_produces_expected_columns() -> None:
@@ -35,4 +35,6 @@ def test_build_feature_windows_produces_expected_columns() -> None:
     assert not windows.empty
     assert "flow_count" in windows.columns
     assert "label" in windows.columns
-    assert X.shape[1] == 8
+    assert "destination_concentration" in windows.columns
+    assert "flow_count_deviation" in windows.columns
+    assert X.shape[1] == len(FEATURE_COLUMNS)

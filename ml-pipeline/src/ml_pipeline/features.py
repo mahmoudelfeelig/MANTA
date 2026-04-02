@@ -28,6 +28,15 @@ PORTABLE_FEATURE_COLUMNS = [
     "packet_imbalance",
     "small_flow_ratio",
     "high_port_ratio",
+    "destination_concentration",
+    "destination_transition_rate",
+    "destination_transition_entropy",
+    "protocol_port_profile_diversity",
+    "flow_size_iqr",
+    "flow_count_deviation",
+    "byte_rate_deviation",
+    "destination_diversity_shift",
+    "novelty_shift",
 ]
 
 # Backwards-compatible alias used by the existing training scripts.
@@ -86,6 +95,16 @@ def _dominant_text(group: pd.DataFrame, column: str, default: str) -> str:
     return str(counts.index[0]) if not counts.empty else default
 
 
+def _normalized_entropy(values: list[str]) -> float:
+    if len(values) <= 1:
+        return 0.0
+    counts = pd.Series(values, dtype="object").value_counts(normalize=True)
+    if len(counts) <= 1:
+        return 0.0
+    entropy = float(-(counts * np.log(counts.clip(lower=1e-12))).sum())
+    return float(entropy / np.log(max(2, len(counts))))
+
+
 def build_feature_windows(df: pd.DataFrame, window_seconds: int = 60) -> pd.DataFrame:
     validate_flow_df(df)
 
@@ -115,6 +134,7 @@ def build_feature_windows(df: pd.DataFrame, window_seconds: int = 60) -> pd.Data
     rows: list[dict[str, float | int | str]] = []
     grouped = working.groupby(["app_id", "window_bucket"], sort=True)
     for (app_id, bucket), group in grouped:
+        ordered = group.sort_values("timestamp_end", kind="mergesort")
         flow_count = int(len(group))
         window_duration_seconds = max(1.0, float(window_seconds))
         total_bytes_out = float(group["bytes_out"].sum())
@@ -124,6 +144,19 @@ def build_feature_windows(df: pd.DataFrame, window_seconds: int = 60) -> pd.Data
         total_packets = total_packets_out + total_packets_in
         duration_values = group["duration_ms"].astype(float)
         packet_imbalance = abs(total_packets_out - total_packets_in) / (total_packets + 1.0)
+        destination_distribution = ordered["destination_key"].astype(str).value_counts(normalize=True)
+        destination_sequence = ordered["destination_key"].astype(str).tolist()
+        destination_switches = sum(
+            int(previous != current)
+            for previous, current in zip(destination_sequence[:-1], destination_sequence[1:], strict=False)
+        )
+        transition_values = [
+            f"{previous}->{current}"
+            for previous, current in zip(destination_sequence[:-1], destination_sequence[1:], strict=False)
+        ]
+        protocol_port_sequence = (
+            ordered["protocol"].astype(str) + ":" + ordered["dst_port"].astype(str)
+        )
 
         row: dict[str, float | int | str] = {
             "app_id": str(app_id),
@@ -152,6 +185,11 @@ def build_feature_windows(df: pd.DataFrame, window_seconds: int = 60) -> pd.Data
             "packet_imbalance": float(packet_imbalance),
             "small_flow_ratio": float(group["small_flow"].mean()),
             "high_port_ratio": float(group["high_port"].mean()),
+            "destination_concentration": float(destination_distribution.iloc[0]) if not destination_distribution.empty else 0.0,
+            "destination_transition_rate": float(destination_switches / max(1, flow_count - 1)),
+            "destination_transition_entropy": _normalized_entropy(transition_values),
+            "protocol_port_profile_diversity": float(protocol_port_sequence.nunique() / max(1, flow_count)),
+            "flow_size_iqr": float(group["total_bytes"].quantile(0.75) - group["total_bytes"].quantile(0.25)) if flow_count > 1 else 0.0,
             "dataset_source": _dominant_text(group, "dataset_source", "unknown_source"),
             "dataset_profile": _dominant_text(group, "dataset_profile", "unknown_profile"),
             "dataset_variant": _dominant_text(group, "dataset_variant", "unknown_variant"),
@@ -163,8 +201,33 @@ def build_feature_windows(df: pd.DataFrame, window_seconds: int = 60) -> pd.Data
         if label_cols:
             row["label"] = int(pd.to_numeric(group[label_cols[0]], errors="coerce").fillna(0).astype(int).max())
         rows.append(row)
+    windows = pd.DataFrame(rows)
+    if windows.empty:
+        return windows
+    windows = windows.sort_values(["app_id", "window_bucket"], kind="mergesort").reset_index(drop=True)
+    app_groups = windows.groupby("app_id", sort=False, dropna=False)
 
-    return pd.DataFrame(rows)
+    def _rolling_reference(series: pd.Series) -> pd.Series:
+        shifted = series.shift(1)
+        return shifted.rolling(3, min_periods=1).mean()
+
+    rolling_flow_count = app_groups["flow_count"].transform(_rolling_reference)
+    rolling_byte_rate = app_groups["byte_rate"].transform(_rolling_reference)
+    rolling_destination_diversity = app_groups["destination_diversity"].transform(_rolling_reference)
+    rolling_novelty = app_groups["novelty_score"].transform(_rolling_reference)
+    windows["flow_count_deviation"] = (
+        (windows["flow_count"] - rolling_flow_count).abs() / (rolling_flow_count.abs() + 1.0)
+    ).fillna(0.0)
+    windows["byte_rate_deviation"] = (
+        (windows["byte_rate"] - rolling_byte_rate).abs() / (rolling_byte_rate.abs() + 1.0)
+    ).fillna(0.0)
+    windows["destination_diversity_shift"] = (
+        (windows["destination_diversity"] - rolling_destination_diversity).abs()
+    ).fillna(0.0)
+    windows["novelty_shift"] = (
+        (windows["novelty_score"] - rolling_novelty).abs()
+    ).fillna(0.0)
+    return windows
 
 
 def feature_matrix(feature_windows: pd.DataFrame, feature_columns: list[str] | None = None) -> pd.DataFrame:
