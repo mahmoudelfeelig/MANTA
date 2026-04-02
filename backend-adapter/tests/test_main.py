@@ -32,6 +32,7 @@ from app.main import (  # noqa: E402
     ingest_mobile_flow,
     list_dead_letter_queue,
     list_devices,
+    list_recent_events,
     list_incidents,
     list_pending_queue,
     list_alerts,
@@ -65,7 +66,7 @@ def _fake_request() -> SimpleNamespace:
 def _flow_payload() -> MobileFlowEvent:
     return MobileFlowEvent(
         event_type="mobile_flow",
-        event_version="1.0",
+        event_version="1.1",
         device_id_pseudo="abcd1234",
         app_id="com.test",
         protocol="TCP",
@@ -81,6 +82,8 @@ def _flow_payload() -> MobileFlowEvent:
         duration_ms=100,
         timestamp_start=1000,
         timestamp_end=2000,
+        is_new_destination_for_app=1.0,
+        threat_tags=["phishing_lookalike"],
         netflow_version=9,
         ipfix_template_id=256,
         ipfix_elements=[{"id": 8, "name": "sourceIPv4Address", "value": "10.0.0.2"}],
@@ -100,6 +103,7 @@ def _alert_payload(alert_id: str = "alert-12345") -> MobileAlertEvent:
         response_score=0.91,
         severity="HIGH",
         top_features=["novelty", "burstiness"],
+        feature_contributions={"novelty": 0.61, "burstiness": 0.39},
         explanation="Unusual destination novelty and burst traffic",
         source_model="statistical",
         triage_status="OPEN",
@@ -119,6 +123,11 @@ def test_accepts_mobile_flow_with_ipfix_fields() -> None:
     response = asyncio.run(ingest_mobile_flow(request=_fake_request(), event=_flow_payload(), _=None))
     assert response.status == "accepted"
     assert response.event_id
+
+    recent = list_recent_events(event_type="mobile_flow", limit=20, _=None)
+    stored = next(item for item in recent["events"] if item["event_id"] == response.event_id)
+    assert stored["payload"]["is_new_destination_for_app"] == pytest.approx(1.0)
+    assert stored["payload"]["threat_tags"] == ["phishing_lookalike"]
 
 
 def test_device_heartbeat_marks_device_online() -> None:
@@ -161,13 +170,53 @@ def test_mobile_alert_triage_lifecycle() -> None:
     assert patched["alert"]["triage_status"] == "INVESTIGATING"
 
 
+def test_list_alerts_supports_multiple_severity_filters() -> None:
+    high_alert = _alert_payload(alert_id="multi-severity-high").model_copy(
+        update={
+            "severity": "HIGH",
+            "triage_status": "OPEN",
+            "timestamp": 2_100_001,
+        }
+    )
+    medium_alert = _alert_payload(alert_id="multi-severity-medium").model_copy(
+        update={
+            "severity": "MEDIUM",
+            "triage_status": "OPEN",
+            "timestamp": 2_100_002,
+        }
+    )
+    low_alert = _alert_payload(alert_id="multi-severity-low").model_copy(
+        update={
+            "severity": "LOW",
+            "triage_status": "OPEN",
+            "timestamp": 2_100_003,
+        }
+    )
+
+    asyncio.run(ingest_mobile_alert(request=_fake_request(), event=high_alert, _=None))
+    asyncio.run(ingest_mobile_alert(request=_fake_request(), event=medium_alert, _=None))
+    asyncio.run(ingest_mobile_alert(request=_fake_request(), event=low_alert, _=None))
+
+    filtered = list_alerts(triage_status="OPEN", severity="HIGH,MEDIUM", limit=100, _=None)
+    severities = {
+        item["alert_id"]: item["severity"]
+        for item in filtered["alerts"]
+        if item["alert_id"] in {"multi-severity-high", "multi-severity-medium", "multi-severity-low"}
+    }
+
+    assert severities == {
+        "multi-severity-high": "HIGH",
+        "multi-severity-medium": "MEDIUM",
+    }
+
+
 def test_device_policy_roundtrip() -> None:
     set_response = set_device_policy(
         device_id_pseudo="abcd1234",
         payload=DevicePolicyPayload(
             policy_version=2,
-            default_thresholds=ThresholdProfile(medium=0.55, high=0.8),
-            app_threshold_overrides={"com.test": ThresholdProfile(medium=0.5, high=0.75)},
+            default_thresholds=ThresholdProfile(low=0.3, medium=0.55, high=0.8),
+            app_threshold_overrides={"com.test": ThresholdProfile(low=0.25, medium=0.5, high=0.75)},
             export_enabled=True,
             retention_days=14,
         ),
@@ -177,7 +226,27 @@ def test_device_policy_roundtrip() -> None:
 
     get_response = get_device_policy(device_id_pseudo="abcd1234", _=None)
     assert get_response["policy"]["policy_version"] == 2
+    assert get_response["policy"]["default_thresholds"]["low"] == 0.3
     assert get_response["policy"]["default_thresholds"]["medium"] == 0.55
+    assert get_response["policy"]["protected_brands_csv"] is None
+
+
+def test_device_policy_roundtrip_with_protected_brands() -> None:
+    set_response = set_device_policy(
+        device_id_pseudo="protected-brands-device",
+        payload=DevicePolicyPayload(
+            policy_version=3,
+            default_thresholds=ThresholdProfile(low=0.3, medium=0.6, high=0.85),
+            export_enabled=True,
+            retention_days=90,
+            protected_brands_csv="google\nmicrosoft\nexamplebank",
+        ),
+        _=None,
+    )
+    assert set_response["status"] == "ok"
+
+    get_response = get_device_policy(device_id_pseudo="protected-brands-device", _=None)
+    assert get_response["policy"]["protected_brands_csv"] == "google\nmicrosoft\nexamplebank"
 
 
 def test_retry_moves_to_dead_letter_after_max_retries(monkeypatch) -> None:
@@ -294,10 +363,10 @@ def test_policy_auto_tune_simulation_and_retraining_samples() -> None:
     simulation_request = PolicySimulationRequest(
         policy=DevicePolicyPayload(
             policy_version=1,
-            default_thresholds=ThresholdProfile(medium=0.55, high=0.85),
+            default_thresholds=ThresholdProfile(low=0.3, medium=0.55, high=0.85),
             app_threshold_overrides={},
             export_enabled=True,
-            retention_days=7,
+            retention_days=90,
         ),
         limit=500,
     )

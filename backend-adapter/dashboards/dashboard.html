@@ -70,6 +70,53 @@
     }
     .toolbar { grid-template-columns: repeat(6, minmax(0, 1fr)); }
     .form-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+    .dashboard-filter-grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 12px;
+      align-items: start;
+    }
+    .filter-group {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }
+    .filter-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .filter-chip {
+      position: relative;
+      display: inline-flex;
+    }
+    .filter-chip input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .filter-chip span {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface-soft);
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
+    }
+    .filter-chip span:hover {
+      transform: translateY(-1px);
+      color: var(--text);
+    }
+    .filter-chip input:checked + span {
+      color: #05211c;
+      border-color: rgba(98, 216, 187, 0.45);
+      background: linear-gradient(180deg, #54d4b5, #2ea78d);
+    }
     label { display: grid; gap: 6px; }
     .label { color: var(--muted); font-size: 12px; }
     input, select, textarea {
@@ -105,13 +152,15 @@
     }
     .stat .value { font-size: 28px; font-weight: 800; margin-top: 8px; }
     .device-toolbar {
-      display: flex; gap: 10px; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 12px;
+      display: flex; gap: 10px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; margin-bottom: 12px;
     }
-    .device-toolbar .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .device-toolbar > div:first-child { flex: 1 1 440px; min-width: 0; }
+    .device-toolbar .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; flex: 1 1 320px; }
     .device-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
       gap: 12px;
+      align-items: stretch;
     }
     .device-card {
       border-radius: 16px;
@@ -121,16 +170,25 @@
       display: grid;
       gap: 8px;
       cursor: pointer;
+      min-width: 0;
     }
     .device-card.selected { border-color: rgba(98, 216, 187, 0.7); box-shadow: 0 0 0 1px rgba(98, 216, 187, 0.35) inset; }
     .device-card.dimmed { opacity: 0.72; }
     .device-title {
-      display: flex; justify-content: space-between; align-items: center; gap: 10px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: start;
+      gap: 10px;
     }
     .device-id {
       font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
       font-size: 12px;
       word-break: break-all;
+    }
+    .device-card .section-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
     }
     .chips { display: flex; gap: 8px; flex-wrap: wrap; }
     .chip {
@@ -152,6 +210,30 @@
       border: 1px solid rgba(255,255,255,0.06);
       border-radius: 16px;
       padding: 14px;
+      display: grid;
+      gap: 10px;
+    }
+    .alert-card.primary {
+      border-color: rgba(98,216,187,0.22);
+      background: linear-gradient(180deg, rgba(98,216,187,0.08), rgba(255,255,255,0.02));
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .risk-danger { color: var(--danger); }
+    .risk-review { color: var(--warn); }
+    .risk-clean { color: var(--accent); }
+    .risk-muted { color: var(--muted); }
+    .alert-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .alert-actions button {
+      padding: 8px 12px;
+      font-size: 12px;
     }
     .event-card pre, .alert-card pre, pre {
       white-space: pre-wrap;
@@ -197,19 +279,23 @@
     .device-display-name {
       font-size: 16px;
       font-weight: 700;
+      overflow-wrap: anywhere;
     }
     .device-subtitle {
       color: var(--muted);
       font-size: 12px;
       margin-top: 2px;
+      overflow-wrap: anywhere;
     }
     @media (max-width: 1200px) {
-      .toolbar, .stats { grid-template-columns: 1fr 1fr; }
+      .toolbar, .stats, .summary-grid { grid-template-columns: 1fr 1fr; }
+      .dashboard-filter-grid { grid-template-columns: 1fr 1fr; }
       .span-8, .span-7, .span-6, .span-5, .span-4, .span-3, .span-12 { grid-column: span 12; }
     }
     @media (max-width: 760px) {
-      .toolbar, .stats { grid-template-columns: 1fr; }
+      .toolbar, .stats, .summary-grid, .dashboard-filter-grid { grid-template-columns: 1fr; }
       .wrap { padding: 14px; }
+      .device-card .section-actions { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -262,71 +348,70 @@
 
       <section class="panel span-12">
         <div class="split" style="margin-bottom:12px;">
-          <div>
-            <h2>Alert test websites</h2>
-            <div class="muted small">Safe targets you can type manually to trigger specific MANTA alert reasons while capture is running.</div>
-          </div>
+            <h2>Alert Posture</h2>
         </div>
-        <div class="hint-box" style="margin-bottom:12px;">
-          Recommended test flow: select your phone device above, set a medium threshold around <span class="mono">0.55</span>, start capture, use one site at a time for 10 to 20 seconds, then check the Alerts panel and the phone app. The goal is reproducible feature/risk explanations, not forcing every visit into HIGH severity.
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th>Website</th><th>Expected MANTA signal</th><th>Notes</th></tr>
-            </thead>
-            <tbody>
-              <tr><td class="mono">https://example.com</td><td>Benign / low-noise baseline</td><td>Use first to confirm the device/browser is exporting normally.</td></tr>
-              <tr><td class="mono">http://neverssl.com</td><td>Insecure plaintext web destination</td><td>Useful for browser-based plaintext HTTP testing.</td></tr>
-              <tr><td class="mono">https://expired.badssl.com</td><td>Expired TLS certificate test host</td><td>Should surface a certificate-risk style explanation when site hints resolve.</td></tr>
-              <tr><td class="mono">https://self-signed.badssl.com</td><td>Self-signed TLS certificate test host</td><td>Good for remote-assisted and reputation-weight testing.</td></tr>
-              <tr><td class="mono">https://wrong.host.badssl.com</td><td>TLS hostname mismatch test host</td><td>Should produce a stronger danger explanation than a normal HTTPS site.</td></tr>
-            </tbody>
-          </table>
-        </div>
+        <div class="summary-grid" id="alertSummary"></div>
       </section>
 
-      <section class="panel span-7">
+      <section class="panel span-12">
         <div class="split" style="margin-bottom:12px;">
           <div>
-            <h2>Recent exported events</h2>
-            <div class="muted small">Filtered by the device selection above.</div>
+            <h2>Dashboard filters</h2>
+            <div class="muted small">The same filter set applies to both Alerts and Recent exported events.</div>
           </div>
           <div class="section-actions">
-            <button id="clearSectionEventsBtn" class="secondary">Clear section events</button>
-            <button id="copyEventsBtn" class="secondary">Copy JSON</button>
+            <button id="applyDashboardFiltersBtn" class="secondary">Apply filters</button>
+            <button id="clearDashboardFiltersBtn" class="secondary">Clear filters</button>
           </div>
         </div>
-        <div class="toolbar" style="margin-bottom:12px; grid-template-columns: 1fr 1fr auto;">
-          <label>
+        <div class="dashboard-filter-grid">
+          <div class="filter-group span-3">
+            <span class="label">Severity</span>
+            <div class="filter-chip-row" id="severityFilterGroup">
+              <label class="filter-chip"><input type="checkbox" value="HIGH" /><span>High</span></label>
+              <label class="filter-chip"><input type="checkbox" value="MEDIUM" /><span>Medium</span></label>
+              <label class="filter-chip"><input type="checkbox" value="LOW" /><span>Low</span></label>
+            </div>
+          </div>
+          <div class="filter-group span-3">
+            <span class="label">Triage</span>
+            <div class="filter-chip-row" id="triageFilterGroup">
+              <label class="filter-chip"><input type="checkbox" value="OPEN" /><span>Open</span></label>
+              <label class="filter-chip"><input type="checkbox" value="INVESTIGATING" /><span>Investigating</span></label>
+              <label class="filter-chip"><input type="checkbox" value="RESOLVED" /><span>Resolved</span></label>
+              <label class="filter-chip"><input type="checkbox" value="FALSE_POSITIVE" /><span>False positive</span></label>
+            </div>
+          </div>
+          <div class="filter-group span-3">
             <span class="label">Event type</span>
-            <select id="eventTypeFilter">
-              <option value="">All</option>
-              <option value="mobile_flow">mobile_flow</option>
-              <option value="mobile_alert">mobile_alert</option>
-            </select>
-          </label>
-          <label>
-            <span class="label">Status</span>
-            <select id="eventStatusFilter">
-              <option value="">All</option>
-              <option value="sent">sent</option>
-              <option value="pending">pending</option>
-            </select>
-          </label>
-          <button id="applyEventFiltersBtn" class="secondary">Apply</button>
-        </div>
-        <div class="stack list" id="events"></div>
-        <div class="pagination">
-          <div class="page-info" id="eventsPageInfo">Page 1 of 1</div>
-          <div class="section-actions">
-            <button id="eventsPrevBtn" class="secondary">Previous</button>
-            <button id="eventsNextBtn" class="secondary">Next</button>
+            <div class="filter-chip-row" id="eventTypeFilterGroup">
+              <label class="filter-chip"><input type="checkbox" value="mobile_alert" /><span>Alerts</span></label>
+              <label class="filter-chip"><input type="checkbox" value="mobile_flow" /><span>Flows</span></label>
+            </div>
           </div>
+          <div class="filter-group span-3">
+            <span class="label">Event status</span>
+            <div class="filter-chip-row" id="eventStatusFilterGroup">
+              <label class="filter-chip"><input type="checkbox" value="sent" /><span>Sent</span></label>
+              <label class="filter-chip"><input type="checkbox" value="pending" /><span>Pending</span></label>
+            </div>
+          </div>
+          <label class="span-3">
+            <span class="label">Model</span>
+            <input id="modelFilter" placeholder="remote_assisted" />
+          </label>
+          <label class="span-3">
+            <span class="label">ATT&CK</span>
+            <input id="attackFilter" placeholder="T1566" />
+          </label>
+          <label class="span-6">
+            <span class="label">Search</span>
+            <input id="searchFilter" placeholder="device, app, site, explanation, feature" />
+          </label>
         </div>
       </section>
 
-      <section class="panel span-5">
+      <section class="panel span-12">
         <div class="split" style="margin-bottom:12px;">
           <div>
             <h2>Alerts</h2>
@@ -334,39 +419,8 @@
           </div>
           <div class="section-actions">
             <button id="clearSectionAlertsBtn" class="secondary">Clear section alerts</button>
-            <button id="clearAlertFiltersBtn" class="secondary">Clear filters</button>
             <button id="copyAlertsBtn" class="secondary">Copy JSON</button>
           </div>
-        </div>
-        <div class="toolbar" style="margin-bottom:12px; grid-template-columns: 1fr 1fr 1fr 1.2fr auto;">
-          <label>
-            <span class="label">Severity</span>
-            <select id="severityFilter">
-              <option value="">All</option>
-              <option value="HIGH">HIGH</option>
-              <option value="MEDIUM">MEDIUM</option>
-              <option value="LOW">LOW</option>
-            </select>
-          </label>
-          <label>
-            <span class="label">Triage</span>
-            <select id="triageFilter">
-              <option value="">All</option>
-              <option value="OPEN">OPEN</option>
-              <option value="INVESTIGATING">INVESTIGATING</option>
-              <option value="RESOLVED">RESOLVED</option>
-              <option value="FALSE_POSITIVE">FALSE_POSITIVE</option>
-            </select>
-          </label>
-          <label>
-            <span class="label">Model</span>
-            <input id="modelFilter" placeholder="remote_assisted" />
-          </label>
-          <label>
-            <span class="label">Search</span>
-            <input id="searchFilter" placeholder="device, app, site, explanation, feature" />
-          </label>
-          <button id="applyAlertFiltersBtn" class="secondary">Apply</button>
         </div>
         <div class="stack list" id="alerts"></div>
         <div class="pagination">
@@ -374,6 +428,27 @@
           <div class="section-actions">
             <button id="alertsPrevBtn" class="secondary">Previous</button>
             <button id="alertsNextBtn" class="secondary">Next</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel span-12">
+        <div class="split" style="margin-bottom:12px;">
+          <div>
+            <h2>Recent exported events</h2>
+            <div class="muted small">Secondary evidence stream. Flow noise lives here; operator decisions live in Alerts.</div>
+          </div>
+          <div class="section-actions">
+            <button id="clearSectionEventsBtn" class="secondary">Clear section events</button>
+            <button id="copyEventsBtn" class="secondary">Copy JSON</button>
+          </div>
+        </div>
+        <div class="stack list" id="events"></div>
+        <div class="pagination">
+          <div class="page-info" id="eventsPageInfo">Page 1 of 1</div>
+          <div class="section-actions">
+            <button id="eventsPrevBtn" class="secondary">Previous</button>
+            <button id="eventsNextBtn" class="secondary">Next</button>
           </div>
         </div>
       </section>
@@ -414,7 +489,7 @@
           </div>
         </div>
         <div class="hint-box" style="margin-bottom:12px;">
-          Policy covers the remotely managed app settings: capture, export, thresholds, detection and shadow model, theme, debug mode, retention, false-positive budget, drift threshold, fusion weights, and app profile overrides. Privacy mode remains local-only by design.
+          Policy covers the remotely managed app settings: capture, export, thresholds, detection and shadow model, theme, debug mode, retention, false-positive budget, drift threshold, fusion weights, protected-brand watchlist, and app profile overrides. Privacy mode remains local-only by design.
         </div>
         <div class="form-grid">
           <label class="span-3">
@@ -465,9 +540,10 @@
             </select>
           </label>
 
+          <label class="span-2"><span class="label">Low threshold</span><input id="policyLow" value="0.30" /></label>
           <label class="span-2"><span class="label">Medium threshold</span><input id="policyMedium" value="0.60" /></label>
           <label class="span-2"><span class="label">High threshold</span><input id="policyHigh" value="0.85" /></label>
-          <label class="span-2"><span class="label">Retention days</span><input id="policyRetention" value="7" /></label>
+          <label class="span-2"><span class="label">Retention days</span><input id="policyRetention" value="90" /></label>
           <label class="span-2"><span class="label">FP budget/app/day</span><input id="policyBudget" value="12" /></label>
           <label class="span-2"><span class="label">Drift threshold</span><input id="policyDrift" value="0.65" /></label>
           <label class="span-2">
@@ -501,9 +577,14 @@
           <summary>Per-app overrides</summary>
           <div class="stack">
             <label>
+              <span class="label">Protected brands (one per line)</span>
+              <textarea id="policyProtectedBrands"></textarea>
+              <div class="json-help">These names drive local lookalike-domain detection on the phone and backend-side destination enrichment.</div>
+            </label>
+            <label>
               <span class="label">App threshold overrides (JSON)</span>
               <textarea id="policyThresholdOverrides">{}</textarea>
-              <div class="json-help">Example: {"com.android.chrome": {"medium": 0.72, "high": 0.92}}</div>
+              <div class="json-help">Example: {"com.android.chrome": {"low": 0.30, "medium": 0.72, "high": 0.92}}</div>
             </label>
             <label>
               <span class="label">App profile overrides (JSON)</span>
@@ -580,22 +661,23 @@
       deviceCards: document.getElementById("deviceCards"),
       healthNote: document.getElementById("healthNote"),
       stats: document.getElementById("stats"),
-      eventTypeFilter: document.getElementById("eventTypeFilter"),
-      eventStatusFilter: document.getElementById("eventStatusFilter"),
-      applyEventFiltersBtn: document.getElementById("applyEventFiltersBtn"),
+      alertSummary: document.getElementById("alertSummary"),
+      severityFilterGroup: document.getElementById("severityFilterGroup"),
+      triageFilterGroup: document.getElementById("triageFilterGroup"),
+      eventTypeFilterGroup: document.getElementById("eventTypeFilterGroup"),
+      eventStatusFilterGroup: document.getElementById("eventStatusFilterGroup"),
+      applyDashboardFiltersBtn: document.getElementById("applyDashboardFiltersBtn"),
+      clearDashboardFiltersBtn: document.getElementById("clearDashboardFiltersBtn"),
       events: document.getElementById("events"),
       clearSectionEventsBtn: document.getElementById("clearSectionEventsBtn"),
       copyEventsBtn: document.getElementById("copyEventsBtn"),
       eventsPageInfo: document.getElementById("eventsPageInfo"),
       eventsPrevBtn: document.getElementById("eventsPrevBtn"),
       eventsNextBtn: document.getElementById("eventsNextBtn"),
-      severityFilter: document.getElementById("severityFilter"),
-      triageFilter: document.getElementById("triageFilter"),
       modelFilter: document.getElementById("modelFilter"),
+      attackFilter: document.getElementById("attackFilter"),
       searchFilter: document.getElementById("searchFilter"),
-      applyAlertFiltersBtn: document.getElementById("applyAlertFiltersBtn"),
       clearSectionAlertsBtn: document.getElementById("clearSectionAlertsBtn"),
-      clearAlertFiltersBtn: document.getElementById("clearAlertFiltersBtn"),
       alerts: document.getElementById("alerts"),
       alertsCount: document.getElementById("alertsCount"),
       copyAlertsBtn: document.getElementById("copyAlertsBtn"),
@@ -612,6 +694,7 @@
       policyThemeMode: document.getElementById("policyThemeMode"),
       policyCaptureEnabled: document.getElementById("policyCaptureEnabled"),
       policyExportEnabled: document.getElementById("policyExportEnabled"),
+      policyLow: document.getElementById("policyLow"),
       policyMedium: document.getElementById("policyMedium"),
       policyHigh: document.getElementById("policyHigh"),
       policyRetention: document.getElementById("policyRetention"),
@@ -630,6 +713,7 @@
       fusionDataQuality: document.getElementById("fusionDataQuality"),
       fusionResponseAnomaly: document.getElementById("fusionResponseAnomaly"),
       fusionResponseContext: document.getElementById("fusionResponseContext"),
+      policyProtectedBrands: document.getElementById("policyProtectedBrands"),
       policyThresholdOverrides: document.getElementById("policyThresholdOverrides"),
       policyAppProfiles: document.getElementById("policyAppProfiles"),
       policyEditorOutput: document.getElementById("policyEditorOutput"),
@@ -654,6 +738,8 @@
       filteredEvents: [],
       allAlerts: [],
       filteredAlerts: [],
+      expandedEventIds: new Set(),
+      expandedAlertIds: new Set(),
       eventsPage: 1,
       alertsPage: 1,
       pageSize: 20,
@@ -719,6 +805,25 @@
       return `<div class="stat"><div class="muted small">${label}</div><div class="value">${value}</div></div>`;
     }
 
+    function bindDetailsState(container, kind) {
+      const targetSet = kind === "event" ? state.expandedEventIds : state.expandedAlertIds;
+      container.querySelectorAll(`details[data-kind="${kind}"]`).forEach(node => {
+        const id = node.getAttribute("data-id") || "";
+        node.open = targetSet.has(id);
+        node.addEventListener("toggle", () => {
+          if (node.open) {
+            targetSet.add(id);
+          } else {
+            targetSet.delete(id);
+          }
+        });
+      });
+    }
+
+    function hasExpandedDetails() {
+      return state.expandedEventIds.size > 0 || state.expandedAlertIds.size > 0;
+    }
+
     const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
     const epochFormatter = new Intl.DateTimeFormat("en-GB", {
       day: "2-digit",
@@ -764,6 +869,33 @@
         page: safePage,
         totalPages
       };
+    }
+
+    function selectedFilterValues(container) {
+      if (!container) {
+        return [];
+      }
+      return Array.from(container.querySelectorAll('input[type="checkbox"]:checked'))
+        .map(input => String(input.value || "").trim())
+        .filter(Boolean);
+    }
+
+    function clearFilterValues(container) {
+      if (!container) {
+        return;
+      }
+      container.querySelectorAll('input[type="checkbox"]').forEach(input => {
+        input.checked = false;
+      });
+    }
+
+    function applyDashboardFiltersAndRender({ resetPages = false } = {}) {
+      if (resetPages) {
+        state.eventsPage = 1;
+        state.alertsPage = 1;
+      }
+      renderEvents(applyEventFilters(state.allEvents));
+      renderAlerts(applyAlertFilters(state.allAlerts));
     }
 
     function renderSelectionSummary() {
@@ -888,11 +1020,53 @@
       els.healthNote.textContent = warnings || `Wazuh ${health.wazuh_configured ? "configured" : "off"} • Resistine ${health.resistine_configured ? "configured" : "off"}`;
     }
 
+    function classifyAlert(alert) {
+      const triage = String(alert.triage_status || "OPEN");
+      const severity = String(alert.severity || "LOW");
+      if (triage === "FALSE_POSITIVE") return { label: "False positive", cls: "risk-muted" };
+      if (triage === "RESOLVED") return { label: "Confirmed dangerous", cls: "risk-danger" };
+      if (triage === "INVESTIGATING") return { label: "Under investigation", cls: "risk-review" };
+      if (severity === "HIGH") return { label: "Dangerous", cls: "risk-danger" };
+      if (severity === "MEDIUM") return { label: "Needs review", cls: "risk-review" };
+      return { label: "Informational", cls: "risk-clean" };
+    }
+
+    function alertReasonSummary(alert) {
+      const raw = String(alert.explanation || "").trim();
+      if (!raw) return "No explanation provided.";
+      const withoutSuppression = raw.split(" Suppression:")[0].trim();
+      const beforeContributors = withoutSuppression.split("Top contributors:")[0].trim();
+      if (beforeContributors) {
+        return beforeContributors;
+      }
+      if (raw.startsWith("Top contributors:")) {
+        return "Feature pattern anomaly detected.";
+      }
+      return raw;
+    }
+
+    function renderAlertSummary(items) {
+      const dangerous = items.filter(alert => classifyAlert(alert).label === "Dangerous" || classifyAlert(alert).label === "Confirmed dangerous").length;
+      const review = items.filter(alert => classifyAlert(alert).label === "Needs review" || classifyAlert(alert).label === "Under investigation").length;
+      const informational = items.filter(alert => classifyAlert(alert).label === "Informational").length;
+      const falsePositive = items.filter(alert => String(alert.triage_status || "") === "FALSE_POSITIVE").length;
+      const open = items.filter(alert => String(alert.triage_status || "OPEN") === "OPEN").length;
+      const incidents = new Set(items.map(alert => alert.correlation_key).filter(Boolean)).size;
+      els.alertSummary.innerHTML = [
+        cardStat("Dangerous", dangerous),
+        cardStat("Needs review", review),
+        cardStat("Informational", informational),
+        cardStat("False positive", falsePositive),
+        cardStat("Open triage", open),
+        cardStat("Incidents", incidents)
+      ].join("");
+    }
+
     function eventSummary(payload) {
       if (!payload) return "No payload";
-      const target = payload.site_hint || payload.dst_host || payload.dst_ip || payload.dst_host_hash || "-";
       if (payload.event_type === "mobile_flow") {
-        return `${payload.app_id} -> ${target}${payload.dst_port ? `:${payload.dst_port}` : ""} • ${payload.protocol}`;
+        const site = payload.site_hint || (payload.dst_port ? `port ${payload.dst_port}` : "no site hint");
+        return `${payload.app_id} • ${payload.protocol} • ${site} • ↑${payload.bytes_out ?? 0} ↓${payload.bytes_in ?? 0}`;
       }
       if (payload.event_type === "mobile_alert") {
         return `${payload.app_id} • ${payload.severity} • ${payload.source_model}${payload.site_hint ? ` • ${payload.site_hint}` : ""}`;
@@ -903,7 +1077,30 @@
     function alertsFromEvents(items) {
       return items
         .filter(item => item.event_type === "mobile_alert" && item.payload)
-        .map(item => item.payload);
+        .map(item => {
+          const payload = { ...item.payload };
+          if (typeof payload.top_features === "string") {
+            try {
+              payload.top_features = JSON.parse(payload.top_features);
+            } catch {
+              payload.top_features = [];
+            }
+          }
+          if (!Array.isArray(payload.top_features)) {
+            payload.top_features = [];
+          }
+          if (typeof payload.data_quality_warnings === "string") {
+            try {
+              payload.data_quality_warnings = JSON.parse(payload.data_quality_warnings);
+            } catch {
+              payload.data_quality_warnings = [];
+            }
+          }
+          if (!Array.isArray(payload.data_quality_warnings)) {
+            payload.data_quality_warnings = [];
+          }
+          return payload;
+        });
     }
 
     function renderEvents(items) {
@@ -929,50 +1126,25 @@
               <span class="chip">${escapeHtml(deviceName)}</span>
               <span class="chip ${item.status}">${item.status}</span>
               <span class="chip">attempts ${item.attempts}</span>
+              <span class="chip">${formatEpoch(item.updated_epoch)}</span>
             </div>
           </div>
-          <div>${eventSummary(item.payload)}</div>
+          <div>${escapeHtml(eventSummary(item.payload))}</div>
           ${item.last_error ? `<div class="danger-text small" style="margin-top:8px;">Last error: ${item.last_error}</div>` : ""}
-          <details style="margin-top:10px;"><summary>Raw payload</summary><div><pre>${JSON.stringify(item.payload, null, 2)}</pre></div></details>
+          <details data-kind="event" data-id="${escapeHtml(item.event_id)}" style="margin-top:10px;"><summary>Raw payload</summary><div><pre>${JSON.stringify(item.payload, null, 2)}</pre></div></details>
         </div>
       `;
       }).join("");
+      bindDetailsState(els.events, "event");
     }
 
-    function renderAlertFilterCounts(items) {
-      const counts = {
-        all: items.length,
-        high: items.filter(alert => alert.severity === "HIGH").length,
-        medium: items.filter(alert => alert.severity === "MEDIUM").length,
-        low: items.filter(alert => alert.severity === "LOW").length,
-        open: items.filter(alert => alert.triage_status === "OPEN").length,
-        investigating: items.filter(alert => alert.triage_status === "INVESTIGATING").length,
-        resolved: items.filter(alert => alert.triage_status === "RESOLVED").length,
-        falsePositive: items.filter(alert => alert.triage_status === "FALSE_POSITIVE").length
-      };
-      els.severityFilter.innerHTML = `
-        <option value="">All (${counts.all})</option>
-        <option value="HIGH">High (${counts.high})</option>
-        <option value="MEDIUM">Medium (${counts.medium})</option>
-        <option value="LOW">Low (${counts.low})</option>
-      `;
-      els.triageFilter.innerHTML = `
-        <option value="">All (${counts.all})</option>
-        <option value="OPEN">Open (${counts.open})</option>
-        <option value="INVESTIGATING">Investigating (${counts.investigating})</option>
-        <option value="RESOLVED">Resolved (${counts.resolved})</option>
-        <option value="FALSE_POSITIVE">False positive (${counts.falsePositive})</option>
-      `;
-      if (els.severityFilter.dataset.selected) {
-        els.severityFilter.value = els.severityFilter.dataset.selected;
-      }
-      if (els.triageFilter.dataset.selected) {
-        els.triageFilter.value = els.triageFilter.dataset.selected;
-      }
+    function renderAlertFilterCounts(_items) {
+      return;
     }
 
     function renderAlerts(items) {
       state.filteredAlerts = items;
+      renderAlertSummary(items);
       renderAlertFilterCounts(items);
       const { pageItems, page, totalPages } = paginate(items, state.alertsPage);
       state.alertsPage = page;
@@ -988,12 +1160,18 @@
       els.alerts.innerHTML = pageItems.map(alert => {
         const device = state.devices.find(entry => entry.device_id_pseudo === alert.device_id_pseudo);
         const deviceName = displayDeviceName(device || alert);
+        const risk = classifyAlert(alert);
+        const reason = alertReasonSummary(alert);
+        const mitre = Array.isArray(alert.mitre_techniques) ? alert.mitre_techniques : [];
         return `
-        <div class="alert-card">
+        <div class="alert-card ${risk.cls === 'risk-danger' ? 'primary' : ''}">
           <div class="split" style="margin-bottom:8px;">
-            <strong>${alert.app_id}</strong>
+            <div>
+              <strong>${escapeHtml(alert.app_id)}</strong>
+              <div class="muted small">${escapeHtml(deviceName)}${alert.site_hint ? ` • ${escapeHtml(alert.site_hint)}` : ""}</div>
+            </div>
             <div class="chips">
-              <span class="chip">${escapeHtml(deviceName)}</span>
+              <span class="chip ${risk.cls}">${risk.label}</span>
               <span class="chip ${String(alert.severity || "").toLowerCase()}">${alert.severity}</span>
               <span class="chip">${alert.triage_status}</span>
               <span class="chip">${alert.source_model}</span>
@@ -1003,15 +1181,41 @@
             <span class="chip">response ${Number(alert.response_score ?? alert.anomaly_score ?? 0).toFixed(3)}</span>
             <span class="chip">anomaly ${Number(alert.base_anomaly_score ?? alert.anomaly_score ?? 0).toFixed(3)}</span>
             <span class="chip">context ${Number(alert.context_score ?? 0).toFixed(3)}</span>
+            <span class="chip">confidence ${Math.round(Number(alert.confidence ?? 0) * 100)}%</span>
+            ${alert.destination_identity ? `<span class="chip">${escapeHtml(alert.destination_identity)}</span>` : ""}
+            ${Number(alert.lookalike_score ?? 0) > 0 ? `<span class="chip warn-text">lookalike ${Number(alert.lookalike_score).toFixed(2)}</span>` : ""}
           </div>
-          <div class="muted small">${alert.site_hint ? `Site ${alert.site_hint} • ` : ""}${alert.explanation || ""}</div>
+          <div class="muted small">${escapeHtml(reason)}</div>
           <div class="chips" style="margin:10px 0;">
-            ${(alert.top_features || []).map(feature => `<span class="chip">${feature}</span>`).join("")}
+            ${(alert.top_features || []).slice(0, 4).map(feature => `<span class="chip">${escapeHtml(feature)}</span>`).join("")}
+            ${mitre.map(technique => `<span class="chip warn-text">${escapeHtml(technique)}</span>`).join("")}
           </div>
-          <details><summary>Alert JSON</summary><div><pre>${JSON.stringify(alert, null, 2)}</pre></div></details>
+          <div class="alert-actions">
+            <button class="secondary alert-triage-btn" data-alert-id="${escapeHtml(alert.alert_id || alert.id)}" data-status="INVESTIGATING" type="button">Investigating</button>
+            <button class="warn alert-triage-btn" data-alert-id="${escapeHtml(alert.alert_id || alert.id)}" data-status="RESOLVED" type="button">Dangerous</button>
+            <button class="secondary alert-triage-btn" data-alert-id="${escapeHtml(alert.alert_id || alert.id)}" data-status="FALSE_POSITIVE" type="button">False positive</button>
+          </div>
+          <details data-kind="alert" data-id="${escapeHtml(alert.alert_id || alert.id)}"><summary>Alert JSON</summary><div><pre>${JSON.stringify(alert, null, 2)}</pre></div></details>
         </div>
       `;
       }).join("");
+      bindDetailsState(els.alerts, "alert");
+      els.alerts.querySelectorAll(".alert-triage-btn").forEach(button => {
+        button.addEventListener("click", async () => {
+          const alertId = button.getAttribute("data-alert-id");
+          const nextStatus = button.getAttribute("data-status");
+          if (!alertId || !nextStatus) return;
+          try {
+            await api(`/api/v1/alerts/${encodeURIComponent(alertId)}/triage`, {
+              method: "PATCH",
+              body: JSON.stringify({ status: nextStatus, note: "" })
+            });
+            await refreshData();
+          } catch (error) {
+            showGlobalError(error);
+          }
+        });
+      });
     }
 
     function renderIncidents(items) {
@@ -1032,25 +1236,87 @@
     }
 
     function applyEventFilters(items) {
+      const eventTypeFilters = selectedFilterValues(els.eventTypeFilterGroup);
+      const eventStatusFilters = selectedFilterValues(els.eventStatusFilterGroup);
+      const severityFilters = selectedFilterValues(els.severityFilterGroup);
+      const triageFilters = selectedFilterValues(els.triageFilterGroup);
+      const modelNeedle = els.modelFilter.value.trim().toLowerCase();
+      const searchNeedle = els.searchFilter.value.trim().toLowerCase();
       return items.filter(item => {
-        const eventTypeMatches = !els.eventTypeFilter.value || item.event_type === els.eventTypeFilter.value;
-        const statusMatches = !els.eventStatusFilter.value || item.status === els.eventStatusFilter.value;
-        return eventTypeMatches && statusMatches;
+        const payload = item.payload || {};
+        if (eventTypeFilters.length && !eventTypeFilters.includes(String(item.event_type || ""))) {
+          return false;
+        }
+        if (eventStatusFilters.length && !eventStatusFilters.includes(String(item.status || ""))) {
+          return false;
+        }
+        if (severityFilters.length) {
+          const severity = String(payload.severity || "").toUpperCase();
+          if (!severity || !severityFilters.includes(severity)) {
+            return false;
+          }
+        }
+        if (triageFilters.length) {
+          const triage = String(payload.triage_status || "").toUpperCase();
+          if (!triage || !triageFilters.includes(triage)) {
+            return false;
+          }
+        }
+        if (modelNeedle) {
+          const sourceModel = String(payload.source_model || "").toLowerCase();
+          if (!sourceModel.includes(modelNeedle)) {
+            return false;
+          }
+        }
+        if (!searchNeedle) {
+          return true;
+        }
+        const haystack = [
+          item.event_id,
+          item.event_type,
+          item.status,
+          payload.device_id_pseudo,
+          payload.app_id,
+          payload.site_hint,
+          payload.destination_identity,
+          payload.explanation,
+          payload.source_model,
+          ...(Array.isArray(payload.mitre_techniques) ? payload.mitre_techniques : []),
+          ...(Array.isArray(payload.threat_tags) ? payload.threat_tags : []),
+          ...(Array.isArray(payload.top_features) ? payload.top_features : [])
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(searchNeedle);
       });
     }
 
     function applyAlertFilters(items) {
+      const severityFilters = selectedFilterValues(els.severityFilterGroup);
+      const triageFilters = selectedFilterValues(els.triageFilterGroup);
+      const eventTypeFilters = selectedFilterValues(els.eventTypeFilterGroup);
       const modelNeedle = els.modelFilter.value.trim().toLowerCase();
+      const attackNeedle = els.attackFilter.value.trim().toLowerCase();
       const searchNeedle = els.searchFilter.value.trim().toLowerCase();
       return items.filter(alert => {
-        if (els.severityFilter.value && alert.severity !== els.severityFilter.value) {
+        if (eventTypeFilters.length && !eventTypeFilters.includes("mobile_alert")) {
           return false;
         }
-        if (els.triageFilter.value && alert.triage_status !== els.triageFilter.value) {
+        if (severityFilters.length && !severityFilters.includes(String(alert.severity || "").toUpperCase())) {
           return false;
         }
-        if (modelNeedle && String(alert.source_model || "").toLowerCase() !== modelNeedle) {
+        if (triageFilters.length && !triageFilters.includes(String(alert.triage_status || "").toUpperCase())) {
           return false;
+        }
+        if (modelNeedle && !String(alert.source_model || "").toLowerCase().includes(modelNeedle)) {
+          return false;
+        }
+        if (attackNeedle) {
+          const techniques = Array.isArray(alert.mitre_techniques) ? alert.mitre_techniques.map(item => String(item).toLowerCase()) : [];
+          if (!techniques.some(item => item.includes(attackNeedle))) {
+            return false;
+          }
         }
         if (!searchNeedle) {
           return true;
@@ -1059,8 +1325,11 @@
           alert.device_id_pseudo,
           alert.app_id,
           alert.site_hint,
+          alert.destination_identity,
           alert.explanation,
           alert.source_model,
+          ...(alert.mitre_techniques || []),
+          ...(alert.threat_tags || []),
           ...(alert.top_features || [])
         ]
           .filter(Boolean)
@@ -1158,7 +1427,8 @@
           toggle.setAttribute("aria-expanded", String(!collapsed));
         };
 
-        let collapsed = window.localStorage.getItem(storageKey) === "1";
+        const stored = window.localStorage.getItem(storageKey);
+        let collapsed = stored === null ? panel.dataset.defaultCollapsed === "true" : stored === "1";
         apply(collapsed);
         toggle.addEventListener("click", () => {
           collapsed = !collapsed;
@@ -1177,9 +1447,10 @@
       els.policyThemeMode.value = policy.theme_mode || "SYSTEM";
       els.policyCaptureEnabled.value = String(policy.capture_enabled ?? true);
       els.policyExportEnabled.value = String(policy.export_enabled ?? true);
+      els.policyLow.value = String(policy.default_thresholds?.low ?? 0.30);
       els.policyMedium.value = String(policy.default_thresholds?.medium ?? 0.60);
       els.policyHigh.value = String(policy.default_thresholds?.high ?? 0.85);
-      els.policyRetention.value = String(policy.retention_days ?? 7);
+      els.policyRetention.value = String(policy.retention_days ?? 90);
       els.policyBudget.value = String(policy.false_positive_budget_per_app_day ?? 12);
       els.policyDrift.value = String(policy.drift_high_threshold ?? 0.65);
       els.policyDebugEnabled.value = String(policy.debug_mode_enabled ?? false);
@@ -1196,6 +1467,7 @@
       els.fusionDataQuality.value = String(fusion.data_quality_penalty ?? 0.10);
       els.fusionResponseAnomaly.value = String(fusion.response_anomaly ?? 0.82);
       els.fusionResponseContext.value = String(fusion.response_context ?? 0.18);
+      els.policyProtectedBrands.value = policy.protected_brands_csv || "";
       els.policyThresholdOverrides.value = JSON.stringify(policy.app_threshold_overrides || {}, null, 2);
       els.policyAppProfiles.value = JSON.stringify(policy.app_profile_overrides || {}, null, 2);
     }
@@ -1206,6 +1478,7 @@
       return {
         policy_version: state.currentPolicyVersion + 1,
         default_thresholds: {
+          low: Number.parseFloat(els.policyLow.value),
           medium: Number.parseFloat(els.policyMedium.value),
           high: Number.parseFloat(els.policyHigh.value)
         },
@@ -1219,6 +1492,7 @@
         capture_enabled: els.policyCaptureEnabled.value === "true",
         theme_mode: els.policyThemeMode.value,
         debug_mode_enabled: els.policyDebugEnabled.value === "true",
+        protected_brands_csv: (els.policyProtectedBrands.value || "").trim() || null,
         fusion_weights: {
           statistical: Number.parseFloat(els.fusionStat.value),
           multivariate: Number.parseFloat(els.fusionMultivariate.value),
@@ -1267,6 +1541,7 @@
         els.events.innerHTML = `<div class="empty">No devices selected.</div>`;
         els.alerts.innerHTML = `<div class="empty">No devices selected.</div>`;
         els.alertsCount.textContent = "0 item(s)";
+        els.alertSummary.innerHTML = "";
         els.incidents.innerHTML = `<tr><td colspan="6" class="muted">No devices selected.</td></tr>`;
         els.quality.textContent = "No devices selected.";
         return;
@@ -1274,6 +1549,9 @@
 
       const eventParams = deviceQuery(new URLSearchParams());
       eventParams.set("limit", "1000");
+      const alertEventParams = deviceQuery(new URLSearchParams());
+      alertEventParams.set("limit", "1000");
+      alertEventParams.set("event_type", "mobile_alert");
 
       const alertParams = deviceQuery(new URLSearchParams());
       alertParams.set("limit", "1000");
@@ -1283,9 +1561,10 @@
 
       const qualityParams = deviceQuery(new URLSearchParams());
 
-      const [health, events, alerts, incidents, quality] = await Promise.all([
+      const [health, events, alertEvents, alerts, incidents, quality] = await Promise.all([
         api("/health"),
         api(`/api/v1/events/recent?${eventParams.toString()}`),
+        api(`/api/v1/events/recent?${alertEventParams.toString()}`),
         api(`/api/v1/alerts?${alertParams.toString()}`),
         api(`/api/v1/incidents?${incidentParams.toString()}`),
         api(`/api/v1/quality/summary?${qualityParams.toString()}`)
@@ -1294,9 +1573,9 @@
       renderHealth(health);
       state.allEvents = Array.isArray(events.events) ? events.events : [];
       const backendAlerts = Array.isArray(alerts.alerts) ? alerts.alerts : [];
-      state.allAlerts = backendAlerts.length ? backendAlerts : alertsFromEvents(state.allEvents);
-      renderEvents(applyEventFilters(state.allEvents));
-      renderAlerts(applyAlertFilters(state.allAlerts));
+      const fallbackAlertEvents = Array.isArray(alertEvents.events) ? alertEvents.events : [];
+      state.allAlerts = backendAlerts.length ? backendAlerts : alertsFromEvents(fallbackAlertEvents);
+      applyDashboardFiltersAndRender();
       renderIncidents(incidents.incidents || []);
       els.quality.textContent = JSON.stringify(quality.quality || {}, null, 2);
     }
@@ -1426,25 +1705,18 @@
     }
 
     els.refreshBtn.addEventListener("click", () => refreshAll().catch(showGlobalError));
-    els.applyEventFiltersBtn.addEventListener("click", () => {
-      state.eventsPage = 1;
-      renderEvents(applyEventFilters(state.allEvents));
+    els.applyDashboardFiltersBtn.addEventListener("click", () => {
+      applyDashboardFiltersAndRender({ resetPages: true });
     });
-    els.applyAlertFiltersBtn.addEventListener("click", () => {
-      els.severityFilter.dataset.selected = els.severityFilter.value;
-      els.triageFilter.dataset.selected = els.triageFilter.value;
-      state.alertsPage = 1;
-      renderAlerts(applyAlertFilters(state.allAlerts));
-    });
-    els.clearAlertFiltersBtn.addEventListener("click", () => {
-      els.severityFilter.value = "";
-      els.severityFilter.dataset.selected = "";
-      els.triageFilter.value = "";
-      els.triageFilter.dataset.selected = "";
+    els.clearDashboardFiltersBtn.addEventListener("click", () => {
+      clearFilterValues(els.severityFilterGroup);
+      clearFilterValues(els.triageFilterGroup);
+      clearFilterValues(els.eventTypeFilterGroup);
+      clearFilterValues(els.eventStatusFilterGroup);
       els.modelFilter.value = "";
+      els.attackFilter.value = "";
       els.searchFilter.value = "";
-      state.alertsPage = 1;
-      renderAlerts(applyAlertFilters(state.allAlerts));
+      applyDashboardFiltersAndRender({ resetPages: true });
     });
     els.copyEventsBtn.addEventListener("click", async () => {
       await navigator.clipboard.writeText(JSON.stringify(state.lastEvents, null, 2));
@@ -1517,8 +1789,11 @@
     }
     refreshAll().catch(showGlobalError);
     window.setInterval(() => {
+      if (hasExpandedDetails()) {
+        return;
+      }
       refreshAll().catch(() => {});
-    }, 10000);
+    }, 30000);
   </script>
 </body>
 </html>

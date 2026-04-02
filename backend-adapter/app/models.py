@@ -6,8 +6,17 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ThresholdProfile(BaseModel):
+    low: float = Field(ge=0.0, le=1.0)
     medium: float = Field(ge=0.0, le=1.0)
     high: float = Field(ge=0.0, le=1.0)
+
+    @field_validator("medium")
+    @classmethod
+    def validate_medium_ge_low(cls, value: float, info):
+        low = info.data.get("low") if info and info.data else None
+        if low is not None and value < low:
+            raise ValueError("medium threshold must be >= low")
+        return value
 
     @field_validator("high")
     @classmethod
@@ -38,7 +47,7 @@ class DevicePolicyPayload(BaseModel):
     default_thresholds: ThresholdProfile
     app_threshold_overrides: dict[str, ThresholdProfile] = Field(default_factory=dict)
     export_enabled: bool = True
-    retention_days: int = Field(default=7, ge=1, le=90)
+    retention_days: int = Field(default=90, ge=1, le=90)
     detection_model: str = Field(default="ensemble_fusion", max_length=64)
     shadow_model: str | None = Field(default=None, max_length=64)
     false_positive_budget_per_app_day: int = Field(default=12, ge=1, le=250)
@@ -51,6 +60,7 @@ class DevicePolicyPayload(BaseModel):
     disable_timing_features: bool = False
     disable_destination_features: bool = False
     app_profile_overrides: dict[str, Literal["DEFAULT", "TRUSTED", "HIGH_CHURN", "BROWSER", "SYSTEM"]] = Field(default_factory=dict)
+    protected_brands_csv: str | None = Field(default=None, max_length=8192)
 
     @model_validator(mode="after")
     def validate_override_count(self):
@@ -84,10 +94,35 @@ class MobileFlowEvent(BaseModel):
     duration_ms: int = Field(ge=0)
     timestamp_start: int
     timestamp_end: int
+    is_new_destination_for_app: float | None = Field(default=None, ge=0.0, le=1.0)
+    dst_novelty: float | None = Field(default=None, ge=0.0, le=1.0)
     anomaly_score: float | None = Field(default=None, ge=0.0, le=1.0)
     explain_top_features: list[str] | None = None
     site_hint: str | None = Field(default=None, max_length=512)
     device_label: str | None = Field(default=None, max_length=256)
+    destination_key: str | None = Field(default=None, max_length=512)
+    dns_query_name: str | None = Field(default=None, max_length=512)
+    dns_query_type: str | None = Field(default=None, max_length=64)
+    dns_response_code: int | None = Field(default=None, ge=0, le=255)
+    dns_answer_value: str | None = Field(default=None, max_length=512)
+    tls_sni: str | None = Field(default=None, max_length=512)
+    tls_alpn: str | None = Field(default=None, max_length=64)
+    tls_version: str | None = Field(default=None, max_length=64)
+    tls_ja3_like: str | None = Field(default=None, max_length=128)
+    tls_leaf_subject: str | None = Field(default=None, max_length=1024)
+    tls_leaf_issuer: str | None = Field(default=None, max_length=1024)
+    tls_leaf_san: str | None = Field(default=None, max_length=2048)
+    http_method: str | None = Field(default=None, max_length=32)
+    http_host: str | None = Field(default=None, max_length=512)
+    http_path: str | None = Field(default=None, max_length=2048)
+    quic_version: str | None = Field(default=None, max_length=64)
+    quic_detected: bool | None = None
+    http3_detected: bool | None = None
+    registrable_domain: str | None = Field(default=None, max_length=512)
+    brand_match: str | None = Field(default=None, max_length=128)
+    lookalike_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    threat_tags: list[str] | None = None
+    mitre_techniques: list[str] | None = None
 
     # P1: NetFlow/IPFIX-style fields
     netflow_version: int | None = Field(default=None, ge=1)
@@ -139,6 +174,7 @@ class MobileAlertEvent(BaseModel):
     response_score: float | None = Field(default=None, ge=0.0, le=1.0)
     severity: Literal["LOW", "MEDIUM", "HIGH"]
     top_features: list[str] = Field(default_factory=list)
+    feature_contributions: dict[str, float] | None = Field(default=None)
     explanation: str = Field(default="", max_length=2048)
     source_model: str = Field(default="unknown", max_length=128)
     site_hint: str | None = Field(default=None, max_length=512)
@@ -156,6 +192,11 @@ class MobileAlertEvent(BaseModel):
     suppression_reason: str | None = Field(default=None, max_length=512)
     data_quality_warnings: list[str] | None = Field(default=None)
     beacon_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    mitre_techniques: list[str] | None = Field(default=None)
+    mitre_matches: list[dict] | None = Field(default=None)
+    destination_identity: str | None = Field(default=None, max_length=512)
+    lookalike_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    threat_tags: list[str] | None = Field(default=None)
     triage_status: Literal["OPEN", "INVESTIGATING", "RESOLVED", "FALSE_POSITIVE"] = "OPEN"
     triage_note: str = Field(default="", max_length=1024)
     timestamp: int
@@ -246,6 +287,17 @@ class RemoteFeatureWindowPayload(BaseModel):
     payload_mean: float = Field(default=0.0, ge=0.0)
     load_mean: float = Field(default=0.0, ge=0.0)
     transport_metrics_present: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class DestinationEnrichmentRequest(BaseModel):
+    site_hint: str | None = Field(default=None, max_length=512)
+    dns_query_name: str | None = Field(default=None, max_length=512)
+    tls_sni: str | None = Field(default=None, max_length=512)
+    http_host: str | None = Field(default=None, max_length=512)
+    dst_ip: str | None = Field(default=None, max_length=128)
+    dst_port: int = Field(default=443, ge=0, le=65535)
+    fetch_certificate: bool = False
+    protected_brands_csv: str | None = Field(default=None, max_length=8192)
 
 
 class RemoteInferenceRequest(BaseModel):

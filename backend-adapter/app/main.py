@@ -10,10 +10,17 @@ from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, Header, HTTPExcep
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from .config import load_settings
+from .destination_enrichment import (
+    DEFAULT_PROTECTED_BRANDS,
+    DestinationEnrichmentInput,
+    analyze_destination,
+    normalize_protected_brands_csv,
+)
 from .models import (
     AdminPurgeRequest,
     AdapterEventAck,
     AlertTriageUpdate,
+    DestinationEnrichmentRequest,
     DeviceHeartbeatPayload,
     DeviceDisplayNameUpdate,
     DevicePolicyPayload,
@@ -66,6 +73,26 @@ def _parse_device_filters(
     return deduped
 
 
+def _parse_csv_enum_filters(
+    raw_value: str | None,
+    *,
+    allowed: set[str],
+    label: str,
+) -> list[str]:
+    if raw_value is None:
+        return []
+    values = [part.strip().upper() for part in raw_value.split(",")]
+    deduped: list[str] = []
+    for value in values:
+        if not value:
+            continue
+        if value not in allowed:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid {label}")
+        if value not in deduped:
+            deduped.append(value)
+    return deduped
+
+
 def _alert_payload(alert) -> dict:
     payload = dict(alert.__dict__)
     raw_top_features = payload.pop("top_features_json", "[]")
@@ -89,10 +116,157 @@ def _alert_payload(alert) -> dict:
         feature_window = {}
     if not isinstance(feature_window, dict):
         feature_window = {}
+    raw_mitre = payload.pop("mitre_techniques_json", "[]")
+    try:
+        mitre_techniques = json.loads(raw_mitre) if raw_mitre else []
+    except Exception:  # noqa: BLE001
+        mitre_techniques = []
+    if not isinstance(mitre_techniques, list):
+        mitre_techniques = []
+    raw_mitre_matches = payload.pop("mitre_matches_json", "[]")
+    try:
+        mitre_matches = json.loads(raw_mitre_matches) if raw_mitre_matches else []
+    except Exception:  # noqa: BLE001
+        mitre_matches = []
+    if not isinstance(mitre_matches, list):
+        mitre_matches = []
+    raw_threat_tags = payload.pop("threat_tags_json", "[]")
+    try:
+        threat_tags = json.loads(raw_threat_tags) if raw_threat_tags else []
+    except Exception:  # noqa: BLE001
+        threat_tags = []
+    if not isinstance(threat_tags, list):
+        threat_tags = []
     payload["top_features"] = [str(item) for item in top_features]
     payload["data_quality_warnings"] = [str(item) for item in warnings]
     payload["window_features"] = feature_window
+    payload["mitre_techniques"] = [str(item) for item in mitre_techniques]
+    payload["mitre_matches"] = mitre_matches
+    payload["threat_tags"] = [str(item) for item in threat_tags]
     return payload
+
+
+def _destination_cache_key(payload: dict) -> str:
+    components = [
+        str(payload.get("destination_identity") or "").strip().lower(),
+        str(payload.get("site_hint") or "").strip().lower(),
+        str(payload.get("window_features", {}).get("dns_query_name") or "").strip().lower(),
+        str(payload.get("window_features", {}).get("tls_sni") or "").strip().lower(),
+        str(payload.get("window_features", {}).get("http_host") or "").strip().lower(),
+        str(payload.get("window_features", {}).get("dst_ip") or payload.get("window_features", {}).get("destination_ip") or "").strip().lower(),
+        str(payload.get("window_features", {}).get("dst_port") or payload.get("window_features", {}).get("destination_port") or payload.get("destination_port") or 443),
+    ]
+    return "|".join(components)
+
+
+def _policy_protected_brands(device_id_pseudo: str | None) -> tuple[str, ...]:
+    if not device_id_pseudo:
+        return DEFAULT_PROTECTED_BRANDS
+    policy = storage.get_policy(device_id_pseudo) or storage.get_policy(_GLOBAL_POLICY_ID) or _DEFAULT_POLICY
+    return normalize_protected_brands_csv(policy.get("protected_brands_csv"))
+
+
+def _auto_enrich_alert_payload(payload: dict) -> dict:
+    enriched = dict(payload)
+    window_features = dict(enriched.get("window_features") or {})
+    lookalike_score = float(enriched.get("lookalike_score") or 0.0)
+    severity = str(enriched.get("severity") or "LOW").upper()
+    protected_brands = _policy_protected_brands(str(enriched.get("device_id_pseudo") or "").strip() or None)
+    should_enrich = bool(
+        severity in {"MEDIUM", "HIGH"}
+        or lookalike_score >= 0.45
+        or enriched.get("site_hint")
+        or window_features.get("tls_sni")
+        or window_features.get("http_host")
+        or window_features.get("dns_query_name")
+    )
+    if not should_enrich:
+        return enriched
+
+    cache_key = _destination_cache_key(enriched)
+    enrichment = storage.get_cached_destination_enrichment(cache_key) if cache_key.strip("|") else None
+    if enrichment is None:
+        fetch_certificate = severity == "HIGH" or lookalike_score >= 0.70
+        enrichment = analyze_destination(
+            DestinationEnrichmentInput(
+                site_hint=enriched.get("site_hint"),
+                dns_query_name=window_features.get("dns_query_name"),
+                tls_sni=window_features.get("tls_sni"),
+                http_host=window_features.get("http_host"),
+                dst_ip=window_features.get("dst_ip") or window_features.get("destination_ip"),
+                dst_port=int(window_features.get("dst_port") or window_features.get("destination_port") or enriched.get("destination_port") or 443),
+                fetch_certificate=fetch_certificate,
+                protected_brands=protected_brands,
+            )
+        )
+        if cache_key.strip("|"):
+            storage.set_cached_destination_enrichment(cache_key, enrichment)
+
+    threat_tags = list(dict.fromkeys([*(enriched.get("threat_tags") or []), *(enrichment.get("threat_tags") or [])]))
+    mitre_techniques = list(dict.fromkeys([*(enriched.get("mitre_techniques") or []), *(enrichment.get("mitre_techniques") or [])]))
+    effective_lookalike = max(float(enriched.get("lookalike_score") or 0.0), float(enrichment.get("lookalike_score") or 0.0))
+    destination_identity = (
+        enriched.get("destination_identity")
+        or enrichment.get("registrable_domain")
+        or enrichment.get("normalized_host")
+    )
+
+    cert_metadata = enrichment.get("tls_certificate") if isinstance(enrichment, dict) else None
+    suspicious_cert_mismatch = False
+    if isinstance(cert_metadata, dict) and "subject_alt_name" in cert_metadata and destination_identity:
+        sans = cert_metadata.get("subject_alt_name") or []
+        san_values = {str(value[1]).lower() for value in sans if isinstance(value, (list, tuple)) and len(value) >= 2}
+        normalized_destination = str(destination_identity).lower()
+        if san_values and not any(normalized_destination.endswith(value.removeprefix("*.")) for value in san_values):
+            suspicious_cert_mismatch = True
+            threat_tags.append("suspicious_cert_mismatch")
+
+    repeated_dns_beacon = bool(window_features.get("dns_query_name")) and float(window_features.get("periodic_beacon_score") or 0.0) >= 0.72
+    if repeated_dns_beacon:
+        threat_tags.append("repeated_dns_beaconing")
+
+    mitre_matches: list[dict[str, object]] = list(enriched.get("mitre_matches") or [])
+    existing_names = {str(item.get("technique")) for item in mitre_matches if isinstance(item, dict)}
+    for technique in mitre_techniques:
+        if technique in existing_names:
+            continue
+        evidence = []
+        if effective_lookalike >= 0.55:
+            evidence.append("lookalike_domain")
+        if suspicious_cert_mismatch:
+            evidence.append("certificate_name_mismatch")
+        if repeated_dns_beacon:
+            evidence.append("periodic_dns_pattern")
+        if technique == "T1071.001":
+            evidence.append("encrypted_web_protocol")
+        if technique == "T1071.004":
+            evidence.append("dns_protocol")
+        confidence = 0.40
+        if technique == "T1566" and effective_lookalike >= 0.55:
+            confidence = 0.86 if effective_lookalike >= 0.80 else 0.72
+        elif technique == "T1071.004" and repeated_dns_beacon:
+            confidence = 0.74
+        elif technique == "T1573" and suspicious_cert_mismatch:
+            confidence = 0.70
+        mitre_matches.append(
+            {
+                "technique": technique,
+                "confidence": round(confidence, 3),
+                "evidence": evidence,
+            }
+        )
+
+    if effective_lookalike >= 0.80 or suspicious_cert_mismatch:
+        enriched["severity"] = "HIGH"
+    elif repeated_dns_beacon and enriched.get("severity") == "LOW":
+        enriched["severity"] = "MEDIUM"
+
+    enriched["lookalike_score"] = effective_lookalike
+    enriched["destination_identity"] = destination_identity
+    enriched["threat_tags"] = list(dict.fromkeys(threat_tags))
+    enriched["mitre_techniques"] = mitre_techniques
+    enriched["mitre_matches"] = mitre_matches
+    return enriched
 
 
 def _incident_payload(incident) -> dict:
@@ -600,7 +774,7 @@ _DASHBOARD_HTML = """
             <label><div class="muted small">High threshold</div><input id="policyHigh" value="0.85" /></label>
           </div>
           <div class="span-3">
-            <label><div class="muted small">Retention days</div><input id="policyRetention" value="7" /></label>
+            <label><div class="muted small">Retention days</div><input id="policyRetention" value="90" /></label>
           </div>
           <div class="span-3">
             <label><div class="muted small">FP budget/app/day</div><input id="policyBudget" value="12" /></label>
@@ -920,7 +1094,7 @@ _DASHBOARD_HTML = """
       const policy = payload.policy || {};
       els.policyMedium.value = policy.default_thresholds?.medium ?? 0.6;
       els.policyHigh.value = policy.default_thresholds?.high ?? 0.85;
-      els.policyRetention.value = policy.retention_days ?? 7;
+      els.policyRetention.value = policy.retention_days ?? 90;
       els.policyBudget.value = policy.false_positive_budget_per_app_day ?? 12;
       els.policyDrift.value = policy.drift_high_threshold ?? 0.65;
       els.policyExportEnabled.value = String(policy.export_enabled ?? true);
@@ -1105,6 +1279,7 @@ def _validate_payload_size(request: Request) -> None:
 def _enqueue_and_try_forward(event_type: str, payload: dict) -> tuple[str, bool]:
     event_id = str(uuid.uuid4())
     storage.enqueue_event(event_id=event_id, event_type=event_type, payload=payload)
+    storage.enforce_retention()
 
     pending_items = storage.pending_events(now_epoch=int(time.time()), limit=1)
     forwarded = False
@@ -1168,7 +1343,7 @@ async def ingest_mobile_alert(
 ):
     _validate_payload_size(request)
 
-    payload = event.model_dump(mode="json")
+    payload = _auto_enrich_alert_payload(event.model_dump(mode="json"))
     storage.upsert_alert(payload)
 
     event_id, forwarded = _enqueue_and_try_forward(
@@ -1514,6 +1689,26 @@ def resistine_send_data(
     return {"status": "ok", "response": response}
 
 
+@app.post("/api/v1/enrichment/destination")
+def enrich_destination(
+    payload: DestinationEnrichmentRequest,
+    _: None = Depends(auth_dependency),
+):
+    enrichment = analyze_destination(
+        DestinationEnrichmentInput(
+            site_hint=payload.site_hint,
+            dns_query_name=payload.dns_query_name,
+            tls_sni=payload.tls_sni,
+            http_host=payload.http_host,
+            dst_ip=payload.dst_ip,
+            dst_port=payload.dst_port,
+            fetch_certificate=payload.fetch_certificate,
+            protected_brands=normalize_protected_brands_csv(payload.protected_brands_csv),
+        )
+    )
+    return {"status": "ok", "enrichment": enrichment}
+
+
 @app.get("/api/v1/alerts")
 def list_alerts(
     triage_status: Annotated[str | None, Query()] = None,
@@ -1527,15 +1722,18 @@ def list_alerts(
 ):
     if triage_status is not None and triage_status not in {"OPEN", "INVESTIGATING", "RESOLVED", "FALSE_POSITIVE"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid triage status")
-    if severity is not None and severity not in {"LOW", "MEDIUM", "HIGH"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid severity")
+    severity_filters = _parse_csv_enum_filters(
+        severity,
+        allowed={"LOW", "MEDIUM", "HIGH"},
+        label="severity",
+    )
 
     alerts = storage.list_alerts(
         status=triage_status,
         limit=limit,
         device_id_pseudo=device_id_pseudo,
         device_ids=_parse_device_filters(device_id_pseudo, device_ids),
-        severity=severity,
+        severity=severity_filters or None,
         source_model=source_model,
         search=search,
     )
@@ -1667,10 +1865,10 @@ def update_alert_triage(
 
 _DEFAULT_POLICY = {
     "policy_version": 1,
-    "default_thresholds": {"medium": 0.6, "high": 0.85},
+    "default_thresholds": {"low": 0.3, "medium": 0.6, "high": 0.85},
     "app_threshold_overrides": {},
     "export_enabled": True,
-    "retention_days": 7,
+    "retention_days": 90,
     "detection_model": "ensemble_fusion",
     "shadow_model": None,
     "false_positive_budget_per_app_day": 12,
@@ -1696,6 +1894,7 @@ _DEFAULT_POLICY = {
     "disable_timing_features": False,
     "disable_destination_features": False,
     "app_profile_overrides": {},
+    "protected_brands_csv": "\n".join(DEFAULT_PROTECTED_BRANDS),
 }
 
 _GLOBAL_POLICY_ID = "__global__"
@@ -1812,11 +2011,13 @@ def auto_tune_policy_from_feedback(
 ):
     current_policy = storage.get_policy(device_id_pseudo) or dict(_DEFAULT_POLICY)
     default_thresholds = current_policy.get("default_thresholds", {})
+    base_low = float(default_thresholds.get("low", 0.3))
     base_medium = float(default_thresholds.get("medium", 0.6))
     base_high = float(default_thresholds.get("high", 0.85))
 
     overrides, feedback_stats = storage.feedback_adjust_policy(
         device_id_pseudo=device_id_pseudo,
+        base_low=base_low,
         base_medium=base_medium,
         base_high=base_high,
     )

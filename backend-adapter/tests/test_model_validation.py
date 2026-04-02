@@ -52,14 +52,14 @@ def test_mobile_alert_rejects_too_many_top_features() -> None:
 
 
 def test_policy_rejects_too_many_overrides() -> None:
-    overrides = {f"app{i}": ThresholdProfile(medium=0.5, high=0.9) for i in range(1200)}
+    overrides = {f"app{i}": ThresholdProfile(low=0.3, medium=0.5, high=0.9) for i in range(1200)}
     with pytest.raises(ValidationError):
         DevicePolicyPayload(
             policy_version=1,
-            default_thresholds=ThresholdProfile(medium=0.6, high=0.85),
+            default_thresholds=ThresholdProfile(low=0.3, medium=0.6, high=0.85),
             app_threshold_overrides=overrides,
             export_enabled=True,
-            retention_days=7,
+            retention_days=90,
         )
 
 
@@ -67,10 +67,10 @@ def test_policy_rejects_unsupported_detection_model() -> None:
     with pytest.raises(ValidationError):
         DevicePolicyPayload(
             policy_version=1,
-            default_thresholds=ThresholdProfile(medium=0.6, high=0.85),
+            default_thresholds=ThresholdProfile(low=0.3, medium=0.6, high=0.85),
             app_threshold_overrides={},
             export_enabled=True,
-            retention_days=7,
+            retention_days=90,
             detection_model="xgboost",
         )
 
@@ -79,10 +79,10 @@ def test_policy_rejects_unsupported_shadow_model() -> None:
     with pytest.raises(ValidationError):
         DevicePolicyPayload(
             policy_version=1,
-            default_thresholds=ThresholdProfile(medium=0.6, high=0.85),
+            default_thresholds=ThresholdProfile(low=0.3, medium=0.6, high=0.85),
             app_threshold_overrides={},
             export_enabled=True,
-            retention_days=7,
+            retention_days=90,
             detection_model="ensemble_fusion",
             shadow_model="random_forest",
         )

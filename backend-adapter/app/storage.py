@@ -75,6 +75,11 @@ class AlertRecord:
     beacon_score: float | None
     feature_window_json: str
     site_hint: str | None
+    mitre_techniques_json: str
+    mitre_matches_json: str
+    destination_identity: str | None
+    lookalike_score: float | None
+    threat_tags_json: str
     created_epoch: int
     updated_epoch: int
 
@@ -197,7 +202,21 @@ class AdapterStorage:
                     beacon_score REAL,
                     feature_window_json TEXT NOT NULL DEFAULT '{}',
                     site_hint TEXT,
+                    mitre_techniques_json TEXT NOT NULL DEFAULT '[]',
+                    mitre_matches_json TEXT NOT NULL DEFAULT '[]',
+                    destination_identity TEXT,
+                    lookalike_score REAL,
+                    threat_tags_json TEXT NOT NULL DEFAULT '[]',
                     created_epoch INTEGER NOT NULL,
+                    updated_epoch INTEGER NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS destination_enrichment_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    enrichment_json TEXT NOT NULL,
                     updated_epoch INTEGER NOT NULL
                 )
                 """
@@ -315,6 +334,12 @@ class AdapterStorage:
                         observed_name=device_label,
                         epoch=now,
                     )
+                retention_policy = self._policy_from_conn(conn, device_id) or self._policy_from_conn(conn, "__global__") or {"retention_days": 90}
+                self._prune_expired_for_device(
+                    conn,
+                    device_id_pseudo=device_id,
+                    retention_days=int(retention_policy.get("retention_days") or 90),
+                )
             conn.commit()
 
     def pending_events(self, now_epoch: int, limit: int) -> list[QueueItem]:
@@ -517,10 +542,9 @@ class AdapterStorage:
                     confidence, uncertainty, drift_score, occurrence_count,
                     first_seen_epoch, last_seen_epoch, correlation_key,
                     shadow_model, shadow_score, suppression_reason, data_quality_warnings_json, beacon_score,
-                    feature_window_json, site_hint,
+                    feature_window_json, site_hint, mitre_techniques_json, mitre_matches_json, destination_identity, lookalike_score, threat_tags_json,
                     created_epoch, updated_epoch
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     COALESCE((SELECT created_epoch FROM alerts WHERE alert_id=?), ?), ?)
                 """,
                 (
@@ -551,6 +575,11 @@ class AdapterStorage:
                     payload.get("beacon_score"),
                     json.dumps(payload.get("window_features") or {}, separators=(",", ":"), ensure_ascii=True),
                     payload.get("site_hint"),
+                    json.dumps(payload.get("mitre_techniques") or [], separators=(",", ":"), ensure_ascii=True),
+                    json.dumps(payload.get("mitre_matches") or [], separators=(",", ":"), ensure_ascii=True),
+                    payload.get("destination_identity"),
+                    payload.get("lookalike_score"),
+                    json.dumps(payload.get("threat_tags") or [], separators=(",", ":"), ensure_ascii=True),
                     payload["alert_id"],
                     now,
                     now,
@@ -566,6 +595,12 @@ class AdapterStorage:
                         observed_name=device_label,
                         epoch=now,
                     )
+                retention_policy = self._policy_from_conn(conn, device_id) or self._policy_from_conn(conn, "__global__") or {"retention_days": 90}
+                self._prune_expired_for_device(
+                    conn,
+                    device_id_pseudo=device_id,
+                    retention_days=int(retention_policy.get("retention_days") or 90),
+                )
             conn.commit()
 
     def get_alert(self, alert_id: str) -> AlertRecord | None:
@@ -577,7 +612,7 @@ class AdapterStorage:
                        confidence, uncertainty, drift_score, occurrence_count,
                        first_seen_epoch, last_seen_epoch, correlation_key,
                        shadow_model, shadow_score, suppression_reason, data_quality_warnings_json, beacon_score,
-                       feature_window_json, site_hint,
+                       feature_window_json, site_hint, mitre_techniques_json, mitre_matches_json, destination_identity, lookalike_score, threat_tags_json,
                        created_epoch, updated_epoch
                 FROM alerts WHERE alert_id=?
                 """,
@@ -593,7 +628,7 @@ class AdapterStorage:
         limit: int,
         device_id_pseudo: str | None = None,
         device_ids: list[str] | None = None,
-        severity: str | None = None,
+        severity: str | list[str] | None = None,
         source_model: str | None = None,
         search: str | None = None,
     ) -> list[AlertRecord]:
@@ -604,7 +639,7 @@ class AdapterStorage:
                    confidence, uncertainty, drift_score, occurrence_count,
                    first_seen_epoch, last_seen_epoch, correlation_key,
                    shadow_model, shadow_score, suppression_reason, data_quality_warnings_json, beacon_score,
-                   feature_window_json, site_hint,
+                   feature_window_json, site_hint, mitre_techniques_json, mitre_matches_json, destination_identity, lookalike_score, threat_tags_json,
                    created_epoch, updated_epoch
             FROM alerts
             """
@@ -621,16 +656,24 @@ class AdapterStorage:
             placeholders = ",".join("?" for _ in target_device_ids)
             filters.append(f"device_id_pseudo IN ({placeholders})")
             params.extend(target_device_ids)
-        if severity:
-            filters.append("severity=?")
-            params.append(severity)
+        severity_filters: list[str]
+        if isinstance(severity, str):
+            severity_filters = [severity] if severity else []
+        else:
+            severity_filters = [value for value in (severity or []) if value]
+        if severity_filters:
+            placeholders = ",".join("?" for _ in severity_filters)
+            filters.append(f"severity IN ({placeholders})")
+            params.extend(severity_filters)
         if source_model:
             filters.append("source_model=?")
             params.append(source_model)
         if search:
-            filters.append("(app_id LIKE ? OR explanation LIKE ? OR top_features_json LIKE ? OR site_hint LIKE ? OR device_id_pseudo LIKE ?)")
+            filters.append(
+                "(app_id LIKE ? OR explanation LIKE ? OR top_features_json LIKE ? OR site_hint LIKE ? OR device_id_pseudo LIKE ? OR destination_identity LIKE ? OR mitre_techniques_json LIKE ? OR threat_tags_json LIKE ?)"
+            )
             needle = f"%{search}%"
-            params.extend([needle, needle, needle, needle, needle])
+            params.extend([needle, needle, needle, needle, needle, needle, needle, needle])
         if filters:
             query += " WHERE " + " AND ".join(filters)
         query += " ORDER BY updated_epoch DESC LIMIT ?"
@@ -728,6 +771,7 @@ class AdapterStorage:
     def feedback_adjust_policy(
         self,
         device_id_pseudo: str,
+        base_low: float,
         base_medium: float,
         base_high: float,
     ) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, int]]]:
@@ -751,14 +795,17 @@ class AdapterStorage:
             tp = int(tp_count or 0)
             delta = (0.02 * fp) - (0.01 * tp)
             delta = max(-0.25, min(0.25, delta))
+            low = max(0.0, min(0.90, base_low + delta))
             medium = max(0.05, min(0.95, base_medium + delta))
+            medium = max(low, medium)
             high = max(medium, min(0.99, base_high + delta))
-            overrides[str(app_id)] = {"medium": float(medium), "high": float(high)}
+            overrides[str(app_id)] = {"low": float(low), "medium": float(medium), "high": float(high)}
             stats[str(app_id)] = {"false_positive": fp, "resolved": tp}
         return overrides, stats
 
     def simulate_policy(self, device_id_pseudo: str, policy: dict, limit: int) -> dict:
         default_thresholds = (policy.get("default_thresholds") or {}) if isinstance(policy, dict) else {}
+        low_default = float(default_thresholds.get("low", 0.3))
         medium_default = float(default_thresholds.get("medium", 0.6))
         high_default = float(default_thresholds.get("high", 0.85))
         overrides = policy.get("app_threshold_overrides", {}) if isinstance(policy, dict) else {}
@@ -775,25 +822,30 @@ class AdapterStorage:
                 (device_id_pseudo, limit),
             ).fetchall()
 
-        counts = {"LOW": 0, "MEDIUM": 0, "HIGH": 0}
+        counts = {"SUPPRESSED": 0, "LOW": 0, "MEDIUM": 0, "HIGH": 0}
         per_app_counts: dict[str, dict[str, int]] = {}
 
         for app_id, score in rows:
             app_key = str(app_id)
             app_override = overrides.get(app_key, {}) if isinstance(overrides, dict) else {}
+            low = float(app_override.get("low", low_default))
             medium = float(app_override.get("medium", medium_default))
             high = float(app_override.get("high", high_default))
+            if medium < low:
+                medium = low
             if high < medium:
                 high = medium
 
-            severity = "LOW"
+            severity = "SUPPRESSED"
             if float(score) >= high:
                 severity = "HIGH"
             elif float(score) >= medium:
                 severity = "MEDIUM"
+            elif float(score) >= low:
+                severity = "LOW"
 
             counts[severity] += 1
-            per_app = per_app_counts.setdefault(app_key, {"LOW": 0, "MEDIUM": 0, "HIGH": 0})
+            per_app = per_app_counts.setdefault(app_key, {"SUPPRESSED": 0, "LOW": 0, "MEDIUM": 0, "HIGH": 0})
             per_app[severity] += 1
 
         return {
@@ -890,6 +942,34 @@ class AdapterStorage:
             "resolved": tp,
         }
 
+    def get_cached_destination_enrichment(self, cache_key: str, max_age_seconds: int = 24 * 60 * 60) -> dict | None:
+        cutoff = int(time.time()) - max(1, max_age_seconds)
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT enrichment_json
+                FROM destination_enrichment_cache
+                WHERE cache_key=? AND updated_epoch>=?
+                """,
+                (cache_key, cutoff),
+            ).fetchone()
+        if row is None:
+            return None
+        return json.loads(row[0])
+
+    def set_cached_destination_enrichment(self, cache_key: str, enrichment: dict) -> None:
+        now = int(time.time())
+        payload_json = json.dumps(enrichment, separators=(",", ":"), ensure_ascii=True)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO destination_enrichment_cache(cache_key, enrichment_json, updated_epoch)
+                VALUES (?, ?, ?)
+                """,
+                (cache_key, payload_json, now),
+            )
+            conn.commit()
+
     def set_policy(self, device_id_pseudo: str, policy: dict) -> None:
         payload_json = json.dumps(policy, separators=(",", ":"), ensure_ascii=True)
         now = int(time.time())
@@ -902,7 +982,39 @@ class AdapterStorage:
                 (device_id_pseudo, payload_json, now),
             )
             self._upsert_device_policy_activity(conn, device_id_pseudo=device_id_pseudo, epoch=now)
+            retention_days = int((policy or {}).get("retention_days") or 90)
+            self._prune_expired_for_device(conn, device_id_pseudo=device_id_pseudo, retention_days=retention_days)
             conn.commit()
+
+    def enforce_retention(self) -> dict[str, int]:
+        counters = {
+            "events": 0,
+            "alerts": 0,
+            "dead_letter": 0,
+            "jobs": 0,
+            "models": 0,
+            "cache": 0,
+        }
+        now = int(time.time())
+        with self._lock, self._connect() as conn:
+            policy_rows = conn.execute("SELECT device_id_pseudo, policy_json FROM policies").fetchall()
+            policies = {str(device_id): json.loads(policy_json) for device_id, policy_json in policy_rows}
+            global_retention = int((policies.get("__global__") or {}).get("retention_days") or 90)
+            all_device_rows = conn.execute("SELECT device_id_pseudo FROM devices").fetchall()
+            device_ids = [str(row[0]) for row in all_device_rows if row and row[0] != "__global__"]
+            for device_id in device_ids:
+                policy = policies.get(device_id) or policies.get("__global__") or {}
+                retention_days = int(policy.get("retention_days") or global_retention)
+                device_counters = self._prune_expired_for_device(conn, device_id_pseudo=device_id, retention_days=retention_days)
+                for key, value in device_counters.items():
+                    counters[key] = counters.get(key, 0) + int(value)
+            cache_cutoff = now - (global_retention * 24 * 60 * 60)
+            counters["cache"] += conn.execute(
+                "DELETE FROM destination_enrichment_cache WHERE updated_epoch < ?",
+                (cache_cutoff,),
+            ).rowcount
+            conn.commit()
+        return counters
 
     def note_device_seen(self, device_id_pseudo: str, source: str = "event") -> None:
         now = int(time.time())
@@ -1395,6 +1507,11 @@ class AdapterStorage:
             "top_features_json": "ALTER TABLE alerts ADD COLUMN top_features_json TEXT NOT NULL DEFAULT '[]'",
             "feature_window_json": "ALTER TABLE alerts ADD COLUMN feature_window_json TEXT NOT NULL DEFAULT '{}'",
             "site_hint": "ALTER TABLE alerts ADD COLUMN site_hint TEXT",
+            "mitre_techniques_json": "ALTER TABLE alerts ADD COLUMN mitre_techniques_json TEXT NOT NULL DEFAULT '[]'",
+            "mitre_matches_json": "ALTER TABLE alerts ADD COLUMN mitre_matches_json TEXT NOT NULL DEFAULT '[]'",
+            "destination_identity": "ALTER TABLE alerts ADD COLUMN destination_identity TEXT",
+            "lookalike_score": "ALTER TABLE alerts ADD COLUMN lookalike_score REAL",
+            "threat_tags_json": "ALTER TABLE alerts ADD COLUMN threat_tags_json TEXT NOT NULL DEFAULT '[]'",
         }
         for column, ddl in to_add.items():
             if column not in existing:
@@ -1404,6 +1521,47 @@ class AdapterStorage:
         existing = {row[1] for row in conn.execute("PRAGMA table_info(devices)").fetchall()}
         if "last_heartbeat_epoch" not in existing:
             conn.execute("ALTER TABLE devices ADD COLUMN last_heartbeat_epoch INTEGER NOT NULL DEFAULT 0")
+
+    def _policy_from_conn(self, conn: sqlite3.Connection, device_id_pseudo: str) -> dict | None:
+        row = conn.execute(
+            "SELECT policy_json FROM policies WHERE device_id_pseudo=?",
+            (device_id_pseudo,),
+        ).fetchone()
+        if row is None:
+            return None
+        return json.loads(row[0])
+
+    def _prune_expired_for_device(self, conn: sqlite3.Connection, *, device_id_pseudo: str, retention_days: int) -> dict[str, int]:
+        retention_days = max(1, min(90, int(retention_days)))
+        cutoff = int(time.time()) - (retention_days * 24 * 60 * 60)
+        counters = {
+            "events": 0,
+            "alerts": 0,
+            "dead_letter": 0,
+            "jobs": 0,
+            "models": 0,
+        }
+        counters["events"] += conn.execute(
+            "DELETE FROM events WHERE created_epoch < ? AND payload_json LIKE ?",
+            (cutoff, f'%\"device_id_pseudo\":\"{device_id_pseudo}\"%'),
+        ).rowcount
+        counters["dead_letter"] += conn.execute(
+            "DELETE FROM dead_letter WHERE created_epoch < ? AND payload_json LIKE ?",
+            (cutoff, f'%\"device_id_pseudo\":\"{device_id_pseudo}\"%'),
+        ).rowcount
+        counters["alerts"] += conn.execute(
+            "DELETE FROM alerts WHERE updated_epoch < ? AND device_id_pseudo=?",
+            (cutoff, device_id_pseudo),
+        ).rowcount
+        counters["jobs"] += conn.execute(
+            "DELETE FROM remote_model_jobs WHERE completed_epoch IS NOT NULL AND completed_epoch < ? AND device_id_pseudo=?",
+            (cutoff, device_id_pseudo),
+        ).rowcount
+        counters["models"] += conn.execute(
+            "DELETE FROM remote_model_registry WHERE created_epoch < ? AND device_id_pseudo=? AND is_active=0",
+            (cutoff, device_id_pseudo),
+        ).rowcount
+        return counters
 
     def _upsert_device_activity(
         self,

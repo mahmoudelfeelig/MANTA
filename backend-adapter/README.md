@@ -37,6 +37,7 @@ Note: environment variables are read from process env (`os.getenv`) at startup; 
 - `POST /api/v1/events/mobile-flow`
 - `POST /api/v1/events/mobile-alert`
 - `POST /api/v1/inference/window`
+- `POST /api/v1/enrichment/destination`
 - `GET /api/v1/model/device/{device_id_pseudo}`
 - `POST /api/v1/model/device/{device_id_pseudo}/retrain`
 - `POST /api/v1/events/retry?limit=100`
