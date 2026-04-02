@@ -12,15 +12,21 @@ This is the single feature checklist for MANTA. Unchecked items are still in sco
 - [x] VPN lifecycle manager (`VpnService`)
 - [x] Local TCP/UDP forwarding with `protect(...)`
 - [x] Packet-to-flow conversion with timing/counter metadata
+- [x] Symmetric transport-flow identity with canonical endpoint ordering
+- [x] Sharded packet-analysis queueing with explicit overflow/drop accounting
+- [x] Capture statistics for packets, bytes, queue depth, and local pipeline loss
 - [x] App attribution from UID/package mapping
 - [x] Local Room/SQLite storage for flows, windows, alerts, and export queue
 - [x] Export queue with retry scheduling
 - [x] Retention cleanup workers
 - [x] NetFlow/IPFIX-style event mapping
 - [x] Rich device/network context capture for reproducible environment metadata
+- [x] DNS, TLS, HTTP, and QUIC metadata extraction from packet/handshake bytes
+- [x] Destination identity, lookalike-domain detection, and ATT&CK-style technique tagging
 
 ## On-device anomaly detection
 - [x] Feature window builder
+- [x] Internal context and graph-inspired window features kept out of reduced privacy tiers
 - [x] Statistical baseline detector
 - [x] Drift monitor
 - [x] Periodic beacon detector
@@ -48,9 +54,15 @@ This is the single feature checklist for MANTA. Unchecked items are still in sco
 - [x] Privacy-aware backend connectivity and policy sync behavior
 - [x] Full custom-tier UX and all local UI behaviors aligned with custom export controls
 - [x] Privacy-preserving representation learning and teacher-student distillation
+- [x] Release-privacy methodology separated from observer-leakage methodology
+- [x] Source-aware distribution-preserving bucketization for `medium` and `strict`
+- [x] Multi-target privacy student suppression of app ID, app family, and destination behavior
+- [x] Reconstruction-style privacy-student pretraining to recover utility after coarsening
 - [x] Federated or secure-aggregation collaboration path for privacy-preserving model improvement
-- [x] Privacy leakage benchmark suite
+- [x] Multi-attacker privacy leakage benchmark suite with closed-world and open-world tasks
+- [x] Encrypted-flow sequence fingerprint benchmark for observer-leakage auditing
 - [x] Privacy/utility Pareto reporting and thesis-ready analysis
+- [x] Combined privacy gate report with strongest-attacker and observer-audit summaries
 
 ## Backend, model serving, and SIEM integration
 - [x] Token-authenticated ingest adapter
@@ -64,6 +76,10 @@ This is the single feature checklist for MANTA. Unchecked items are still in sco
 - [x] Dashboard with filters, pagination, and device management
 - [x] Wazuh-compatible forwarding path
 - [x] Resistine connector routes
+- [x] Optional remote destination-enrichment endpoint for certificate/domain context
+- [x] Backend retention enforcement for events, alerts, jobs, and enrichment cache
+- [x] Automatic high-risk alert enrichment and escalation logic
+- [x] ATT&CK tags exposed in backend alert views and filters
 - [x] Remote model registry with multiple model families, versioning, and per-device/global selection
 - [x] Hybrid remote anomaly/context scorer bundle with separate channels
 - [x] Live SIEM deployment verification and packaged integration contracts

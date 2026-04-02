@@ -1,6 +1,6 @@
 # MANTA ML Pipeline
 
-Pipeline for MANTA flow feature extraction, anomaly model training, evaluation, privacy/utility benchmarking, and model export.
+Pipeline for MANTA flow feature extraction, anomaly model training, evaluation, privacy/utility benchmarking, adversarial privacy auditing, and model export.
 
 ## Install
 ```bash
@@ -60,6 +60,31 @@ python -m ml_pipeline.privacy_ablation \
   --input data/controlled_flows.csv \
   --output reports/privacy-ablation.json
 ```
+
+Benchmark metadata leakage from the privacy views:
+```bash
+python -m ml_pipeline.privacy_leakage_benchmark \
+  --input data/controlled_flows.csv \
+  --output reports/privacy-leakage.json
+```
+
+Benchmark encrypted-flow sequence fingerprinting over metadata-only traces:
+```bash
+python -m ml_pipeline.traffic_fingerprint_benchmark \
+  --input data/controlled_flows.csv \
+  --output reports/traffic-fingerprint.json
+```
+
+The privacy story is intentionally split into two parts:
+- `release privacy`: how much can be inferred from the exported/derived privacy views
+- `observer leakage`: how much can still be inferred from encrypted-flow sequences seen by a passive observer
+
+The privacy gate treats those as separate but related claims. `medium` and `strict` are now expected to reduce both app-ID leakage and the stronger app-family / destination-behavior leakage in the released representation. If you want to make a tunnel-observer privacy claim, the observer sequence audit must pass as well.
+
+`privacy_gate_report` supports a claim scope:
+- `release` keeps `overall_pass` aligned to exported/derived-feature privacy
+- `observer` evaluates the sequence-observer claim directly
+- `combined` requires both to pass
 
 Generate a drift report from scored windows:
 ```bash
@@ -335,11 +360,28 @@ python -m ml_pipeline.simulate_federated_rounds \
   --output-report reports/federated-report.json \
   --view medium
 
+python -m ml_pipeline.privacy_leakage_benchmark \
+  --input data/real/manta-real-training.csv \
+  --output reports/privacy-leakage.json
+
+python -m ml_pipeline.traffic_fingerprint_benchmark \
+  --input data/real/manta-real-training.csv \
+  --output reports/traffic-fingerprint.json
+
 python -m ml_pipeline.privacy_gate_report \
   --ablation-report reports/privacy-ablation.json \
   --leakage-report reports/privacy-leakage.json \
+  --traffic-fingerprint-report reports/traffic-fingerprint.json \
   --output reports/privacy-gate.json
 ```
+
+The current privacy-student path uses a stronger methodology than the earlier simple adversarial student:
+- more aggressive `medium` and `strict` release views based on source-aware distribution bucketization
+- explicit suppression of `app_id`, `app_family`, and `destination_behavior`
+- reconstruction-style encoder pretraining to recover anomaly utility after coarsening
+- latent normalization exported with the student so federated training can consume the representation directly
+
+The detector side also keeps richer internal context features such as transition concentration and rolling window deviations. Those help anomaly scoring, but they are intentionally excluded from the reduced privacy views.
 
 9. Run the full experiment suite on the real corpus:
 
@@ -351,7 +393,7 @@ python -m ml_pipeline.run_experiment_suite \
   --ids-threshold 0.55
 ```
 
-The suite uses the public-corpus-aware grouped split logic, trains the hybrid remote primary by default, reruns privacy leakage on the derived views, and builds the full comparison matrix.
+The suite uses the public-corpus-aware grouped split logic, trains the hybrid remote primary by default, reruns privacy leakage on the derived views, runs the encrypted-flow fingerprint benchmark, and builds the full comparison matrix.
 
 The suite now also warms reusable caches for:
 - feature windows
@@ -506,9 +548,18 @@ python -m ml_pipeline.simulate_federated_rounds `
   --output-report ".\reports\federated-report.json" `
   --view medium
 
+python -m ml_pipeline.privacy_leakage_benchmark `
+  --input ".\data\real\manta-real-training.csv" `
+  --output ".\reports\privacy-leakage.json"
+
+python -m ml_pipeline.traffic_fingerprint_benchmark `
+  --input ".\data\real\manta-real-training.csv" `
+  --output ".\reports\traffic-fingerprint.json"
+
 python -m ml_pipeline.privacy_gate_report `
   --ablation-report ".\reports\privacy-ablation.json" `
   --leakage-report ".\reports\privacy-leakage.json" `
+  --traffic-fingerprint-report ".\reports\traffic-fingerprint.json" `
   --output ".\reports\privacy-gate.json"
 ```
 
@@ -556,7 +607,9 @@ Generated reports include:
 - `threshold-sweep.csv`, `roc-curve.csv`, `pr-curve.csv`, `confusion-matrix.json`
 - `comparison.json` (ML vs IDS baseline)
 - `privacy-ablation.json` (privacy/utility deltas by feature set)
-- `privacy-gate.json` (combined utility + leakage verdict per privacy tier)
+- `privacy-leakage.json` (multi-attacker metadata leakage suite with open-world app tests)
+- `traffic-fingerprint.json` (encrypted-flow sequence observer-leakage audit)
+- `privacy-gate.json` (combined utility + leakage verdict per privacy tier plus observer audit summary)
 - `drift-report.json`, `drift-series.csv` (concept drift timeline by app)
 - `policy-simulation.json`, `policy-simulation-per-app.csv` (policy threshold what-if)
 - `android-model-evaluation.json` (metrics for exported Android model)

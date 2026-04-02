@@ -69,6 +69,7 @@ config.*
 
 # notes
 /notes.txt
+/notes/
 
 # cloudflared stuff
 /cloudflared.exe
@@ -81,6 +82,7 @@ config.*
 
 # reports
 /reports/
+/exports/
 
 # Thesis / animation assets
 /presentation/
