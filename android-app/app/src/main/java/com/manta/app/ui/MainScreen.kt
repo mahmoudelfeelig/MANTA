@@ -71,6 +71,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -79,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import com.manta.app.core.model.AlertSeverity
 import com.manta.app.core.model.AnomalyAlert
 import com.manta.app.core.model.RuntimeHealth
+import com.manta.app.core.model.ThresholdProfile
 import com.manta.app.core.model.TriageStatus
 import com.manta.app.core.settings.AppProfile
 import com.manta.app.core.settings.CustomPrivacyOptions
@@ -122,6 +124,7 @@ private val BROWSER_APP_IDS = setOf(
 
 private enum class MainTab(val label: String) {
     HOME("Home"),
+    APPS("Apps"),
     ALERTS("Alerts"),
     SETTINGS("Settings")
 }
@@ -140,6 +143,27 @@ private data class PendingUndoAction(
     val alertId: String,
     val appLabel: String,
     val action: AlertAction
+)
+
+private data class InstalledAppCatalogEntry(
+    val appId: String,
+    val label: String,
+    val isSystem: Boolean
+)
+
+private data class AppInventoryEntry(
+    val appId: String,
+    val label: String,
+    val isInstalled: Boolean,
+    val isSystem: Boolean,
+    val alertCount: Int,
+    val openAlertCount: Int,
+    val highestSeverity: AlertSeverity?,
+    val lastAlertMillis: Long,
+    val thresholdLow: Double,
+    val thresholdMedium: Double,
+    val thresholdHigh: Double,
+    val profile: AppProfile
 )
 
 @Composable
@@ -168,13 +192,13 @@ fun MainScreen(
     onSetTestModeEnabled: (Boolean) -> Unit,
     onSetPrivacyMode: (PrivacyMode) -> Unit,
     onSetCustomPrivacyOptions: (CustomPrivacyOptions) -> Unit,
+    onSaveProtectedBrandsCsv: (String) -> Unit,
     onSyncPolicy: () -> Unit,
     onPingBackend: () -> Unit,
     onAcceptConsent: () -> Unit,
     onExportDataset: () -> Unit,
     onExportAlerts: () -> Unit,
     onExportForensics: () -> Unit,
-    onCaptureEvidence: () -> Unit,
     onFlushExportQueue: () -> Unit,
     onLoadMoreAlerts: () -> Unit,
     onStartCapture: () -> Unit,
@@ -184,11 +208,15 @@ fun MainScreen(
     onMarkAlertDangerous: (String) -> Unit,
     onMarkAlertFalsePositive: (String) -> Unit,
     onDismissAlertNeutral: (String) -> Unit,
+    currentAppThresholdProfile: (String) -> ThresholdProfile,
     currentAppProfile: (String) -> AppProfile,
+    onSetAppThresholdOverride: (String, Double, Double, Double) -> Unit,
     onSetAppProfile: (String, AppProfile) -> Unit
 ) {
-    var backendUrl by rememberSaveable(config.backendUrl) { mutableStateOf(config.backendUrl) }
-    var apiToken by rememberSaveable(config.apiToken) { mutableStateOf(config.apiToken) }
+    var backendUrl by rememberSaveable { mutableStateOf(config.backendUrl) }
+    var apiToken by rememberSaveable { mutableStateOf(config.apiToken) }
+    var backendUrlDirty by rememberSaveable { mutableStateOf(false) }
+    var apiTokenDirty by rememberSaveable { mutableStateOf(false) }
     var lowThreshold by rememberSaveable(config.lowThreshold) { mutableStateOf(formatDecimal(config.lowThreshold)) }
     var mediumThreshold by rememberSaveable(config.mediumThreshold) { mutableStateOf(formatDecimal(config.mediumThreshold)) }
     var highThreshold by rememberSaveable(config.highThreshold) { mutableStateOf(formatDecimal(config.highThreshold)) }
@@ -206,6 +234,7 @@ fun MainScreen(
     var responseContextBlendWeight by rememberSaveable(config.fusionWeights.responseContextBlend) { mutableStateOf(formatDecimal(config.fusionWeights.responseContextBlend)) }
     var falsePositiveBudget by rememberSaveable(config.falsePositiveBudgetPerAppDay) { mutableStateOf(config.falsePositiveBudgetPerAppDay.toString()) }
     var driftHighThreshold by rememberSaveable(config.driftHighThreshold) { mutableStateOf(formatDecimal(config.driftHighThreshold)) }
+    var protectedBrandsCsv by rememberSaveable(config.protectedBrandsCsv) { mutableStateOf(config.protectedBrandsCsv) }
     var selectedTab by rememberSaveable { mutableStateOf(MainTab.HOME) }
     var severityFilter by rememberSaveable { mutableStateOf(SeverityFilter.ALL) }
     var selectedModelFilter by rememberSaveable { mutableStateOf(ALL_MODELS_KEY) }
@@ -214,6 +243,14 @@ fun MainScreen(
     var modelInfoDialog by rememberSaveable { mutableStateOf<String?>(null) }
     var alertsPage by rememberSaveable { mutableStateOf(1) }
     var pendingUndo by rememberSaveable { mutableStateOf<PendingUndoAction?>(null) }
+    var appsSearchQuery by rememberSaveable { mutableStateOf("") }
+    var showSystemApps by rememberSaveable { mutableStateOf(false) }
+    var appRescanNonce by rememberSaveable { mutableStateOf(0) }
+    var selectedAppId by rememberSaveable { mutableStateOf<String?>(null) }
+    var appAlertsSearchQuery by rememberSaveable { mutableStateOf("") }
+    var appAlertsSeverityFilter by rememberSaveable { mutableStateOf(SeverityFilter.ALL) }
+    var appAlertsSelectedModelFilter by rememberSaveable { mutableStateOf(ALL_MODELS_KEY) }
+    var appAlertsSelectedShadowFilter by rememberSaveable { mutableStateOf(ALL_SHADOWS_KEY) }
 
     LaunchedEffect(
         config.backendUrl,
@@ -236,13 +273,28 @@ fun MainScreen(
         config.fusionWeights.responseAnomalyBlend,
         config.fusionWeights.responseContextBlend
     ) {
-        backendUrl = config.backendUrl
-        apiToken = config.apiToken
+        val backendUrlMatchesConfig = backendUrl == config.backendUrl
+        if (backendUrlMatchesConfig) {
+            backendUrlDirty = false
+        }
+        if (!backendUrlDirty || backendUrlMatchesConfig) {
+            backendUrl = config.backendUrl
+        }
+
+        val apiTokenMatchesConfig = apiToken == config.apiToken
+        if (apiTokenMatchesConfig) {
+            apiTokenDirty = false
+        }
+        if (!apiTokenDirty || apiTokenMatchesConfig) {
+            apiToken = config.apiToken
+        }
+
         lowThreshold = formatDecimal(config.lowThreshold)
         mediumThreshold = formatDecimal(config.mediumThreshold)
         highThreshold = formatDecimal(config.highThreshold)
         falsePositiveBudget = config.falsePositiveBudgetPerAppDay.toString()
         driftHighThreshold = formatDecimal(config.driftHighThreshold)
+        protectedBrandsCsv = config.protectedBrandsCsv
         fusionStatisticalWeight = formatDecimal(config.fusionWeights.statistical)
         fusionMultivariateWeight = formatDecimal(config.fusionWeights.multivariate)
         fusionSequenceWeight = formatDecimal(config.fusionWeights.sequence)
@@ -337,8 +389,100 @@ fun MainScreen(
         filteredAlerts.drop((currentAlertsPage - 1) * 20).take(20)
     }
 
+    val packageManager = LocalContext.current.packageManager
+    val installedApps = remember(packageManager, appRescanNonce) {
+        loadInstalledApps(packageManager)
+    }
+    val appInventory = buildAppInventory(
+        installedApps = installedApps,
+        alerts = alerts,
+        searchQuery = appsSearchQuery,
+        includeSystemApps = showSystemApps,
+        currentAppThresholdProfile = currentAppThresholdProfile,
+        currentAppProfile = currentAppProfile
+    )
+    val selectedAppEntry = remember(appInventory, selectedAppId) {
+        appInventory.firstOrNull { it.appId == selectedAppId }
+    }
+    val selectedAppAlertsSource = remember(alerts, selectedAppId) {
+        alerts.filter { it.appId == selectedAppId }
+    }
+    val selectedAppModelFilters = remember(selectedAppAlertsSource) {
+        buildList {
+            add(ALL_MODELS_KEY)
+            addAll(KNOWN_MODEL_FILTERS)
+            addAll(selectedAppAlertsSource.map { it.sourceModel }.distinct().sorted())
+        }.distinct()
+    }
+    val selectedAppShadowFilters = remember(selectedAppAlertsSource) {
+        buildList {
+            add(ALL_SHADOWS_KEY)
+            add(DISABLED_SHADOW_KEY)
+            addAll(KNOWN_MODEL_FILTERS)
+            addAll(selectedAppAlertsSource.mapNotNull { it.shadowModel }.distinct().sorted())
+        }.distinct()
+    }
+    val selectedAppScopedAlerts = remember(
+        selectedAppAlertsSource,
+        appAlertsSelectedModelFilter,
+        appAlertsSelectedShadowFilter,
+        appAlertsSearchQuery
+    ) {
+        selectedAppAlertsSource.filter { alert ->
+            val modelMatches = appAlertsSelectedModelFilter == ALL_MODELS_KEY || alert.sourceModel == appAlertsSelectedModelFilter
+            val shadowMatches = when (appAlertsSelectedShadowFilter) {
+                ALL_SHADOWS_KEY -> true
+                DISABLED_SHADOW_KEY -> alert.shadowModel.isNullOrBlank()
+                else -> alert.shadowModel == appAlertsSelectedShadowFilter
+            }
+            val query = appAlertsSearchQuery.trim().lowercase()
+            val searchMatches = if (query.isBlank()) {
+                true
+            } else {
+                alert.appId.lowercase().contains(query) ||
+                    displayAppName(alert.appId).lowercase().contains(query) ||
+                    modelDisplayName(alert.sourceModel).lowercase().contains(query) ||
+                    modelDisplayName(alert.shadowModel.orEmpty()).lowercase().contains(query) ||
+                    (alert.siteHint?.lowercase()?.contains(query) == true) ||
+                    alert.explanation.lowercase().contains(query) ||
+                    alert.topFeatures.any { it.lowercase().contains(query) }
+            }
+            modelMatches && shadowMatches && searchMatches
+        }
+    }
+    val selectedAppSeverityCounts = remember(selectedAppScopedAlerts) {
+        mapOf(
+            SeverityFilter.ALL to selectedAppScopedAlerts.size,
+            SeverityFilter.HIGH to selectedAppScopedAlerts.count { it.severity == AlertSeverity.HIGH },
+            SeverityFilter.MEDIUM to selectedAppScopedAlerts.count { it.severity == AlertSeverity.MEDIUM },
+            SeverityFilter.LOW to selectedAppScopedAlerts.count { it.severity == AlertSeverity.LOW }
+        )
+    }
+    val selectedAppFilteredAlerts = remember(selectedAppScopedAlerts, appAlertsSeverityFilter) {
+        selectedAppScopedAlerts.filter { alert ->
+            when (appAlertsSeverityFilter) {
+                SeverityFilter.ALL -> true
+                SeverityFilter.HIGH -> alert.severity == AlertSeverity.HIGH
+                SeverityFilter.MEDIUM -> alert.severity == AlertSeverity.MEDIUM
+                SeverityFilter.LOW -> alert.severity == AlertSeverity.LOW
+            }
+        }
+    }
     LaunchedEffect(severityFilter, selectedModelFilter, selectedShadowFilter, searchQuery, alerts.size) {
         alertsPage = 1
+    }
+
+    LaunchedEffect(selectedAppId) {
+        appAlertsSearchQuery = ""
+        appAlertsSeverityFilter = SeverityFilter.ALL
+        appAlertsSelectedModelFilter = ALL_MODELS_KEY
+        appAlertsSelectedShadowFilter = ALL_SHADOWS_KEY
+    }
+
+    LaunchedEffect(appInventory, selectedAppId) {
+        if (selectedAppId != null && appInventory.none { it.appId == selectedAppId }) {
+            selectedAppId = null
+        }
     }
 
     LaunchedEffect(alerts) {
@@ -409,6 +553,7 @@ fun MainScreen(
                         icon = {
                             val icon = when (tab) {
                                 MainTab.HOME -> Icons.Filled.Home
+                                MainTab.APPS -> Icons.Filled.Palette
                                 MainTab.ALERTS -> Icons.Filled.Notifications
                                 MainTab.SETTINGS -> Icons.Filled.Settings
                             }
@@ -435,6 +580,53 @@ fun MainScreen(
                     onAcceptConsent = onAcceptConsent,
                     onStartCapture = onStartCapture,
                     onStopCapture = onStopCapture
+                )
+
+                MainTab.APPS -> AppsView(
+                    entries = appInventory,
+                    selectedApp = selectedAppEntry,
+                    selectedAppAlerts = selectedAppFilteredAlerts,
+                    selectedAppAllFilteredAlerts = selectedAppFilteredAlerts,
+                    statusMessage = statusMessage,
+                    showSystemApps = showSystemApps,
+                    onShowSystemAppsChange = { showSystemApps = it },
+                    searchQuery = appsSearchQuery,
+                    onSearchQueryChange = { appsSearchQuery = it },
+                    onRescanApps = { appRescanNonce++ },
+                    onOpenApp = { selectedAppId = it },
+                    onBackToApps = { selectedAppId = null },
+                    appAlertsSearchQuery = appAlertsSearchQuery,
+                    onAppAlertsSearchQueryChange = { appAlertsSearchQuery = it },
+                    appAlertsSeverityFilter = appAlertsSeverityFilter,
+                    onAppAlertsSeverityFilterChange = { appAlertsSeverityFilter = it },
+                    appAlertsSeverityCounts = selectedAppSeverityCounts,
+                    appAlertModelFilters = selectedAppModelFilters,
+                    selectedAppModelFilter = appAlertsSelectedModelFilter,
+                    onSelectedAppModelFilterChange = { appAlertsSelectedModelFilter = it },
+                    appAlertShadowFilters = selectedAppShadowFilters,
+                    selectedAppShadowFilter = appAlertsSelectedShadowFilter,
+                    onSelectedAppShadowFilterChange = { appAlertsSelectedShadowFilter = it },
+                    onShowModelInfo = { modelInfoDialog = it },
+                    currentPage = 1,
+                    totalPages = 1,
+                    onPreviousPage = {},
+                    onNextPage = {},
+                    onMarkDangerous = { alertId ->
+                        alerts.find { it.id == alertId }?.let { queueUndoAction(it, AlertAction.DANGEROUS) }
+                    },
+                    onMarkFalsePositive = { alertId ->
+                        alerts.find { it.id == alertId }?.let { queueUndoAction(it, AlertAction.FALSE_POSITIVE) }
+                    },
+                    onDismissNeutral = { alertId ->
+                        alerts.find { it.id == alertId }?.let { queueUndoAction(it, AlertAction.NEUTRAL) }
+                    },
+                    currentAppProfile = currentAppProfile,
+                    onSetAppProfile = onSetAppProfile,
+                    onSetAppThresholdOverride = onSetAppThresholdOverride,
+                    debugModeEnabled = config.debugModeEnabled,
+                    privacyModeEnabled = config.privacyModeEnabled,
+                    pendingUndo = pendingUndo,
+                    onUndoPendingAction = ::undoPendingAction
                 )
 
                 MainTab.ALERTS -> AlertsView(
@@ -483,11 +675,23 @@ fun MainScreen(
                     statusMessage = statusMessage,
                     runtimeHealth = runtimeHealth,
                     backendUrl = backendUrl,
-                    onBackendUrlChange = { backendUrl = it },
-                    onSaveBackendUrl = { onSaveBackendUrl(backendUrl) },
+                    onBackendUrlChange = {
+                        backendUrl = it
+                        backendUrlDirty = it != config.backendUrl
+                    },
+                    onSaveBackendUrl = {
+                        backendUrlDirty = false
+                        onSaveBackendUrl(backendUrl)
+                    },
                     apiToken = apiToken,
-                    onApiTokenChange = { apiToken = it },
-                    onSaveApiToken = { onSaveApiToken(apiToken) },
+                    onApiTokenChange = {
+                        apiToken = it
+                        apiTokenDirty = it != config.apiToken
+                    },
+                    onSaveApiToken = {
+                        apiTokenDirty = false
+                        onSaveApiToken(apiToken)
+                    },
                     lowThreshold = lowThreshold,
                     onLowThresholdChange = { lowThreshold = it },
                     mediumThreshold = mediumThreshold,
@@ -528,6 +732,8 @@ fun MainScreen(
                     onFalsePositiveBudgetChange = { falsePositiveBudget = it },
                     driftHighThreshold = driftHighThreshold,
                     onDriftHighThresholdChange = { driftHighThreshold = it },
+                    protectedBrandsCsv = protectedBrandsCsv,
+                    onProtectedBrandsCsvChange = { protectedBrandsCsv = it },
                     onSaveFusionWeights = {
                         onSaveFusionWeights(
                             FusionWeights(
@@ -563,13 +769,13 @@ fun MainScreen(
                     onSetTestModeEnabled = onSetTestModeEnabled,
                     onSetPrivacyMode = onSetPrivacyMode,
                     onSetCustomPrivacyOptions = onSetCustomPrivacyOptions,
+                    onSaveProtectedBrandsCsv = { onSaveProtectedBrandsCsv(protectedBrandsCsv) },
                     onToggleExport = onToggleExport,
                     onSyncPolicy = onSyncPolicy,
                     onPingBackend = onPingBackend,
                     onExportDataset = onExportDataset,
                     onExportAlerts = onExportAlerts,
                     onExportForensics = onExportForensics,
-                    onCaptureEvidence = onCaptureEvidence,
                     onFlushExportQueue = onFlushExportQueue,
                     onPurgeData = onPurgeData
                 )
@@ -698,6 +904,18 @@ private fun HomeView(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (config.debugModeEnabled) {
+                    Text(
+                        "Packets ${runtimeHealth.packetPipeline.packetsRead} • Active flows ${runtimeHealth.packetPipeline.activeFlows} • Parser failures ${runtimeHealth.packetPipeline.parserFailure}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Drops: forward ${runtimeHealth.packetPipeline.forwardQueueDropped} • ingress ${runtimeHealth.packetPipeline.analysisIngressDropped} • shard ${runtimeHealth.packetPipeline.analysisShardDropped}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
 
@@ -713,6 +931,359 @@ private fun HomeView(
                 )
             }
         }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun AppsView(
+    entries: List<AppInventoryEntry>,
+    selectedApp: AppInventoryEntry?,
+    selectedAppAlerts: List<AnomalyAlert>,
+    selectedAppAllFilteredAlerts: List<AnomalyAlert>,
+    statusMessage: String?,
+    showSystemApps: Boolean,
+    onShowSystemAppsChange: (Boolean) -> Unit,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onRescanApps: () -> Unit,
+    onOpenApp: (String) -> Unit,
+    onBackToApps: () -> Unit,
+    appAlertsSearchQuery: String,
+    onAppAlertsSearchQueryChange: (String) -> Unit,
+    appAlertsSeverityFilter: SeverityFilter,
+    onAppAlertsSeverityFilterChange: (SeverityFilter) -> Unit,
+    appAlertsSeverityCounts: Map<SeverityFilter, Int>,
+    appAlertModelFilters: List<String>,
+    selectedAppModelFilter: String,
+    onSelectedAppModelFilterChange: (String) -> Unit,
+    appAlertShadowFilters: List<String>,
+    selectedAppShadowFilter: String,
+    onSelectedAppShadowFilterChange: (String) -> Unit,
+    onShowModelInfo: (String) -> Unit,
+    currentPage: Int,
+    totalPages: Int,
+    onPreviousPage: () -> Unit,
+    onNextPage: () -> Unit,
+    onMarkDangerous: (String) -> Unit,
+    onMarkFalsePositive: (String) -> Unit,
+    onDismissNeutral: (String) -> Unit,
+    currentAppProfile: (String) -> AppProfile,
+    onSetAppProfile: (String, AppProfile) -> Unit,
+    onSetAppThresholdOverride: (String, Double, Double, Double) -> Unit,
+    debugModeEnabled: Boolean,
+    privacyModeEnabled: Boolean,
+    pendingUndo: PendingUndoAction?,
+    onUndoPendingAction: () -> Unit
+) {
+    if (selectedApp == null) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = 12.dp)
+        ) {
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("Apps", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Scan installed apps, keep existing alerts intact, and drill into one app at a time for alert review and threshold/profile tuning.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = onSearchQueryChange,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Search app name or package") }
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Show system apps")
+                                Text(
+                                    "Hide or include preinstalled/system packages in the scanned app list.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = showSystemApps,
+                                onCheckedChange = onShowSystemAppsChange
+                            )
+                        }
+                        OutlinedButton(onClick = onRescanApps, modifier = Modifier.fillMaxWidth()) {
+                            Text("Rescan installed apps")
+                        }
+                        Text(
+                            "Showing ${entries.size} app entries",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            if (!statusMessage.isNullOrBlank()) {
+                item {
+                    Text(
+                        text = statusMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+                }
+            }
+
+            if (entries.isEmpty()) {
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("No apps match the current filters.")
+                            Text(
+                                "Try clearing the search term or enabling system apps.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            } else {
+                items(entries, key = { it.appId }) { entry ->
+                    AppInventoryCard(
+                        entry = entry,
+                        onOpenApp = { onOpenApp(entry.appId) }
+                    )
+                }
+            }
+        }
+        return
+    }
+
+    var lowThreshold by rememberSaveable(selectedApp.appId) { mutableStateOf(formatDecimal(selectedApp.thresholdLow)) }
+    var mediumThreshold by rememberSaveable(selectedApp.appId) { mutableStateOf(formatDecimal(selectedApp.thresholdMedium)) }
+    var highThreshold by rememberSaveable(selectedApp.appId) { mutableStateOf(formatDecimal(selectedApp.thresholdHigh)) }
+
+    LaunchedEffect(selectedApp.appId, selectedApp.thresholdLow, selectedApp.thresholdMedium, selectedApp.thresholdHigh) {
+        lowThreshold = formatDecimal(selectedApp.thresholdLow)
+        mediumThreshold = formatDecimal(selectedApp.thresholdMedium)
+        highThreshold = formatDecimal(selectedApp.thresholdHigh)
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(bottom = 12.dp)
+    ) {
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(onClick = onBackToApps, modifier = Modifier.fillMaxWidth()) {
+                        Text("Back to app list")
+                    }
+                    Text(selectedApp.label, style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        selectedApp.appId,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        InventoryChip(if (selectedApp.isInstalled) "Installed" else "Historical")
+                        InventoryChip(if (selectedApp.isSystem) "System" else "User")
+                        InventoryChip("Alerts ${selectedApp.alertCount}")
+                        InventoryChip("Open ${selectedApp.openAlertCount}")
+                        InventoryChip(selectedApp.profile.label())
+                        selectedApp.highestSeverity?.let { InventoryChip("${it.name.lowercase().replaceFirstChar { ch -> ch.uppercaseChar() }} max") }
+                    }
+                    Text(
+                        "Last alert ${formatOptionalTimestamp(selectedApp.lastAlertMillis)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("App thresholds and profile", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Low controls whether alerts for this app are kept at all. Medium and High control the severity bands after the score passes the low floor.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = lowThreshold,
+                            onValueChange = { lowThreshold = it },
+                            modifier = Modifier.weight(1f),
+                            label = { Text("Low") }
+                        )
+                        OutlinedTextField(
+                            value = mediumThreshold,
+                            onValueChange = { mediumThreshold = it },
+                            modifier = Modifier.weight(1f),
+                            label = { Text("Medium") }
+                        )
+                        OutlinedTextField(
+                            value = highThreshold,
+                            onValueChange = { highThreshold = it },
+                            modifier = Modifier.weight(1f),
+                            label = { Text("High") }
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            onSetAppThresholdOverride(
+                                selectedApp.appId,
+                                lowThreshold.toDoubleOrNull() ?: selectedApp.thresholdLow,
+                                mediumThreshold.toDoubleOrNull() ?: selectedApp.thresholdMedium,
+                                highThreshold.toDoubleOrNull() ?: selectedApp.thresholdHigh
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Save app thresholds")
+                    }
+                    Text("App profile", style = MaterialTheme.typography.labelLarge)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        AppProfile.values().forEach { profile ->
+                            FilterChip(
+                                selected = profile == currentAppProfile(selectedApp.appId),
+                                onClick = { onSetAppProfile(selectedApp.appId, profile) },
+                                label = { Text(profile.label()) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            AppAlertsView(
+                alerts = selectedAppAlerts,
+                allFilteredAlerts = selectedAppAllFilteredAlerts,
+                statusMessage = statusMessage,
+                searchQuery = appAlertsSearchQuery,
+                onSearchQueryChange = onAppAlertsSearchQueryChange,
+                severityFilter = appAlertsSeverityFilter,
+                onSeverityFilterChange = onAppAlertsSeverityFilterChange,
+                severityCounts = appAlertsSeverityCounts,
+                modelFilters = appAlertModelFilters,
+                selectedModelFilter = selectedAppModelFilter,
+                onModelFilterChange = onSelectedAppModelFilterChange,
+                shadowFilters = appAlertShadowFilters,
+                selectedShadowFilter = selectedAppShadowFilter,
+                onShadowFilterChange = onSelectedAppShadowFilterChange,
+                onShowModelInfo = onShowModelInfo,
+                currentPage = currentPage,
+                totalPages = totalPages,
+                onPreviousPage = onPreviousPage,
+                onNextPage = onNextPage,
+                onMarkDangerous = onMarkDangerous,
+                onMarkFalsePositive = onMarkFalsePositive,
+                onDismissNeutral = onDismissNeutral,
+                debugModeEnabled = debugModeEnabled,
+                privacyModeEnabled = privacyModeEnabled,
+                currentAppProfile = currentAppProfile,
+                onSetAppProfile = onSetAppProfile,
+                pendingUndo = pendingUndo,
+                onUndoPendingAction = onUndoPendingAction
+            )
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
+private fun AppInventoryCard(
+    entry: AppInventoryEntry,
+    onOpenApp: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onOpenApp),
+        colors = CardDefaults.cardColors(
+            containerColor = when (entry.highestSeverity) {
+                AlertSeverity.HIGH -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
+                AlertSeverity.MEDIUM -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.40f)
+                else -> MaterialTheme.colorScheme.surface
+            }
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(entry.label, style = MaterialTheme.typography.titleMedium)
+            Text(
+                entry.appId,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                InventoryChip(if (entry.isInstalled) "Installed" else "Historical")
+                InventoryChip(if (entry.isSystem) "System" else "User")
+                InventoryChip("Alerts ${entry.alertCount}")
+                InventoryChip("Open ${entry.openAlertCount}")
+                InventoryChip(entry.profile.label())
+                entry.highestSeverity?.let { InventoryChip("${it.name.lowercase().replaceFirstChar { ch -> ch.uppercaseChar() }} max") }
+            }
+            Text(
+                "Thresholds L ${formatDecimal(entry.thresholdLow)} • M ${formatDecimal(entry.thresholdMedium)} • H ${formatDecimal(entry.thresholdHigh)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "Last alert ${formatOptionalTimestamp(entry.lastAlertMillis)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun InventoryChip(label: String) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            style = MaterialTheme.typography.labelSmall
+        )
     }
 }
 
@@ -1055,6 +1626,8 @@ private fun SettingsView(
     onFalsePositiveBudgetChange: (String) -> Unit,
     driftHighThreshold: String,
     onDriftHighThresholdChange: (String) -> Unit,
+    protectedBrandsCsv: String,
+    onProtectedBrandsCsvChange: (String) -> Unit,
     onSaveFusionWeights: () -> Unit,
     onSaveGuardrails: () -> Unit,
     onSetAblationFlags: (Boolean, Boolean, Boolean) -> Unit,
@@ -1066,13 +1639,13 @@ private fun SettingsView(
     onSetTestModeEnabled: (Boolean) -> Unit,
     onSetPrivacyMode: (PrivacyMode) -> Unit,
     onSetCustomPrivacyOptions: (CustomPrivacyOptions) -> Unit,
+    onSaveProtectedBrandsCsv: () -> Unit,
     onToggleExport: (Boolean) -> Unit,
     onSyncPolicy: () -> Unit,
     onPingBackend: () -> Unit,
     onExportDataset: () -> Unit,
     onExportAlerts: () -> Unit,
     onExportForensics: () -> Unit,
-    onCaptureEvidence: () -> Unit,
     onFlushExportQueue: () -> Unit,
     onPurgeData: () -> Unit
 ) {
@@ -1332,6 +1905,21 @@ private fun SettingsView(
                                 RuntimeHealthChip("TFLite", runtimeHealth.tfliteAvailable)
                                 RuntimeHealthChip("Remote", runtimeHealth.remoteConfigured)
                             }
+                            Text(
+                                "Packets ${runtimeHealth.packetPipeline.packetsRead} • Active flows ${runtimeHealth.packetPipeline.activeFlows} • Parser failures ${runtimeHealth.packetPipeline.parserFailure}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "Queue drops: forward ${runtimeHealth.packetPipeline.forwardQueueDropped}, ingress ${runtimeHealth.packetPipeline.analysisIngressDropped}, shard ${runtimeHealth.packetPipeline.analysisShardDropped}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "Latency avg (ms): read→parse ${formatLatency(runtimeHealth.packetPipeline.readToParseAvgMs)}, parse→shard ${formatLatency(runtimeHealth.packetPipeline.parseToShardAvgMs)}, shard→flush ${formatLatency(runtimeHealth.packetPipeline.shardToFlushAvgMs)}, flush→persist ${formatLatency(runtimeHealth.packetPipeline.flushToPersistAvgMs)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
 
@@ -1442,6 +2030,34 @@ private fun SettingsView(
                     }
                     OutlinedButton(onClick = onSaveFusionWeights, modifier = Modifier.fillMaxWidth()) {
                         Text("Save all fusion weights")
+                    }
+                }
+            }
+        }
+
+        if (config.debugModeEnabled) {
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("Protected brands", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "One brand per line. These names are used by the local destination-intelligence engine for lookalike and phishing-style domain detection.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        OutlinedTextField(
+                            value = protectedBrandsCsv,
+                            onValueChange = onProtectedBrandsCsvChange,
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 6,
+                            label = { Text("Protected brand watchlist") }
+                        )
+                        OutlinedButton(onClick = onSaveProtectedBrandsCsv, modifier = Modifier.fillMaxWidth()) {
+                            Text("Save protected brands")
+                        }
                     }
                 }
             }
@@ -1692,15 +2308,9 @@ private fun SettingsView(
                     }
 
                     if (config.debugModeEnabled) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedButton(onClick = onExportForensics, modifier = Modifier.weight(1f)) {
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(onClick = onExportForensics, modifier = Modifier.fillMaxWidth()) {
                                 Text("Forensics bundle", style = MaterialTheme.typography.labelSmall)
-                            }
-                            OutlinedButton(onClick = onCaptureEvidence, modifier = Modifier.weight(1f)) {
-                                Text("Capture evidence", style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }
@@ -1767,6 +2377,237 @@ private fun ModelInfoChip(
             color = contentColor,
             style = MaterialTheme.typography.labelLarge
         )
+    }
+}
+
+@Composable
+private fun AppAlertsView(
+    alerts: List<AnomalyAlert>,
+    allFilteredAlerts: List<AnomalyAlert>,
+    statusMessage: String?,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    severityFilter: SeverityFilter,
+    onSeverityFilterChange: (SeverityFilter) -> Unit,
+    severityCounts: Map<SeverityFilter, Int>,
+    modelFilters: List<String>,
+    selectedModelFilter: String,
+    onModelFilterChange: (String) -> Unit,
+    shadowFilters: List<String>,
+    selectedShadowFilter: String,
+    onShadowFilterChange: (String) -> Unit,
+    onShowModelInfo: (String) -> Unit,
+    currentPage: Int,
+    totalPages: Int,
+    onPreviousPage: () -> Unit,
+    onNextPage: () -> Unit,
+    onMarkDangerous: (String) -> Unit,
+    onMarkFalsePositive: (String) -> Unit,
+    onDismissNeutral: (String) -> Unit,
+    debugModeEnabled: Boolean,
+    privacyModeEnabled: Boolean,
+    currentAppProfile: (String) -> AppProfile,
+    onSetAppProfile: (String, AppProfile) -> Unit,
+    pendingUndo: PendingUndoAction?,
+    onUndoPendingAction: () -> Unit
+) {
+    var filtersExpanded by rememberSaveable { mutableStateOf(false) }
+    var compactRepeatedAlerts by rememberSaveable { mutableStateOf(true) }
+
+    val displayedAlerts = remember(alerts, compactRepeatedAlerts) {
+        if (!compactRepeatedAlerts) {
+            alerts
+        } else {
+            alerts
+                .groupBy { alert ->
+                    alert.correlationKey.takeIf { it.isNotBlank() }
+                        ?: "${alert.appId}|${alert.sourceModel}|${alert.siteHint ?: alert.destinationHash ?: "unknown"}"
+                }
+                .map { (_, grouped) -> grouped.maxByOrNull { it.lastSeenMillis } ?: grouped.first() }
+                .sortedByDescending { it.createdAtMillis }
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Alerts for this app", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            if (allFilteredAlerts.isNotEmpty()) "${allFilteredAlerts.size} matching alerts" else "No matching alerts",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    OutlinedButton(onClick = { filtersExpanded = !filtersExpanded }) {
+                        Text(if (filtersExpanded) "Hide" else "Show")
+                    }
+                }
+
+                AnimatedVisibility(visible = filtersExpanded) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = onSearchQueryChange,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Search explanation / site / features") }
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Compact repeated alerts", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "Collapse repeated incidents into the latest alert card for this app.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = compactRepeatedAlerts,
+                                onCheckedChange = { compactRepeatedAlerts = it }
+                            )
+                        }
+
+                        Text("Severity", style = MaterialTheme.typography.labelLarge)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(SeverityFilter.values().toList()) { filter ->
+                                FilterChip(
+                                    selected = filter == severityFilter,
+                                    onClick = { onSeverityFilterChange(filter) },
+                                    label = { Text("${filter.label} (${severityCounts[filter] ?: 0})") }
+                                )
+                            }
+                        }
+
+                        Text("Model", style = MaterialTheme.typography.labelLarge)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(modelFilters) { model ->
+                                val label = if (model == ALL_MODELS_KEY) "All" else modelDisplayName(model)
+                                ModelInfoChip(
+                                    label = label,
+                                    selected = model == selectedModelFilter,
+                                    onClick = { onModelFilterChange(model) },
+                                    onLongPress = { if (model != ALL_MODELS_KEY) onShowModelInfo(model) }
+                                )
+                            }
+                        }
+
+                        Text("Shadow", style = MaterialTheme.typography.labelLarge)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(shadowFilters) { model ->
+                                val label = when (model) {
+                                    ALL_SHADOWS_KEY -> "All"
+                                    DISABLED_SHADOW_KEY -> "Disabled"
+                                    else -> modelDisplayName(model)
+                                }
+                                ModelInfoChip(
+                                    label = label,
+                                    selected = model == selectedShadowFilter,
+                                    onClick = { onShadowFilterChange(model) },
+                                    onLongPress = {
+                                        if (model != ALL_SHADOWS_KEY && model != DISABLED_SHADOW_KEY) onShowModelInfo(model)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Text(
+                    "Showing ${displayedAlerts.size} alerts on this page",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        if (!statusMessage.isNullOrBlank()) {
+            Text(
+                text = statusMessage,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+        }
+
+        if (allFilteredAlerts.isEmpty()) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("No alerts for this app match the current filters.")
+                    if (debugModeEnabled) {
+                        Text(
+                            if (privacyModeEnabled) {
+                                "Debug hint: privacy mode can hide some destination context even when alerts are still present."
+                            } else {
+                                "Debug hint: use the model and shadow filters to compare how this app is being scored."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        } else {
+            displayedAlerts.forEach { alert ->
+                if (pendingUndo?.alertId == alert.id) {
+                    PendingUndoCard(
+                        pendingUndo = pendingUndo,
+                        onUndoPendingAction = onUndoPendingAction
+                    )
+                } else {
+                    AlertCard(
+                        alert = alert,
+                        debugModeEnabled = debugModeEnabled,
+                        privacyModeEnabled = privacyModeEnabled,
+                        onMarkDangerous = { onMarkDangerous(alert.id) },
+                        onMarkFalsePositive = { onMarkFalsePositive(alert.id) },
+                        onDismissNeutral = { onDismissNeutral(alert.id) },
+                        onShowInfo = { onShowModelInfo(it) },
+                        currentProfile = currentAppProfile(alert.appId),
+                        onSetAppProfile = { profile -> onSetAppProfile(alert.appId, profile) }
+                    )
+                }
+            }
+            if (totalPages > 1) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Page $currentPage of $totalPages",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = onPreviousPage, enabled = currentPage > 1, modifier = Modifier.weight(1f)) {
+                                Text("Previous")
+                            }
+                            Button(onClick = onNextPage, enabled = currentPage < totalPages, modifier = Modifier.weight(1f)) {
+                                Text("Next")
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -2237,6 +3078,86 @@ private fun alertAccentColor(severity: AlertSeverity): Color = when (severity) {
     AlertSeverity.LOW -> MaterialTheme.colorScheme.secondary
 }
 
+private fun loadInstalledApps(packageManager: PackageManager?): List<InstalledAppCatalogEntry> {
+    if (packageManager == null) {
+        return emptyList()
+    }
+    return runCatching {
+        packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+            .mapNotNull { appInfo ->
+                val packageName = appInfo.packageName?.trim().orEmpty()
+                if (packageName.isBlank()) {
+                    null
+                } else {
+                    InstalledAppCatalogEntry(
+                        appId = packageName,
+                        label = packageManager.getApplicationLabel(appInfo)?.toString()?.trim().takeUnless { it.isNullOrBlank() }
+                            ?: displayAppName(packageName),
+                        isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
+                            (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                    )
+                }
+            }
+            .sortedBy { it.label.lowercase() }
+    }.getOrDefault(emptyList())
+}
+
+private fun buildAppInventory(
+    installedApps: List<InstalledAppCatalogEntry>,
+    alerts: List<AnomalyAlert>,
+    searchQuery: String,
+    includeSystemApps: Boolean,
+    currentAppThresholdProfile: (String) -> ThresholdProfile,
+    currentAppProfile: (String) -> AppProfile
+): List<AppInventoryEntry> {
+    val alertsByApp = alerts.groupBy { it.appId }
+    val installedById = installedApps.associateBy { it.appId }
+    val allAppIds = (installedById.keys + alertsByApp.keys).toSortedSet()
+    val normalizedQuery = searchQuery.trim().lowercase()
+
+    return allAppIds.mapNotNull { appId ->
+        val installed = installedById[appId]
+        val appAlerts = alertsByApp[appId].orEmpty()
+        val isSystem = installed?.isSystem ?: (appId.startsWith("com.android.") || appId.startsWith("android."))
+        if (!includeSystemApps && isSystem) {
+            return@mapNotNull null
+        }
+
+        val label = installed?.label ?: displayAppName(appId)
+        if (normalizedQuery.isNotBlank() &&
+            !label.lowercase().contains(normalizedQuery) &&
+            !appId.lowercase().contains(normalizedQuery)
+        ) {
+            return@mapNotNull null
+        }
+
+        val thresholdProfile = currentAppThresholdProfile(appId)
+        AppInventoryEntry(
+            appId = appId,
+            label = label,
+            isInstalled = installed != null,
+            isSystem = isSystem,
+            alertCount = appAlerts.size,
+            openAlertCount = appAlerts.count { it.triageStatus == TriageStatus.OPEN },
+            highestSeverity = appAlerts.maxByOrNull { it.severity.rank() }?.severity,
+            lastAlertMillis = appAlerts.maxOfOrNull { it.lastSeenMillis } ?: 0L,
+            thresholdLow = thresholdProfile.low,
+            thresholdMedium = thresholdProfile.medium,
+            thresholdHigh = thresholdProfile.high,
+            profile = currentAppProfile(appId)
+        )
+    }.sortedWith(
+        compareByDescending<AppInventoryEntry> { it.alertCount > 0 }
+            .thenBy { it.label.lowercase() }
+    )
+}
+
+private fun AlertSeverity.rank(): Int = when (this) {
+    AlertSeverity.HIGH -> 3
+    AlertSeverity.MEDIUM -> 2
+    AlertSeverity.LOW -> 1
+}
+
 private fun displayAppName(appId: String): String {
     return when {
         appId.startsWith("uid:") -> {
@@ -2549,9 +3470,19 @@ private fun buildFlowPreviewText(deviceIdPseudo: String, config: EndpointConfig)
         PrivacyMode.CUSTOM -> if (config.customPrivacy.includeExactPorts) "443" else "443 (service bucket)"
         else -> "443"
     }
+    val destinationKey = when (config.privacyMode) {
+        PrivacyMode.OFF -> "www.example.com:443"
+        PrivacyMode.LOW -> "www.example.com:443"
+        PrivacyMode.MEDIUM, PrivacyMode.STRICT -> "sha256(destination_key)"
+        PrivacyMode.CUSTOM -> when {
+            config.customPrivacy.includeSiteHint -> "www.example.com:443"
+            config.customPrivacy.includeIpAddresses -> "93.184.216.34:443"
+            else -> "sha256(destination_key)"
+        }
+    }
     val explain = when (config.privacyMode) {
         PrivacyMode.OFF -> "[novelty_score, destination_diversity, periodic_beacon_score]"
-        PrivacyMode.LOW -> "[feature_window, site_hint, hashed IPs]"
+        PrivacyMode.LOW -> "[feature_window, readable destination_key, hashed IPs]"
         PrivacyMode.MEDIUM -> "[feature_window, ports, protocol, hashed identifiers]"
         PrivacyMode.STRICT -> "[feature_window only, no site hint, minimal endpoint context]"
         PrivacyMode.CUSTOM ->
@@ -2568,7 +3499,8 @@ private fun buildFlowPreviewText(deviceIdPseudo: String, config: EndpointConfig)
         src_ip=$srcIp
         dst_ip=$dstIp
         dst_port=$dstPort
-        dst_host_hash=${CryptoUtils.sha256("93.184.216.34:443").take(16)}...
+        destination_key=$destinationKey
+        is_new_destination_for_app=1.0
         explain_top_features=$explain
     """.trimIndent()
 }
@@ -2718,3 +3650,5 @@ private fun formatOptionalTimestamp(millis: Long): String {
         formatTimestamp(millis)
     }
 }
+
+private fun formatLatency(value: Double): String = "%.2f".format(value)

@@ -30,6 +30,7 @@ internal class UserspaceTunForwarder(
     private val vpnService: VpnService,
     tunFd: ParcelFileDescriptor,
     localVpnAddress: String,
+    private val pipelineStats: PacketPipelineStats? = null,
     dispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
     companion object {
@@ -64,7 +65,7 @@ internal class UserspaceTunForwarder(
 
     private val inboundPackets = Channel<ByteArray>(
         capacity = TUN_QUEUE_CAPACITY,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
+        onBufferOverflow = BufferOverflow.SUSPEND
     )
 
     private val udpSessions = ConcurrentHashMap<UdpSessionKey, UdpSession>()
@@ -79,10 +80,15 @@ internal class UserspaceTunForwarder(
         if (!running.get() || length <= 0) {
             return
         }
-        if (packet.size == length) {
+        val result = if (packet.size == length) {
             inboundPackets.trySend(packet)
         } else {
             inboundPackets.trySend(packet.copyOf(length))
+        }
+        if (result.isSuccess) {
+            pipelineStats?.recordForwardEnqueued()
+        } else {
+            pipelineStats?.recordForwardDropped()
         }
     }
 
@@ -112,6 +118,7 @@ internal class UserspaceTunForwarder(
             if (!running.get()) {
                 break
             }
+            pipelineStats?.recordForwardDequeued()
             val ipPacket = parseIpv4(packet) ?: continue
 
             when (ipPacket.protocol) {

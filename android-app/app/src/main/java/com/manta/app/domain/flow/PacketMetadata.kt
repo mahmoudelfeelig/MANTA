@@ -1,7 +1,10 @@
 package com.manta.app.domain.flow
 
+import com.manta.app.core.model.ProtocolEvidence
+
 data class PacketMetadata(
     val timestampMillis: Long,
+    val ipVersion: Int = 4,
     val protocolCode: Int,
     val srcIp: String,
     val srcPort: Int,
@@ -18,5 +21,6 @@ data class PacketMetadata(
     val ackFlag: Boolean = false,
     val finFlag: Boolean = false,
     val pshFlag: Boolean = false,
-    val tcpWindowSize: Int? = null
+    val tcpWindowSize: Int? = null,
+    val protocolEvidence: ProtocolEvidence = ProtocolEvidence()
 )

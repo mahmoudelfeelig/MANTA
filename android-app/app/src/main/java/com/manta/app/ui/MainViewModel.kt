@@ -147,6 +147,11 @@ class MainViewModel(
         _statusMessage.value = "Custom privacy options updated."
     }
 
+    fun setProtectedBrandsCsv(value: String) {
+        container.settingsStore.setProtectedBrandsCsv(value)
+        _statusMessage.value = "Protected brand watchlist updated."
+    }
+
     fun hasConsent(): Boolean = container.settingsStore.readConfig().consentAccepted
 
     fun acceptConsent() {
@@ -155,7 +160,7 @@ class MainViewModel(
     }
 
     fun setBaseThresholds(low: Double, medium: Double, high: Double) {
-        container.settingsStore.setBaseThresholds(low, ThresholdProfile(medium, high))
+        container.settingsStore.setBaseThresholds(low, ThresholdProfile(low, medium, high))
     }
 
     fun setFusionWeights(weights: FusionWeights) {
@@ -186,6 +191,15 @@ class MainViewModel(
     }
 
     fun appProfile(appId: String): AppProfile = container.settingsStore.getAppProfile(appId)
+
+    fun thresholdProfile(appId: String): ThresholdProfile = container.settingsStore.getThresholdForApp(appId)
+
+    fun setAppThresholdOverride(appId: String, low: Double, medium: Double, high: Double) {
+        val normalized = ThresholdProfile(low = low, medium = medium, high = high).normalize()
+        container.settingsStore.setThresholdOverride(appId, normalized)
+        _statusMessage.value =
+            "Threshold override for $appId set to low ${"%.2f".format(normalized.low)} / medium ${"%.2f".format(normalized.medium)} / high ${"%.2f".format(normalized.high)}."
+    }
 
     fun syncPolicy() {
         viewModelScope.launch {
@@ -333,10 +347,6 @@ class MainViewModel(
     }
 
     fun deviceIdPseudo(): String = container.settingsStore.getPseudonymousDeviceId()
-
-    fun publishStatus(message: String) {
-        _statusMessage.value = message
-    }
 
     private suspend fun refreshBackendConnection(showStatus: Boolean): Result<String> {
         val config = container.settingsStore.readConfig()

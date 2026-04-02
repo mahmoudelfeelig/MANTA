@@ -2,6 +2,7 @@ package com.manta.app.domain.flow
 
 import com.manta.app.core.model.FlowProtocol
 import com.manta.app.core.model.FlowRecord
+import com.manta.app.core.model.ProtocolEvidence
 import com.manta.app.core.security.CryptoUtils
 import java.util.UUID
 import kotlin.math.max
@@ -9,14 +10,15 @@ import kotlin.math.max
 private data class FlowKey(
     val appId: String,
     val protocol: FlowProtocol,
-    val srcIp: String,
-    val srcPort: Int,
-    val dstIp: String,
-    val dstPort: Int
+    val identity: TransportFlowIdentity
 )
 
 private data class FlowAccumulator(
     val startMillis: Long,
+    val localIp: String,
+    val localPort: Int,
+    val remoteIp: String,
+    val remotePort: Int,
     var endMillis: Long,
     var bytesOut: Long,
     var bytesIn: Long,
@@ -44,7 +46,14 @@ private data class FlowAccumulator(
     var fragmentCount: Int = 0,
     var tcpWindowSum: Long = 0L,
     var tcpWindowCount: Int = 0,
-    var transportMetricsObserved: Boolean = false
+    var transportMetricsObserved: Boolean = false,
+    var protocolEvidence: ProtocolEvidence = ProtocolEvidence()
+)
+
+data class FlowIngestResult(
+    val flushed: List<FlowRecord>,
+    val createdNewFlow: Boolean,
+    val activeFlowCount: Int
 )
 
 class FlowAggregator(
@@ -55,18 +64,32 @@ class FlowAggregator(
     private val seenDestinationsByApp = mutableMapOf<String, MutableSet<String>>()
 
     fun ingest(packet: PacketMetadata, appId: String): List<FlowRecord> {
+        return ingestWithStats(packet, appId).flushed
+    }
+
+    fun ingestWithStats(packet: PacketMetadata, appId: String): FlowIngestResult {
         val protocol = FlowProtocol.fromCode(packet.protocolCode)
-        val key = FlowKey(
-            appId = appId,
-            protocol = protocol,
+        val identity = FlowIdentity.canonical(
+            ipVersion = packet.ipVersion,
+            protocolCode = packet.protocolCode,
             srcIp = packet.srcIp,
             srcPort = packet.srcPort,
             dstIp = packet.dstIp,
             dstPort = packet.dstPort
         )
+        val key = FlowKey(
+            appId = appId,
+            protocol = protocol,
+            identity = identity
+        )
 
+        val existed = activeFlows.containsKey(key)
         val accumulator = activeFlows[key] ?: FlowAccumulator(
             startMillis = packet.timestampMillis,
+            localIp = if (packet.outbound) packet.srcIp else packet.dstIp,
+            localPort = if (packet.outbound) packet.srcPort else packet.dstPort,
+            remoteIp = if (packet.outbound) packet.dstIp else packet.srcIp,
+            remotePort = if (packet.outbound) packet.dstPort else packet.srcPort,
             endMillis = packet.timestampMillis,
             bytesOut = 0,
             bytesIn = 0,
@@ -92,6 +115,7 @@ class FlowAggregator(
         if (accumulator.siteHint.isNullOrBlank() && !packet.hostHint.isNullOrBlank()) {
             accumulator.siteHint = packet.hostHint
         }
+        accumulator.protocolEvidence = accumulator.protocolEvidence.merge(packet.protocolEvidence)
 
         val sawPayload = packet.payloadBytes > 0
         if (sawPayload) {
@@ -139,8 +163,15 @@ class FlowAggregator(
             accumulator.lastPayloadTimestampMillis = packet.timestampMillis
         }
 
-        return flushExpired(packet.timestampMillis)
+        val flushed = flushExpired(packet.timestampMillis)
+        return FlowIngestResult(
+            flushed = flushed,
+            createdNewFlow = !existed,
+            activeFlowCount = activeFlows.size
+        )
     }
+
+    fun activeFlowCount(): Int = activeFlows.size
 
     fun flushAll(nowMillis: Long): List<FlowRecord> {
         return flushInternal(activeFlows.keys.toList(), nowMillis)
@@ -165,7 +196,7 @@ class FlowAggregator(
 
         return keys.mapNotNull { key ->
             val accumulator = activeFlows.remove(key) ?: return@mapNotNull null
-            val destination = "${accumulator.siteHint ?: key.dstIp}:${key.dstPort}"
+            val destination = "${accumulator.siteHint ?: accumulator.remoteIp}:${accumulator.remotePort}"
             val seenDestinations = seenDestinationsByApp.getOrPut(key.appId) { mutableSetOf() }
             val destinationNovelty = if (seenDestinations.contains(destination)) 0.0 else 1.0
             seenDestinations += destination
@@ -187,12 +218,13 @@ class FlowAggregator(
                 id = UUID.randomUUID().toString(),
                 timestampStartMillis = accumulator.startMillis,
                 timestampEndMillis = max(accumulator.endMillis, nowMillis),
+                ipVersion = key.identity.ipVersion,
                 appId = key.appId,
                 protocol = key.protocol,
-                srcIp = key.srcIp,
-                srcPort = key.srcPort,
-                dstIp = key.dstIp,
-                dstPort = key.dstPort,
+                srcIp = accumulator.localIp,
+                srcPort = accumulator.localPort,
+                dstIp = accumulator.remoteIp,
+                dstPort = accumulator.remotePort,
                 bytesOut = accumulator.bytesOut,
                 bytesIn = accumulator.bytesIn,
                 packetsOut = accumulator.packetsOut,
@@ -214,7 +246,8 @@ class FlowAggregator(
                 interPacketGapMean = if (accumulator.interPacketGapCount > 0) accumulator.interPacketGapSumMillis.toDouble() / accumulator.interPacketGapCount.toDouble() else 0.0,
                 payloadMean = if (accumulator.payloadPacketCount > 0) accumulator.payloadBytesSum.toDouble() / accumulator.payloadPacketCount.toDouble() else 0.0,
                 loadMean = ((accumulator.bytesOut + accumulator.bytesIn).toDouble() / durationSeconds).coerceAtLeast(0.0),
-                transportMetricsPresent = transportPresent
+                transportMetricsPresent = transportPresent,
+                protocolEvidence = accumulator.protocolEvidence
             )
         }
     }

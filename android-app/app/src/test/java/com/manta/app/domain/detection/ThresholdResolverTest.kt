@@ -8,7 +8,7 @@ import org.junit.Test
 class ThresholdResolverTest {
     @Test
     fun `resolves severity using configurable thresholds`() {
-        val profile = ThresholdProfile(medium = 0.55, high = 0.8)
+        val profile = ThresholdProfile(low = 0.3, medium = 0.55, high = 0.8)
 
         assertEquals(AlertSeverity.LOW, ThresholdResolver.resolveSeverity(0.4, profile))
         assertEquals(AlertSeverity.MEDIUM, ThresholdResolver.resolveSeverity(0.6, profile))

@@ -64,7 +64,10 @@ interface FlowDao {
             "destinationIp = :destinationIp, " +
             "destinationPort = :destinationPort, " +
             "destinationHash = :destinationHash, " +
-            "siteHint = :siteHint " +
+            "siteHint = :siteHint, " +
+            "mitreTechniquesCsv = :mitreTechniquesCsv, " +
+            "destinationIdentity = :destinationIdentity, " +
+            "lookalikeScore = :lookalikeScore " +
             "WHERE id = :alertId"
     )
     suspend fun updateCorrelatedAlert(
@@ -94,7 +97,10 @@ interface FlowDao {
         destinationIp: String?,
         destinationPort: Int?,
         destinationHash: String?,
-        siteHint: String?
+        siteHint: String?,
+        mitreTechniquesCsv: String,
+        destinationIdentity: String?,
+        lookalikeScore: Double
     ): Int
 
     @Query("SELECT * FROM anomaly_scores WHERE triageStatus = :triageStatus ORDER BY createdAtMillis DESC LIMIT :limit")

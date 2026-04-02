@@ -1,6 +1,7 @@
 package com.manta.app.di
 
 import android.content.Context
+import com.manta.app.core.model.PacketPipelineHealth
 import com.manta.app.core.model.RuntimeHealth
 import com.manta.app.core.net.OkHttpEventClient
 import com.manta.app.core.settings.SecureSettingsStore
@@ -19,10 +20,17 @@ import com.manta.app.domain.detection.SeverityStabilityGate
 import com.manta.app.domain.detection.StatisticalAnomalyDetector
 import com.manta.app.domain.detection.TfliteAnomalyScorer
 import com.manta.app.domain.flow.FeatureWindowBuilder
+import com.manta.app.domain.intelligence.DestinationInsightEngine
+import com.manta.app.service.PacketPipelineStats
 
 class AppContainer(context: Context) {
+    companion object {
+        const val ANALYSIS_SHARD_COUNT = 4
+    }
+
     val settingsStore = SecureSettingsStore(context)
     val eventClient = OkHttpEventClient(settingsStore)
+    val packetPipelineStats = PacketPipelineStats(shardCount = ANALYSIS_SHARD_COUNT)
 
     private val statisticalDetector = StatisticalAnomalyDetector()
     private val multivariateDetector = MultivariateAnomalyDetector()
@@ -45,6 +53,7 @@ class AppContainer(context: Context) {
     private val falsePositiveBudgetManager = FalsePositiveBudgetManager()
     private val runtimeGuardrailManager = RuntimeGuardrailManager()
     private val featureWindowBuilder = FeatureWindowBuilder()
+    private val destinationInsightEngine = DestinationInsightEngine()
 
     val repository = FlowRepository(
         context = context,
@@ -56,17 +65,32 @@ class AppContainer(context: Context) {
         periodicBeaconDetector = periodicBeaconDetector,
         dataQualityMonitor = dataQualityMonitor,
         falsePositiveBudgetManager = falsePositiveBudgetManager,
-        runtimeGuardrailManager = runtimeGuardrailManager
+        runtimeGuardrailManager = runtimeGuardrailManager,
+        destinationInsightEngine = destinationInsightEngine,
+        packetPipelineStats = packetPipelineStats
     )
 
     fun runtimeHealth(): RuntimeHealth {
         val config = settingsStore.readConfig()
+        val snapshot = packetPipelineStats.snapshot()
         return RuntimeHealth(
             linearAvailable = exportedModelScorer.isModelAvailable(),
             tfliteAvailable = tfliteScorer.isModelAvailable(),
             remoteConfigured = config.isConfigured(),
             activeDetectionModel = config.detectionModel,
-            shadowModel = config.shadowModel
+            shadowModel = config.shadowModel,
+            packetPipeline = PacketPipelineHealth(
+                packetsRead = snapshot.packetsRead,
+                activeFlows = snapshot.activeFlows,
+                parserFailure = snapshot.parserFailure,
+                forwardQueueDropped = snapshot.forwardQueueDropped,
+                analysisIngressDropped = snapshot.analysisIngressDropped,
+                analysisShardDropped = snapshot.analysisShardDropped,
+                readToParseAvgMs = snapshot.readToParseAvgMs,
+                parseToShardAvgMs = snapshot.parseToShardAvgMs,
+                shardToFlushAvgMs = snapshot.shardToFlushAvgMs,
+                flushToPersistAvgMs = snapshot.flushToPersistAvgMs
+            )
         )
     }
 }

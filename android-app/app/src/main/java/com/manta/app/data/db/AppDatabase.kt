@@ -12,7 +12,7 @@ import androidx.room.RoomDatabase
         AnomalyScoreEntity::class,
         ExportQueueEntity::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

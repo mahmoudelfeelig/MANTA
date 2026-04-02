@@ -1,13 +1,15 @@
 package com.manta.app.core.model
 
 data class ThresholdProfile(
+    val low: Double,
     val medium: Double,
     val high: Double
 ) {
     fun normalize(): ThresholdProfile {
-        val mediumBound = medium.coerceIn(0.0, 1.0)
+        val lowBound = low.coerceIn(0.0, 1.0)
+        val mediumBound = medium.coerceIn(lowBound, 1.0)
         val highBound = high.coerceIn(mediumBound, 1.0)
-        return ThresholdProfile(mediumBound, highBound)
+        return ThresholdProfile(lowBound, mediumBound, highBound)
     }
 }
 
@@ -43,5 +45,6 @@ data class RemotePolicy(
     val disableVolumeFeatures: Boolean = false,
     val disableTimingFeatures: Boolean = false,
     val disableDestinationFeatures: Boolean = false,
-    val appProfileOverrides: Map<String, String> = emptyMap()
+    val appProfileOverrides: Map<String, String> = emptyMap(),
+    val protectedBrandsCsv: String? = null
 )

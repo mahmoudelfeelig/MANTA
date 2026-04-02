@@ -9,6 +9,7 @@ data class RawFlowEntity(
     val timestampStartMillis: Long,
     val timestampEndMillis: Long,
     val appId: String,
+    val ipVersion: Int = 4,
     val protocol: String,
     val srcIp: String,
     val srcPort: Int,
@@ -35,7 +36,9 @@ data class RawFlowEntity(
     val interPacketGapMean: Double = 0.0,
     val payloadMean: Double = 0.0,
     val loadMean: Double = 0.0,
-    val transportMetricsPresent: Double = 0.0
+    val transportMetricsPresent: Double = 0.0,
+    val protocolEvidenceJson: String = "{}",
+    val destinationInsightJson: String = "{}"
 )
 
 @Entity(tableName = "feature_windows")
@@ -120,7 +123,10 @@ data class AnomalyScoreEntity(
     val destinationIp: String? = null,
     val destinationPort: Int? = null,
     val destinationHash: String? = null,
-    val siteHint: String? = null
+    val siteHint: String? = null,
+    val mitreTechniquesCsv: String = "",
+    val destinationIdentity: String? = null,
+    val lookalikeScore: Double = 0.0
 )
 
 @Entity(tableName = "export_queue")

@@ -45,5 +45,8 @@ data class AnomalyAlert(
     val destinationIp: String? = null,
     val destinationPort: Int? = null,
     val destinationHash: String? = null,
-    val siteHint: String? = null
+    val siteHint: String? = null,
+    val mitreTechniques: List<String> = emptyList(),
+    val destinationIdentity: String? = null,
+    val lookalikeScore: Double = 0.0
 )

@@ -1,8 +1,6 @@
 package com.manta.app
 
 import android.app.Activity
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
@@ -18,9 +16,6 @@ import com.manta.app.ui.MainScreen
 import com.manta.app.ui.MainViewModel
 import com.manta.app.ui.MainViewModelFactory
 import com.manta.app.ui.theme.MantaTheme
-import java.io.File
-import java.io.FileOutputStream
-import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     private val app by lazy { application as MantaApplication }
@@ -75,13 +70,13 @@ class MainActivity : ComponentActivity() {
                     onSetTestModeEnabled = viewModel::setTestModeEnabled,
                     onSetPrivacyMode = viewModel::setPrivacyMode,
                     onSetCustomPrivacyOptions = viewModel::setCustomPrivacyOptions,
+                    onSaveProtectedBrandsCsv = viewModel::setProtectedBrandsCsv,
                     onSyncPolicy = viewModel::syncPolicy,
                     onPingBackend = viewModel::pingBackend,
                     onAcceptConsent = viewModel::acceptConsent,
                     onExportDataset = viewModel::exportDatasetSnapshot,
                     onExportAlerts = viewModel::exportAlertsJson,
                     onExportForensics = viewModel::exportForensicsBundle,
-                    onCaptureEvidence = ::captureEvidenceSnapshot,
                     onFlushExportQueue = viewModel::flushExportQueueNow,
                     onLoadMoreAlerts = viewModel::loadMoreAlerts,
                     onStartCapture = ::requestOrStartCapture,
@@ -91,7 +86,11 @@ class MainActivity : ComponentActivity() {
                     onMarkAlertDangerous = viewModel::markAlertDangerous,
                     onMarkAlertFalsePositive = viewModel::markAlertFalsePositive,
                     onDismissAlertNeutral = viewModel::dismissAlertNeutral,
+                    currentAppThresholdProfile = viewModel::thresholdProfile,
                     currentAppProfile = viewModel::appProfile,
+                    onSetAppThresholdOverride = { appId, low, medium, high ->
+                        viewModel.setAppThresholdOverride(appId, low, medium, high)
+                    },
                     onSetAppProfile = viewModel::setAppProfile
                 )
             }
@@ -119,76 +118,5 @@ class MainActivity : ComponentActivity() {
     private fun stopCaptureService() {
         viewModel.setCaptureEnabled(false)
         startService(FlowVpnService.stopIntent(this))
-    }
-
-    private fun captureEvidenceSnapshot() {
-        val rootView = window.decorView.rootView
-        if (rootView.width <= 0 || rootView.height <= 0) {
-            viewModel.publishStatus("Evidence capture failed: screen size unavailable.")
-            return
-        }
-
-        val exportRoot = File(getExternalFilesDir(null), "exports")
-        if (!exportRoot.exists()) {
-            exportRoot.mkdirs()
-        }
-        val timestamp = System.currentTimeMillis()
-        val evidenceDir = File(exportRoot, "evidence-$timestamp")
-        evidenceDir.mkdirs()
-
-        val screenshotFile = File(evidenceDir, "screenshot.png")
-        val bitmap = Bitmap.createBitmap(rootView.width, rootView.height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        rootView.draw(canvas)
-        FileOutputStream(screenshotFile).use { output ->
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
-        }
-
-        val config = viewModel.config.value
-        val alerts = viewModel.alerts.value
-        val stateFile = File(evidenceDir, "ui-state.json")
-        val statePayload = JSONObject()
-            .put("captured_at", timestamp)
-            .put("device_policy_id", viewModel.deviceIdPseudo())
-            .put("status_message", viewModel.statusMessage.value)
-                .put("config", JSONObject()
-                    .put("backend_url", config.backendUrl)
-                    .put("export_enabled", config.exportEnabled)
-                    .put("privacy_mode", config.privacyMode.name.lowercase())
-                    .put("debug_mode_enabled", config.debugModeEnabled)
-                    .put("test_mode_enabled", config.testModeEnabled)
-                    .put("detection_model", config.detectionModel)
-                    .put("shadow_model", config.shadowModel)
-                    .put("threshold_low", config.lowThreshold)
-                    .put("threshold_medium", config.mediumThreshold)
-                    .put("threshold_high", config.highThreshold)
-                .put("fusion_weights", JSONObject()
-                    .put("statistical", config.fusionWeights.statistical)
-                    .put("multivariate", config.fusionWeights.multivariate)
-                    .put("sequence", config.fusionWeights.sequence)
-                    .put("linear", config.fusionWeights.linear)
-                    .put("tflite", config.fusionWeights.tflite)
-                    .put("remote", config.fusionWeights.remote)
-                    .put("beacon", config.fusionWeights.beacon)
-                    .put("drift", config.fusionWeights.drift)
-                    .put("reputation", config.fusionWeights.reputation)
-                    .put("data_quality_penalty", config.fusionWeights.dataQualityPenalty)
-                    .put("response_anomaly", config.fusionWeights.responseAnomalyBlend)
-                    .put("response_context", config.fusionWeights.responseContextBlend)
-                )
-            )
-            .put("alerts", alerts.take(50).map { alert ->
-                JSONObject()
-                    .put("id", alert.id)
-                    .put("app_id", alert.appId)
-                    .put("severity", alert.severity.name)
-                    .put("score", alert.anomalyScore)
-                    .put("source_model", alert.sourceModel)
-                    .put("triage_status", alert.triageStatus.name)
-                    .put("explanation", alert.explanation)
-            })
-        stateFile.writeText(statePayload.toString(2), Charsets.UTF_8)
-
-        viewModel.publishStatus("Evidence snapshot captured: ${evidenceDir.absolutePath}")
     }
 }

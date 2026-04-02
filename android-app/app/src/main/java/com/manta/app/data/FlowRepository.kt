@@ -5,9 +5,11 @@ import android.os.Build
 import android.util.Log
 import com.manta.app.core.model.AlertSeverity
 import com.manta.app.core.model.AnomalyAlert
+import com.manta.app.core.model.DestinationInsight
 import com.manta.app.core.model.FeatureWindow
 import com.manta.app.core.model.FlowProtocol
 import com.manta.app.core.model.FlowRecord
+import com.manta.app.core.model.ProtocolEvidence
 import com.manta.app.core.model.TriageStatus
 import com.manta.app.core.model.ThresholdProfile
 import com.manta.app.core.net.NetworkEventClient
@@ -30,6 +32,8 @@ import com.manta.app.domain.detection.RuntimeGuardrailManager
 import com.manta.app.domain.detection.SeverityStabilityGate
 import com.manta.app.domain.detection.ThresholdResolver
 import com.manta.app.domain.flow.FeatureWindowBuilder
+import com.manta.app.domain.intelligence.DestinationInsightEngine
+import com.manta.app.service.PacketPipelineStats
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -74,65 +78,85 @@ class FlowRepository(
     private val periodicBeaconDetector: PeriodicBeaconDetector,
     private val dataQualityMonitor: DataQualityMonitor,
     private val falsePositiveBudgetManager: FalsePositiveBudgetManager,
-    private val runtimeGuardrailManager: RuntimeGuardrailManager
+    private val runtimeGuardrailManager: RuntimeGuardrailManager,
+    private val destinationInsightEngine: DestinationInsightEngine,
+    private val packetPipelineStats: PacketPipelineStats
 ) {
     private val appContext = context.applicationContext
     private val db = AppDatabase.getInstance(context)
     private val dao = db.flowDao()
     private val siteHintCache = mutableMapOf<String, String?>()
+    private val dnsAnswerCache = mutableMapOf<String, String>()
 
     suspend fun persistFlow(flow: FlowRecord): AnomalyAlert? = withContext(Dispatchers.IO) {
+        val config = settingsStore.readConfig()
+        val resolvedSiteHint = resolveSiteHint(flow = flow, privacyModeEnabled = config.privacyModeEnabled)
+        val destinationInsight = destinationInsightEngine.analyze(
+            flow,
+            resolvedSiteHint,
+            settingsStore.getProtectedBrands()
+        )
+        val enrichedFlow = flow.copy(
+            siteHint = resolvedSiteHint ?: flow.siteHint,
+            destinationInsight = destinationInsight
+        )
+        recordDnsResolution(enrichedFlow)
+
         dao.insertRawFlow(
             RawFlowEntity(
-                id = flow.id,
-                timestampStartMillis = flow.timestampStartMillis,
-                timestampEndMillis = flow.timestampEndMillis,
-                appId = flow.appId,
-                protocol = flow.protocol.name,
-                srcIp = flow.srcIp,
-                srcPort = flow.srcPort,
-                dstIp = flow.dstIp,
-                dstPort = flow.dstPort,
-                bytesOut = flow.bytesOut,
-                bytesIn = flow.bytesIn,
-                packetsOut = flow.packetsOut,
-                packetsIn = flow.packetsIn,
-                durationMillis = flow.durationMillis,
-                destinationHash = flow.destinationHash,
-                destinationNovelty = flow.destinationNovelty,
-                siteHint = flow.siteHint,
-                ttlGap = flow.ttlGap,
-                ttlMetricsPresent = flow.ttlMetricsPresent,
-                synRateTotal = flow.synRateTotal,
-                rstRateTotal = flow.rstRateTotal,
-                ackRateTotal = flow.ackRateTotal,
-                finRateTotal = flow.finRateTotal,
-                pshRateTotal = flow.pshRateTotal,
-                fragmentRateTotal = flow.fragmentRateTotal,
-                tcpWindowMean = flow.tcpWindowMean,
-                ackDelayMean = flow.ackDelayMean,
-                interPacketGapMean = flow.interPacketGapMean,
-                payloadMean = flow.payloadMean,
-                loadMean = flow.loadMean,
-                transportMetricsPresent = flow.transportMetricsPresent
+                id = enrichedFlow.id,
+                timestampStartMillis = enrichedFlow.timestampStartMillis,
+                timestampEndMillis = enrichedFlow.timestampEndMillis,
+                appId = enrichedFlow.appId,
+                ipVersion = enrichedFlow.ipVersion,
+                protocol = enrichedFlow.protocol.name,
+                srcIp = enrichedFlow.srcIp,
+                srcPort = enrichedFlow.srcPort,
+                dstIp = enrichedFlow.dstIp,
+                dstPort = enrichedFlow.dstPort,
+                bytesOut = enrichedFlow.bytesOut,
+                bytesIn = enrichedFlow.bytesIn,
+                packetsOut = enrichedFlow.packetsOut,
+                packetsIn = enrichedFlow.packetsIn,
+                durationMillis = enrichedFlow.durationMillis,
+                destinationHash = enrichedFlow.destinationHash,
+                destinationNovelty = enrichedFlow.destinationNovelty,
+                siteHint = enrichedFlow.siteHint,
+                ttlGap = enrichedFlow.ttlGap,
+                ttlMetricsPresent = enrichedFlow.ttlMetricsPresent,
+                synRateTotal = enrichedFlow.synRateTotal,
+                rstRateTotal = enrichedFlow.rstRateTotal,
+                ackRateTotal = enrichedFlow.ackRateTotal,
+                finRateTotal = enrichedFlow.finRateTotal,
+                pshRateTotal = enrichedFlow.pshRateTotal,
+                fragmentRateTotal = enrichedFlow.fragmentRateTotal,
+                tcpWindowMean = enrichedFlow.tcpWindowMean,
+                ackDelayMean = enrichedFlow.ackDelayMean,
+                interPacketGapMean = enrichedFlow.interPacketGapMean,
+                payloadMean = enrichedFlow.payloadMean,
+                loadMean = enrichedFlow.loadMean,
+                transportMetricsPresent = enrichedFlow.transportMetricsPresent,
+                protocolEvidenceJson = enrichedFlow.protocolEvidence.toJsonString(),
+                destinationInsightJson = enrichedFlow.destinationInsight.toJsonString()
             )
         )
 
-        val quality = dataQualityMonitor.evaluate(flow)
+        val quality = dataQualityMonitor.evaluate(enrichedFlow)
         val pendingExportQueue = dao.countPendingExports()
         val guardrail = runtimeGuardrailManager.decide(
             context = appContext,
             pendingExportQueue = pendingExportQueue
         )
-        val beaconScore = periodicBeaconDetector.observe(flow)
+        val beaconScore = periodicBeaconDetector.observe(enrichedFlow)
 
-        val windowStart = flow.timestampEndMillis - WINDOW_MILLIS
-        val recent = dao.getRecentFlowsByApp(flow.appId, windowStart).map { entity ->
+        val windowStart = enrichedFlow.timestampEndMillis - WINDOW_MILLIS
+        val recent = dao.getRecentFlowsByApp(enrichedFlow.appId, windowStart).map { entity ->
             FlowRecord(
                 id = entity.id,
                 timestampStartMillis = entity.timestampStartMillis,
                 timestampEndMillis = entity.timestampEndMillis,
                 appId = entity.appId,
+                ipVersion = entity.ipVersion,
                 protocol = FlowProtocol.valueOf(entity.protocol),
                 srcIp = entity.srcIp,
                 srcPort = entity.srcPort,
@@ -159,25 +183,26 @@ class FlowRepository(
                 interPacketGapMean = entity.interPacketGapMean,
                 payloadMean = entity.payloadMean,
                 loadMean = entity.loadMean,
-                transportMetricsPresent = entity.transportMetricsPresent
+                transportMetricsPresent = entity.transportMetricsPresent,
+                protocolEvidence = ProtocolEvidence.fromJsonString(entity.protocolEvidenceJson),
+                destinationInsight = DestinationInsight.fromJsonString(entity.destinationInsightJson)
             )
         }
 
-        val config = settingsStore.readConfig()
-        val siteHint = resolveSiteHint(flow = flow, privacyModeEnabled = config.privacyModeEnabled)
-        enqueueFlowForExport(flow = flow, siteHint = siteHint)
+        val siteHint = enrichedFlow.siteHint
+        enqueueFlowForExport(flow = enrichedFlow, siteHint = siteHint)
         val activeModel = config.detectionModel
         val shadowModel = config.shadowModel
         val appProfile = effectiveAppProfile(
-            base = settingsStore.getAppProfile(flow.appId),
-            flow = flow,
+            base = settingsStore.getAppProfile(enrichedFlow.appId),
+            flow = enrichedFlow,
             siteHint = siteHint
         )
         val builtWindow = featureWindowBuilder.build(
-            appId = flow.appId,
+            appId = enrichedFlow.appId,
             flows = recent,
             windowStartMillis = windowStart,
-            windowEndMillis = flow.timestampEndMillis,
+            windowEndMillis = enrichedFlow.timestampEndMillis,
             siteHint = siteHint,
             periodicBeaconScore = beaconScore,
             dataQualityScore = quality.score,
@@ -229,8 +254,8 @@ class FlowRepository(
             }
             val drift = conceptDriftMonitor.evaluate(scoringWindow)
             driftScore = drift.score
-            dangerSummary = buildDangerSummary(flow = flow, siteHint = siteHint)
-            reputationScore = dangerScore(flow = flow, siteHint = siteHint)
+            dangerSummary = buildDangerSummary(flow = enrichedFlow, siteHint = siteHint)
+            reputationScore = dangerScore(flow = enrichedFlow, siteHint = siteHint)
             val driftPostScore = if (driftScore >= config.driftHighThreshold) {
                 driftScore
             } else {
@@ -294,15 +319,15 @@ class FlowRepository(
         val window = builtWindow.copy(processingCostMillis = processingCostMillis)
         saveFeatureWindow(window)
         val thresholdProfile = adjustedThresholdProfile(
-            base = settingsStore.getThresholdForApp(flow.appId),
+            base = settingsStore.getThresholdForApp(enrichedFlow.appId),
             profile = appProfile,
             testModeEnabled = config.testModeEnabled
         )
         val proposedSeverity = ThresholdResolver.resolveSeverity(anomaly.score, thresholdProfile)
         val stabilizedSeverity = severityStabilityGate.adjust(flow.appId, proposedSeverity)
         val falsePositives = dao.countFalsePositivesForAppSince(
-            appId = flow.appId,
-            sinceMillis = flow.timestampEndMillis - 24L * 60L * 60L * 1000L
+            appId = enrichedFlow.appId,
+            sinceMillis = enrichedFlow.timestampEndMillis - 24L * 60L * 60L * 1000L
         )
         val budgetDecision = falsePositiveBudgetManager.apply(
             proposed = stabilizedSeverity,
@@ -324,23 +349,23 @@ class FlowRepository(
                 alert = anomaly,
                 siteHint = siteHint,
                 dangerSummary = dangerSummary,
-                flow = flow
+                flow = enrichedFlow
             )
         ) {
             severity = AlertSeverity.LOW
             suppressionReason = appendSuppressionReason(suppressionReason, "profile_suppression:${appProfile.name.lowercase()}")
         }
         val dangerFloor = minimumSeverityForDanger(
-            flow = flow,
+            flow = enrichedFlow,
             siteHint = siteHint,
             reputationScore = reputationScore
         )
         val minimumPersistScore = when {
-            config.testModeEnabled && activeModel != AnomalyEngine.MODE_ENSEMBLE -> config.lowThreshold * 0.20
-            config.debugModeEnabled && activeModel != AnomalyEngine.MODE_ENSEMBLE -> config.lowThreshold * 0.35
-            activeModel != AnomalyEngine.MODE_ENSEMBLE -> config.lowThreshold * 0.55
-            config.testModeEnabled -> config.lowThreshold * 0.65
-            else -> config.lowThreshold
+            config.testModeEnabled && activeModel != AnomalyEngine.MODE_ENSEMBLE -> thresholdProfile.low * 0.20
+            config.debugModeEnabled && activeModel != AnomalyEngine.MODE_ENSEMBLE -> thresholdProfile.low * 0.35
+            activeModel != AnomalyEngine.MODE_ENSEMBLE -> thresholdProfile.low * 0.55
+            config.testModeEnabled -> thresholdProfile.low * 0.65
+            else -> thresholdProfile.low
         }
         if (anomaly.responseScore < minimumPersistScore && dangerFloor == null) {
             return@withContext null
@@ -351,17 +376,19 @@ class FlowRepository(
         val explanation = (dangerSummary?.let { "Potential risk: $it. " } ?: "") + ExplanationFormatter.summarize(
             topFeatures = anomaly.topFeatures,
             contributions = anomaly.featureContributions
-        ) + if (suppressionReason != null) " Suppression: $suppressionReason." else ""
+        ) + enrichedFlow.destinationInsight.mitreTechniques.takeIf { it.isNotEmpty() }?.let {
+            " MITRE: ${it.joinToString(",")}."
+        }.orEmpty() + if (suppressionReason != null) " Suppression: $suppressionReason." else ""
 
         val correlationKey = computeCorrelationKey(
-            appId = flow.appId,
+            appId = enrichedFlow.appId,
             sourceModel = anomaly.source,
             topFeatures = anomaly.topFeatures
         )
         val correlated = dao.findCorrelatedAlert(
-            appId = flow.appId,
+            appId = enrichedFlow.appId,
             correlationKey = correlationKey,
-            sinceMillis = flow.timestampEndMillis - ALERT_CORRELATION_WINDOW_MILLIS
+            sinceMillis = enrichedFlow.timestampEndMillis - ALERT_CORRELATION_WINDOW_MILLIS
         )
 
         val alert = if (correlated != null) {
@@ -394,10 +421,13 @@ class FlowRepository(
                 suppressionReason = suppressionReason,
                 dataQualityWarningsCsv = dataQualityWarnings.joinToString(","),
                 beaconScore = maxOf(correlated.beaconScore, beaconScore),
-                destinationIp = flow.dstIp,
-                destinationPort = flow.dstPort,
-                destinationHash = flow.destinationHash,
-                siteHint = siteHint
+                destinationIp = enrichedFlow.dstIp,
+                destinationPort = enrichedFlow.dstPort,
+                destinationHash = enrichedFlow.destinationHash,
+                siteHint = siteHint,
+                mitreTechniquesCsv = enrichedFlow.destinationInsight.mitreTechniques.joinToString(","),
+                destinationIdentity = enrichedFlow.destinationInsight.registrableDomain ?: enrichedFlow.destinationInsight.normalizedHost,
+                lookalikeScore = enrichedFlow.destinationInsight.lookalikeScore
             )
             mapEntityToAlert(
                 dao.getScoreById(correlated.id) ?: correlated.copy(
@@ -421,17 +451,20 @@ class FlowRepository(
                     suppressionReason = suppressionReason,
                     dataQualityWarningsCsv = dataQualityWarnings.joinToString(","),
                     beaconScore = maxOf(correlated.beaconScore, beaconScore),
-                    destinationIp = flow.dstIp,
-                    destinationPort = flow.dstPort,
-                    destinationHash = flow.destinationHash,
-                    siteHint = siteHint
+                    destinationIp = enrichedFlow.dstIp,
+                    destinationPort = enrichedFlow.dstPort,
+                    destinationHash = enrichedFlow.destinationHash,
+                    siteHint = siteHint,
+                    mitreTechniquesCsv = enrichedFlow.destinationInsight.mitreTechniques.joinToString(","),
+                    destinationIdentity = enrichedFlow.destinationInsight.registrableDomain ?: enrichedFlow.destinationInsight.normalizedHost,
+                    lookalikeScore = enrichedFlow.destinationInsight.lookalikeScore
                 )
             )
         } else {
             val newAlert = AnomalyAlert(
                 id = UUID.randomUUID().toString(),
                 featureWindowId = window.id,
-                appId = flow.appId,
+                appId = enrichedFlow.appId,
                 anomalyScore = anomaly.responseScore,
                 severity = severity,
                 topFeatures = anomaly.topFeatures,
@@ -440,8 +473,8 @@ class FlowRepository(
                 sourceModel = anomaly.source,
                 triageStatus = TriageStatus.OPEN,
                 triageNote = "",
-                createdAtMillis = flow.timestampEndMillis,
-                triageUpdatedAtMillis = flow.timestampEndMillis,
+                createdAtMillis = enrichedFlow.timestampEndMillis,
+                triageUpdatedAtMillis = enrichedFlow.timestampEndMillis,
                 confidence = anomaly.confidence,
                 uncertainty = anomaly.uncertainty,
                 baseAnomalyScore = anomaly.anomalyScore,
@@ -449,18 +482,21 @@ class FlowRepository(
                 responseScore = anomaly.responseScore,
                 driftScore = driftScore,
                 occurrenceCount = 1,
-                firstSeenMillis = flow.timestampEndMillis,
-                lastSeenMillis = flow.timestampEndMillis,
+                firstSeenMillis = enrichedFlow.timestampEndMillis,
+                lastSeenMillis = enrichedFlow.timestampEndMillis,
                 correlationKey = correlationKey,
                 shadowModel = shadowModel,
                 shadowScore = shadowScore,
                 suppressionReason = suppressionReason,
                 dataQualityWarnings = dataQualityWarnings,
                 beaconScore = beaconScore,
-                destinationIp = flow.dstIp,
-                destinationPort = flow.dstPort,
-                destinationHash = flow.destinationHash,
-                siteHint = siteHint
+                destinationIp = enrichedFlow.dstIp,
+                destinationPort = enrichedFlow.dstPort,
+                destinationHash = enrichedFlow.destinationHash,
+                siteHint = siteHint,
+                mitreTechniques = enrichedFlow.destinationInsight.mitreTechniques,
+                destinationIdentity = enrichedFlow.destinationInsight.registrableDomain ?: enrichedFlow.destinationInsight.normalizedHost,
+                lookalikeScore = enrichedFlow.destinationInsight.lookalikeScore
             )
 
             dao.insertAnomalyScore(
@@ -496,7 +532,10 @@ class FlowRepository(
                     destinationIp = newAlert.destinationIp,
                     destinationPort = newAlert.destinationPort,
                     destinationHash = newAlert.destinationHash,
-                    siteHint = newAlert.siteHint
+                    siteHint = newAlert.siteHint,
+                    mitreTechniquesCsv = newAlert.mitreTechniques.joinToString(","),
+                    destinationIdentity = newAlert.destinationIdentity,
+                    lookalikeScore = newAlert.lookalikeScore
                 )
             )
             newAlert
@@ -767,37 +806,70 @@ class FlowRepository(
             }
 
             val outputFile = File(exportRoot, "flows-${System.currentTimeMillis()}.csv")
+            val config = settingsStore.readConfig()
+            val customPrivacy = config.customPrivacy
             val salt = settingsStore.getDeviceSalt()
 
             outputFile.bufferedWriter(Charsets.UTF_8).use { writer ->
                 writer.appendLine(
-                    "timestamp_start_ms,timestamp_end_ms,app_id_pseudo,protocol,src_ip_hash,src_port," +
-                        "dst_ip_hash,dst_port,dst_host_hash,bytes_out,bytes_in,packets_out,packets_in,duration_ms,dst_novelty"
+                    "timestamp_start_ms,timestamp_end_ms,app_id,protocol,src_ip,src_port," +
+                        "dst_ip,dst_port,destination_key,site_hint,bytes_out,bytes_in,packets_out,packets_in,duration_ms,is_new_destination_for_app," +
+                        "dns_query_name,dns_query_type,dns_response_code,dns_answer_value,tls_sni,tls_alpn,tls_version,tls_ja3_like,tls_leaf_subject,tls_leaf_issuer,tls_leaf_san," +
+                        "http_method,http_host,http_path,quic_version,quic_detected,http3_detected,registrable_domain,brand_match,lookalike_score,threat_tags,mitre_techniques"
                 )
 
                 flows.forEach { flow ->
-                    val appPseudo = CryptoUtils.sha256("$salt:${flow.appId}")
-                    val srcIpHash = CryptoUtils.sha256("$salt:${flow.srcIp}")
-                    val dstIpHash = CryptoUtils.sha256("$salt:${flow.dstIp}")
+                    val protocolEvidence = ProtocolEvidence.fromJsonString(flow.protocolEvidenceJson)
+                    val destinationInsight = DestinationInsight.fromJsonString(flow.destinationInsightJson)
+                    val exportedAppId = exportAppId(flow.appId, config.privacyMode, customPrivacy)
+                    val exportedSrcIp = exportFlowIp(flow.srcIp, config.privacyMode, customPrivacy, salt)
+                    val exportedDstIp = exportFlowIp(flow.dstIp, config.privacyMode, customPrivacy, salt)
+                    val exportedSiteHint = exportSiteHint(flow.siteHint, config.privacyMode, customPrivacy) ?: ""
+                    val exportedSrcPort = exportFlowPort(flow.srcPort, config.privacyMode, customPrivacy)
+                    val exportedDstPort = exportFlowPort(flow.dstPort, config.privacyMode, customPrivacy)
+                    val exportedDestinationKey = exportDestinationKey(flow, config.privacyMode, customPrivacy, salt)
 
                     writer.appendLine(
                         listOf(
                             flow.timestampStartMillis,
                             flow.timestampEndMillis,
-                            appPseudo,
+                            exportedAppId,
                             flow.protocol,
-                            srcIpHash,
-                            flow.srcPort,
-                            dstIpHash,
-                            flow.dstPort,
-                            flow.destinationHash,
+                            exportedSrcIp,
+                            exportedSrcPort,
+                            exportedDstIp,
+                            exportedDstPort,
+                            exportedDestinationKey,
+                            exportedSiteHint,
                             flow.bytesOut,
                             flow.bytesIn,
                             flow.packetsOut,
                             flow.packetsIn,
                             flow.durationMillis,
-                            flow.destinationNovelty
-                        ).joinToString(",")
+                            flow.destinationNovelty,
+                            protocolEvidence.dnsQueryName,
+                            protocolEvidence.dnsQueryType,
+                            protocolEvidence.dnsResponseCode,
+                            protocolEvidence.dnsAnswerValue,
+                            protocolEvidence.tlsSni,
+                            protocolEvidence.tlsAlpn,
+                            protocolEvidence.tlsVersion,
+                            protocolEvidence.tlsJa3Like,
+                            protocolEvidence.tlsLeafSubject,
+                            protocolEvidence.tlsLeafIssuer,
+                            protocolEvidence.tlsLeafSan,
+                            protocolEvidence.httpMethod,
+                            protocolEvidence.httpHost,
+                            protocolEvidence.httpPath,
+                            protocolEvidence.quicVersion,
+                            protocolEvidence.quicDetected,
+                            protocolEvidence.http3Detected,
+                            destinationInsight.registrableDomain,
+                            destinationInsight.brandMatch,
+                            destinationInsight.lookalikeScore,
+                            destinationInsight.threatTags.joinToString("|"),
+                            destinationInsight.mitreTechniques.joinToString("|")
+                        ).joinToString(",") { csvCell(it) }
                     )
                 }
             }
@@ -820,27 +892,35 @@ class FlowRepository(
             val alertsPayload = JSONObject()
                 .put("generated_at", System.currentTimeMillis())
                 .put("privacy_mode", config.privacyMode.name.lowercase())
-                .put("alerts", alerts.map { entity ->
-                    JSONObject()
-                        .put("id", entity.id)
-                        .put("app_id", exportAppId(entity.appId, config.privacyMode, config.customPrivacy))
-                        .put("score", entity.score)
-                        .put("severity", entity.severity)
-                        .put("source_model", entity.sourceModel)
-                        .put("confidence", entity.confidence)
-                        .put("uncertainty", entity.uncertainty)
-                        .put("drift_score", entity.driftScore)
-                        .put("occurrence_count", entity.occurrenceCount)
-                        .put("first_seen", entity.firstSeenMillis)
-                        .put("last_seen", entity.lastSeenMillis)
-                        .put("correlation_key", entity.correlationKey)
-                        .put("triage_status", entity.triageStatus)
-                        .put("triage_note", entity.triageNote)
-                        .put("explanation", entity.explanation)
-                        .put("top_features", entity.topFeaturesCsv.split(',').filter { it.isNotBlank() })
-                        .put("feature_contributions", deserializeFeatureContributions(entity.featureContributionsJson))
-                        .put("site_hint", exportSiteHint(entity.siteHint, config.privacyMode, config.customPrivacy))
-                })
+                .put(
+                    "alerts",
+                    JSONArray(
+                        alerts.map { entity ->
+                            JSONObject()
+                                .put("id", entity.id)
+                                .put("app_id", exportAppId(entity.appId, config.privacyMode, config.customPrivacy))
+                                .put("score", entity.score)
+                                .put("severity", entity.severity)
+                                .put("source_model", entity.sourceModel)
+                                .put("confidence", entity.confidence)
+                                .put("uncertainty", entity.uncertainty)
+                                .put("drift_score", entity.driftScore)
+                                .put("occurrence_count", entity.occurrenceCount)
+                                .put("first_seen", entity.firstSeenMillis)
+                                .put("last_seen", entity.lastSeenMillis)
+                                .put("correlation_key", entity.correlationKey)
+                                .put("triage_status", entity.triageStatus)
+                                .put("triage_note", entity.triageNote)
+                                .put("explanation", entity.explanation)
+                                .put("top_features", JSONArray(entity.topFeaturesCsv.split(',').filter { it.isNotBlank() }))
+                                .put("feature_contributions", JSONObject(deserializeFeatureContributions(entity.featureContributionsJson)))
+                                .put("site_hint", exportSiteHint(entity.siteHint, config.privacyMode, config.customPrivacy))
+                                .put("mitre_techniques", JSONArray(entity.mitreTechniquesCsv.split(',').filter { it.isNotBlank() }))
+                                .put("destination_identity", entity.destinationIdentity)
+                                .put("lookalike_score", entity.lookalikeScore)
+                        }
+                    )
+                )
             outputFile.writeText(alertsPayload.toString(2), Charsets.UTF_8)
             outputFile.absolutePath
         }
@@ -868,27 +948,35 @@ class FlowRepository(
             val salt = settingsStore.getDeviceSalt()
             val alertsPayload = JSONObject()
                 .put("generated_at", timestamp)
-                .put("alerts", dao.getLatestScores(25_000).map { entity ->
-                    JSONObject()
-                        .put("id", entity.id)
-                        .put("app_id", exportAppId(entity.appId, privacyMode, settingsStore.readConfig().customPrivacy))
-                        .put("score", entity.score)
-                        .put("severity", entity.severity)
-                        .put("source_model", entity.sourceModel)
-                        .put("confidence", entity.confidence)
-                        .put("uncertainty", entity.uncertainty)
-                        .put("drift_score", entity.driftScore)
-                        .put("occurrence_count", entity.occurrenceCount)
-                        .put("first_seen", entity.firstSeenMillis)
-                        .put("last_seen", entity.lastSeenMillis)
-                        .put("correlation_key", entity.correlationKey)
-                        .put("triage_status", entity.triageStatus)
-                        .put("triage_note", entity.triageNote)
-                        .put("explanation", entity.explanation)
-                        .put("top_features", entity.topFeaturesCsv.split(',').filter { it.isNotBlank() })
-                        .put("feature_contributions", deserializeFeatureContributions(entity.featureContributionsJson))
-                        .put("site_hint", exportSiteHint(entity.siteHint, privacyMode, settingsStore.readConfig().customPrivacy))
-                })
+                .put(
+                    "alerts",
+                    JSONArray(
+                        dao.getLatestScores(25_000).map { entity ->
+                            JSONObject()
+                                .put("id", entity.id)
+                                .put("app_id", exportAppId(entity.appId, privacyMode, settingsStore.readConfig().customPrivacy))
+                                .put("score", entity.score)
+                                .put("severity", entity.severity)
+                                .put("source_model", entity.sourceModel)
+                                .put("confidence", entity.confidence)
+                                .put("uncertainty", entity.uncertainty)
+                                .put("drift_score", entity.driftScore)
+                                .put("occurrence_count", entity.occurrenceCount)
+                                .put("first_seen", entity.firstSeenMillis)
+                                .put("last_seen", entity.lastSeenMillis)
+                                .put("correlation_key", entity.correlationKey)
+                                .put("triage_status", entity.triageStatus)
+                                .put("triage_note", entity.triageNote)
+                                .put("explanation", entity.explanation)
+                                .put("top_features", JSONArray(entity.topFeaturesCsv.split(',').filter { it.isNotBlank() }))
+                                .put("feature_contributions", JSONObject(deserializeFeatureContributions(entity.featureContributionsJson)))
+                                .put("site_hint", exportSiteHint(entity.siteHint, privacyMode, settingsStore.readConfig().customPrivacy))
+                                .put("mitre_techniques", JSONArray(entity.mitreTechniquesCsv.split(',').filter { it.isNotBlank() }))
+                                .put("destination_identity", entity.destinationIdentity)
+                                .put("lookalike_score", entity.lookalikeScore)
+                        }
+                    )
+                )
             alertsFile.writeText(alertsPayload.toString(2), Charsets.UTF_8)
 
             val policyFile = File(bundleDir, "policy.json")
@@ -927,6 +1015,7 @@ class FlowRepository(
                 .put("generated_at", timestamp)
                 .put("data_quality_counters", JSONObject(dataQualityMonitor.snapshotCounters()))
                 .put("guardrail", JSONObject(runtimeGuardrailManager.diagnostics()))
+                .put("packet_pipeline", JSONObject(packetPipelineStats.snapshot().toMap()))
             diagnosticsFile.writeText(diagPayload.toString(2), Charsets.UTF_8)
 
             val connectivityFile = File(bundleDir, "connectivity.json")
@@ -995,11 +1084,13 @@ class FlowRepository(
         val current = settingsStore.getThresholdForApp(appId)
         val next = when (status) {
             TriageStatus.FALSE_POSITIVE -> ThresholdProfile(
+                low = (current.low + FEEDBACK_ADJUST_STEP_FP).coerceAtMost(0.90),
                 medium = (current.medium + FEEDBACK_ADJUST_STEP_FP).coerceAtMost(0.95),
                 high = (current.high + FEEDBACK_ADJUST_STEP_FP).coerceAtMost(0.99)
             ).normalize()
 
             TriageStatus.RESOLVED -> ThresholdProfile(
+                low = (current.low - FEEDBACK_ADJUST_STEP_TRUE_POSITIVE).coerceAtLeast(0.02),
                 medium = (current.medium - FEEDBACK_ADJUST_STEP_TRUE_POSITIVE).coerceAtLeast(0.05),
                 high = (current.high - FEEDBACK_ADJUST_STEP_TRUE_POSITIVE).coerceAtLeast(0.15)
             ).normalize()
@@ -1179,6 +1270,9 @@ class FlowRepository(
             )
             .put("source_model", alert.sourceModel)
             .put("site_hint", exportSiteHint(siteHint, config.privacyMode, customPrivacy))
+            .put("destination_identity", alert.destinationIdentity)
+            .put("lookalike_score", alert.lookalikeScore)
+            .put("mitre_techniques", JSONArray(alert.mitreTechniques))
             .put(
                 "window_features",
                 if (config.privacyMode == PrivacyMode.CUSTOM && !customPrivacy.includeFeatureWindow) {
@@ -1265,6 +1359,7 @@ class FlowRepository(
             timestampStartMillis = entity.timestampStartMillis,
             timestampEndMillis = entity.timestampEndMillis,
             appId = entity.appId,
+            ipVersion = entity.ipVersion,
             protocol = FlowProtocol.valueOf(entity.protocol),
             srcIp = entity.srcIp,
             srcPort = entity.srcPort,
@@ -1291,7 +1386,9 @@ class FlowRepository(
             interPacketGapMean = entity.interPacketGapMean,
             payloadMean = entity.payloadMean,
             loadMean = entity.loadMean,
-            transportMetricsPresent = entity.transportMetricsPresent
+            transportMetricsPresent = entity.transportMetricsPresent,
+            protocolEvidence = ProtocolEvidence.fromJsonString(entity.protocolEvidenceJson),
+            destinationInsight = DestinationInsight.fromJsonString(entity.destinationInsightJson)
         )
     }
 
@@ -1363,13 +1460,22 @@ class FlowRepository(
             destinationIp = entity.destinationIp,
             destinationPort = entity.destinationPort,
             destinationHash = entity.destinationHash,
-            siteHint = entity.siteHint
+            siteHint = entity.siteHint,
+            mitreTechniques = entity.mitreTechniquesCsv.split(',').filter { it.isNotBlank() },
+            destinationIdentity = entity.destinationIdentity,
+            lookalikeScore = entity.lookalikeScore
         )
     }
 
     private fun resolveSiteHint(flow: FlowRecord, privacyModeEnabled: Boolean): String? {
         if (!flow.siteHint.isNullOrBlank()) {
             return flow.siteHint
+        }
+        if (!flow.protocolEvidence.preferredHost().isNullOrBlank()) {
+            return flow.protocolEvidence.preferredHost()
+        }
+        synchronized(dnsAnswerCache) {
+            dnsAnswerCache[flow.dstIp]?.let { return it }
         }
         if (privacyModeEnabled || !isBrowserLikeFlow(flow, siteHint = null)) {
             return null
@@ -1390,6 +1496,21 @@ class FlowRepository(
                 }.getOrNull()
                 siteHintCache[flow.dstIp] = resolved
                 resolved
+            }
+        }
+    }
+
+    private fun recordDnsResolution(flow: FlowRecord) {
+        val queryName = flow.protocolEvidence.dnsQueryName?.takeIf { it.isNotBlank() } ?: return
+        val answer = flow.protocolEvidence.dnsAnswerValue?.takeIf { it.isNotBlank() } ?: return
+        if (!answer.matches(Regex("""\d{1,3}(\.\d{1,3}){3}""")) && !answer.contains(':')) {
+            return
+        }
+        synchronized(dnsAnswerCache) {
+            dnsAnswerCache[answer] = queryName
+            while (dnsAnswerCache.size > 2048) {
+                val eldest = dnsAnswerCache.entries.firstOrNull()?.key ?: break
+                dnsAnswerCache.remove(eldest)
             }
         }
     }
@@ -1424,6 +1545,7 @@ class FlowRepository(
 
     private fun buildDangerSummary(flow: FlowRecord, siteHint: String?): String? {
         val reasons = linkedSetOf<String>()
+        val insight = flow.destinationInsight
         if (flow.dstPort == 80 && isBrowserLikeFlow(flow, siteHint)) {
             reasons += "insecure plaintext web destination"
         }
@@ -1475,6 +1597,22 @@ class FlowRepository(
                 reasons += "host appears as a direct IP literal"
             }
         }
+        if (insight.lookalikeScore >= 0.55 && !insight.brandMatch.isNullOrBlank()) {
+            reasons += "lookalike domain similar to ${insight.brandMatch}"
+        }
+        if (insight.punycodePresent) {
+            reasons += "punycode domain"
+        }
+        if (insight.suspiciousTld) {
+            reasons += "suspicious top-level domain"
+        }
+        insight.threatTags.forEach { reasons += it.replace('_', ' ') }
+        if (!flow.protocolEvidence.tlsLeafSubject.isNullOrBlank()) {
+            reasons += "tls certificate observed"
+        }
+        if (flow.protocolEvidence.http3Detected) {
+            reasons += "quic/http3 destination"
+        }
 
         if (flow.dstPort !in setOf(53, 80, 123, 443, 853) && flow.dstPort > 0) {
             reasons += "unusual destination port ${flow.dstPort}"
@@ -1486,6 +1624,13 @@ class FlowRepository(
     private fun dangerScore(flow: FlowRecord, siteHint: String?): Double {
         var score = 0.0
         val host = siteHint?.lowercase().orEmpty()
+        score += (flow.destinationInsight.lookalikeScore * 0.45).coerceIn(0.0, 0.45)
+        if (flow.destinationInsight.punycodePresent) {
+            score += 0.22
+        }
+        if (flow.destinationInsight.suspiciousTld) {
+            score += 0.18
+        }
         if (flow.dstPort == 80 && isBrowserLikeFlow(flow, siteHint)) {
             score += 0.45
         }
@@ -1507,6 +1652,12 @@ class FlowRepository(
         if (host.contains("doubleclick") || host.contains("googlesyndication") || host.contains("tracking") || host.contains("telemetry")) {
             score += 0.18
         }
+        if (!flow.protocolEvidence.tlsLeafSubject.isNullOrBlank()) {
+            score += 0.08
+        }
+        if (flow.protocolEvidence.http3Detected) {
+            score += 0.05
+        }
         if (host.matches(Regex("""\d{1,3}(\.\d{1,3}){3}"""))) {
             score += 0.12
         }
@@ -1523,6 +1674,8 @@ class FlowRepository(
     ): AlertSeverity? {
         val host = siteHint?.lowercase().orEmpty()
         return when {
+            flow.destinationInsight.lookalikeScore >= 0.80 -> AlertSeverity.HIGH
+            flow.destinationInsight.lookalikeScore >= 0.55 -> AlertSeverity.MEDIUM
             host.contains("expired.badssl.com") || host.contains("self-signed.badssl.com") || host.contains("wrong.host.badssl.com") -> AlertSeverity.HIGH
             host.endsWith(".badssl.com") || host == "badssl.com" -> AlertSeverity.MEDIUM
             host.contains("http.badssl.com") || host.contains("neverssl.com") -> AlertSeverity.MEDIUM
@@ -1540,6 +1693,7 @@ class FlowRepository(
             timestampStartMillis = 1_700_000_000_000L,
             timestampEndMillis = 1_700_000_001_500L,
             appId = "com.android.chrome",
+            ipVersion = 4,
             protocol = FlowProtocol.TCP,
             srcIp = "10.0.0.2",
             srcPort = 40123,
@@ -1551,7 +1705,19 @@ class FlowRepository(
             packetsIn = 7,
             durationMillis = 1500,
             destinationHash = CryptoUtils.sha256("93.184.216.34:443"),
-            destinationNovelty = 0.42
+            destinationNovelty = 0.42,
+            protocolEvidence = ProtocolEvidence(
+                tlsSni = "www.example.com",
+                tlsAlpn = "h2",
+                tlsVersion = "TLS1.3",
+                tlsJa3Like = "sha256(ja3)",
+                quicDetected = false
+            ),
+            destinationInsight = DestinationInsight(
+                normalizedHost = "example.com",
+                registrableDomain = "example.com",
+                confidence = 0.35
+            )
         )
         return JSONObject(
             sampleFlow.toJson(
@@ -1665,13 +1831,14 @@ class FlowRepository(
     private fun adjustedThresholdProfile(base: ThresholdProfile, profile: AppProfile, testModeEnabled: Boolean): ThresholdProfile {
         val profiled = when (profile) {
             AppProfile.DEFAULT -> base
-            AppProfile.TRUSTED -> ThresholdProfile(base.medium + 0.10, base.high + 0.12).normalize()
-            AppProfile.HIGH_CHURN -> ThresholdProfile(base.medium + 0.07, base.high + 0.08).normalize()
-            AppProfile.BROWSER -> ThresholdProfile(base.medium + 0.06, base.high + 0.08).normalize()
-            AppProfile.SYSTEM -> ThresholdProfile(base.medium + 0.12, base.high + 0.15).normalize()
+            AppProfile.TRUSTED -> ThresholdProfile(base.low + 0.08, base.medium + 0.10, base.high + 0.12).normalize()
+            AppProfile.HIGH_CHURN -> ThresholdProfile(base.low + 0.05, base.medium + 0.07, base.high + 0.08).normalize()
+            AppProfile.BROWSER -> ThresholdProfile(base.low + 0.05, base.medium + 0.06, base.high + 0.08).normalize()
+            AppProfile.SYSTEM -> ThresholdProfile(base.low + 0.10, base.medium + 0.12, base.high + 0.15).normalize()
         }
         return if (testModeEnabled) {
             ThresholdProfile(
+                low = (profiled.low - 0.10).coerceIn(0.02, 1.0),
                 medium = (profiled.medium - 0.10).coerceIn(0.15, 1.0),
                 high = (profiled.high - 0.10).coerceIn(0.25, 1.0)
             ).normalize()
@@ -1727,12 +1894,69 @@ class FlowRepository(
         return if (existing.isNullOrBlank()) next else "$existing,$next"
     }
 
+    private fun csvCell(value: Any?): String {
+        val raw = value?.toString() ?: ""
+        if (raw.none { it == ',' || it == '"' || it == '\n' || it == '\r' }) {
+            return raw
+        }
+        return "\"${raw.replace("\"", "\"\"")}\""
+    }
+
     private fun exportAppId(appId: String, privacyMode: PrivacyMode, customPrivacy: com.manta.app.core.settings.CustomPrivacyOptions): String {
         return when (privacyMode) {
             PrivacyMode.OFF -> appId
             PrivacyMode.LOW -> appId
             PrivacyMode.MEDIUM, PrivacyMode.STRICT -> CryptoUtils.sha256("${settingsStore.getDeviceSalt()}:$appId")
             PrivacyMode.CUSTOM -> if (customPrivacy.includeAppId) appId else CryptoUtils.sha256("${settingsStore.getDeviceSalt()}:$appId")
+        }
+    }
+
+    private fun exportFlowIp(
+        ipAddress: String,
+        privacyMode: PrivacyMode,
+        customPrivacy: com.manta.app.core.settings.CustomPrivacyOptions,
+        salt: String
+    ): String {
+        return when (privacyMode) {
+            PrivacyMode.OFF -> ipAddress
+            PrivacyMode.LOW, PrivacyMode.MEDIUM, PrivacyMode.STRICT -> CryptoUtils.sha256("$salt:$ipAddress")
+            PrivacyMode.CUSTOM -> if (customPrivacy.includeIpAddresses) ipAddress else CryptoUtils.sha256("$salt:$ipAddress")
+        }
+    }
+
+    private fun exportFlowPort(
+        port: Int,
+        privacyMode: PrivacyMode,
+        customPrivacy: com.manta.app.core.settings.CustomPrivacyOptions
+    ): Int {
+        if (privacyMode != PrivacyMode.CUSTOM || customPrivacy.includeExactPorts) {
+            return port
+        }
+        return when {
+            port in setOf(53, 80, 123, 443, 853) -> port
+            port in 1..1023 -> 1024
+            port in 1024..49151 -> 49152
+            else -> 65535
+        }
+    }
+
+    private fun exportDestinationKey(
+        flow: RawFlowEntity,
+        privacyMode: PrivacyMode,
+        customPrivacy: com.manta.app.core.settings.CustomPrivacyOptions,
+        salt: String
+    ): String {
+        val siteHint = flow.siteHint?.takeIf { it.isNotBlank() }
+        val exportedPort = exportFlowPort(flow.dstPort, privacyMode, customPrivacy)
+        return when (privacyMode) {
+            PrivacyMode.OFF -> "${siteHint ?: flow.dstIp}:$exportedPort"
+            PrivacyMode.LOW -> "${siteHint ?: flow.dstIp}:$exportedPort"
+            PrivacyMode.MEDIUM, PrivacyMode.STRICT -> flow.destinationHash
+            PrivacyMode.CUSTOM -> when {
+                customPrivacy.includeSiteHint && siteHint != null -> "$siteHint:$exportedPort"
+                customPrivacy.includeIpAddresses -> "${flow.dstIp}:$exportedPort"
+                else -> CryptoUtils.sha256("$salt:${siteHint ?: flow.dstIp}:$exportedPort")
+            }
         }
     }
 

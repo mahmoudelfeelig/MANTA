@@ -9,6 +9,7 @@ object RemotePolicyParser {
 
         val thresholds = policyNode.optJSONObject("default_thresholds") ?: JSONObject()
         val defaultThresholds = ThresholdProfile(
+            low = thresholds.optDouble("low", 0.3),
             medium = thresholds.optDouble("medium", 0.6),
             high = thresholds.optDouble("high", 0.85)
         ).normalize()
@@ -18,6 +19,7 @@ object RemotePolicyParser {
         overridesObj.keys().forEach { appId ->
             val value = overridesObj.optJSONObject(appId) ?: return@forEach
             overrides[appId] = ThresholdProfile(
+                low = value.optDouble("low", defaultThresholds.low),
                 medium = value.optDouble("medium", defaultThresholds.medium),
                 high = value.optDouble("high", defaultThresholds.high)
             ).normalize()
@@ -38,7 +40,7 @@ object RemotePolicyParser {
             defaultThresholds = defaultThresholds,
             appThresholdOverrides = overrides,
             exportEnabled = policyNode.optBoolean("export_enabled", true),
-            retentionDays = policyNode.optInt("retention_days", 7).coerceIn(1, 90),
+            retentionDays = policyNode.optInt("retention_days", 90).coerceIn(1, 90),
             detectionModel = policyNode.optString("detection_model", "ensemble_fusion"),
             shadowModel = policyNode.optString("shadow_model", "").takeIf { it.isNotBlank() },
             falsePositiveBudgetPerAppDay = policyNode.optInt("false_positive_budget_per_app_day", 12).coerceIn(1, 250),
@@ -63,7 +65,8 @@ object RemotePolicyParser {
             disableVolumeFeatures = policyNode.optBoolean("disable_volume_features", false),
             disableTimingFeatures = policyNode.optBoolean("disable_timing_features", false),
             disableDestinationFeatures = policyNode.optBoolean("disable_destination_features", false),
-            appProfileOverrides = appProfiles
+            appProfileOverrides = appProfiles,
+            protectedBrandsCsv = policyNode.optString("protected_brands_csv", "").takeIf { it.isNotBlank() }
         )
     }
 }

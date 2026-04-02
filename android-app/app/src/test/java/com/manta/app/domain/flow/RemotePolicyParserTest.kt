@@ -12,9 +12,9 @@ class RemotePolicyParserTest {
               "status": "ok",
               "policy": {
                 "policy_version": 3,
-                "default_thresholds": {"medium": 0.5, "high": 0.8},
+                "default_thresholds": {"low": 0.3, "medium": 0.5, "high": 0.8},
                 "app_threshold_overrides": {
-                  "com.test": {"medium": 0.45, "high": 0.7}
+                  "com.test": {"low": 0.25, "medium": 0.45, "high": 0.7}
                 },
                 "export_enabled": true,
                 "retention_days": 14
@@ -25,7 +25,9 @@ class RemotePolicyParserTest {
         val policy = RemotePolicyParser.parse(raw)
 
         assertEquals(3, policy.policyVersion)
+        assertEquals(0.3, policy.defaultThresholds.low, 0.0001)
         assertEquals(0.5, policy.defaultThresholds.medium, 0.0001)
+        assertEquals(0.25, policy.appThresholdOverrides["com.test"]?.low ?: 0.0, 0.0001)
         assertEquals(0.7, policy.appThresholdOverrides["com.test"]?.high ?: 0.0, 0.0001)
         assertEquals(14, policy.retentionDays)
     }

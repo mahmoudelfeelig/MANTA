@@ -11,6 +11,7 @@ data class FlowRecord(
     val timestampStartMillis: Long,
     val timestampEndMillis: Long,
     val appId: String,
+    val ipVersion: Int = 4,
     val protocol: FlowProtocol,
     val srcIp: String,
     val srcPort: Int,
@@ -37,7 +38,9 @@ data class FlowRecord(
     val interPacketGapMean: Double = 0.0,
     val payloadMean: Double = 0.0,
     val loadMean: Double = 0.0,
-    val transportMetricsPresent: Double = 0.0
+    val transportMetricsPresent: Double = 0.0,
+    val protocolEvidence: ProtocolEvidence = ProtocolEvidence(),
+    val destinationInsight: DestinationInsight = DestinationInsight()
 ) {
     fun toJson(
         deviceIdPseudo: String,

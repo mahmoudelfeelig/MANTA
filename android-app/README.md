@@ -43,5 +43,5 @@ Minimum configuration:
 - Managed app restrictions are supported for Android Enterprise / EMM deployment via `mdm/managed-configurations.json`.
 - A bundled linear model is loaded from `app/src/main/assets/models/anomaly-linear.json`.
 - If no TFLite model exists in `app/src/main/assets/models/anomaly.tflite`, scoring uses linear + statistical paths.
-- Dataset snapshots are written to app external files under `exports/` as anonymized CSV.
+- Dataset snapshots are written to app external files under `exports/` as privacy-mode-aware CSV.
 - Policy sync expects backend endpoint `GET /api/v1/policy/device/{device_id_pseudo}`.

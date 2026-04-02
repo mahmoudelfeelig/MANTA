@@ -42,6 +42,10 @@ object IpfixMapper {
         }
         val exportedSrcPort = exportPort(flow.srcPort, privacyMode, customPrivacy)
         val exportedDstPort = exportPort(flow.dstPort, privacyMode, customPrivacy)
+        val exportedDestinationKey = exportDestinationKey(flow, privacyMode, customPrivacy)
+        val hostMetadataAllowed = privacyMode == PrivacyMode.OFF ||
+            privacyMode == PrivacyMode.LOW ||
+            (privacyMode == PrivacyMode.CUSTOM && customPrivacy.includeSiteHint)
         val ipfixElements = JSONArray()
             .put(element(8, "sourceIPv4Address", exportedSrcIp))
             .put(element(12, "destinationIPv4Address", exportedDstIp))
@@ -65,6 +69,7 @@ object IpfixMapper {
             .put("dst_ip", exportedDstIp)
             .put("dst_port", exportedDstPort)
             .put("dst_host_hash", flow.destinationHash)
+            .put("destination_key", exportedDestinationKey)
             .put("bytes_out", flow.bytesOut)
             .put("bytes_in", flow.bytesIn)
             .put("packets_out", flow.packetsOut)
@@ -72,8 +77,31 @@ object IpfixMapper {
             .put("duration_ms", flow.durationMillis)
             .put("timestamp_start", flow.timestampStartMillis)
             .put("timestamp_end", flow.timestampEndMillis)
+            .put("is_new_destination_for_app", flow.destinationNovelty)
             .put("dst_novelty", flow.destinationNovelty)
             .put("site_hint", exportSiteHint(siteHint, privacyMode, customPrivacy))
+            .put("dns_query_name", flow.protocolEvidence.dnsQueryName.takeIf { hostMetadataAllowed })
+            .put("dns_query_type", flow.protocolEvidence.dnsQueryType)
+            .put("dns_response_code", flow.protocolEvidence.dnsResponseCode)
+            .put("dns_answer_value", flow.protocolEvidence.dnsAnswerValue.takeIf { hostMetadataAllowed })
+            .put("tls_sni", flow.protocolEvidence.tlsSni.takeIf { hostMetadataAllowed })
+            .put("tls_alpn", flow.protocolEvidence.tlsAlpn)
+            .put("tls_version", flow.protocolEvidence.tlsVersion)
+            .put("tls_ja3_like", flow.protocolEvidence.tlsJa3Like)
+            .put("tls_leaf_subject", flow.protocolEvidence.tlsLeafSubject.takeIf { hostMetadataAllowed })
+            .put("tls_leaf_issuer", flow.protocolEvidence.tlsLeafIssuer.takeIf { hostMetadataAllowed })
+            .put("tls_leaf_san", flow.protocolEvidence.tlsLeafSan.takeIf { hostMetadataAllowed })
+            .put("http_method", flow.protocolEvidence.httpMethod)
+            .put("http_host", flow.protocolEvidence.httpHost.takeIf { hostMetadataAllowed })
+            .put("http_path", flow.protocolEvidence.httpPath.takeIf { privacyMode == PrivacyMode.OFF || privacyMode == PrivacyMode.LOW })
+            .put("quic_version", flow.protocolEvidence.quicVersion)
+            .put("quic_detected", flow.protocolEvidence.quicDetected)
+            .put("http3_detected", flow.protocolEvidence.http3Detected)
+            .put("registrable_domain", flow.destinationInsight.registrableDomain.takeIf { hostMetadataAllowed })
+            .put("brand_match", flow.destinationInsight.brandMatch.takeIf { hostMetadataAllowed })
+            .put("lookalike_score", flow.destinationInsight.lookalikeScore)
+            .put("threat_tags", JSONArray(flow.destinationInsight.threatTags))
+            .put("mitre_techniques", JSONArray(flow.destinationInsight.mitreTechniques))
             .put("netflow_version", NETFLOW_VERSION)
             .put("ipfix_template_id", IPFIX_TEMPLATE_ID)
             .put("ipfix_elements", ipfixElements)
@@ -103,6 +131,21 @@ object IpfixMapper {
             PrivacyMode.OFF, PrivacyMode.LOW -> siteHint
             PrivacyMode.MEDIUM, PrivacyMode.STRICT -> null
             PrivacyMode.CUSTOM -> siteHint.takeIf { customPrivacy.includeSiteHint }
+        }
+    }
+
+    private fun exportDestinationKey(
+        flow: FlowRecord,
+        privacyMode: PrivacyMode,
+        customPrivacy: CustomPrivacyOptions
+    ): String {
+        val visibleHost = exportSiteHint(flow.siteHint, privacyMode, customPrivacy)
+        return when {
+            !visibleHost.isNullOrBlank() -> "${visibleHost}:${exportPort(flow.dstPort, privacyMode, customPrivacy)}"
+            privacyMode == PrivacyMode.OFF -> "${flow.dstIp}:${flow.dstPort}"
+            privacyMode == PrivacyMode.CUSTOM && customPrivacy.includeIpAddresses ->
+                "${flow.dstIp}:${exportPort(flow.dstPort, privacyMode, customPrivacy)}"
+            else -> flow.destinationHash
         }
     }
 

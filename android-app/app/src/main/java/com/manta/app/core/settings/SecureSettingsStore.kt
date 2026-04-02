@@ -62,8 +62,32 @@ private const val KEY_ABLATE_VOLUME_FEATURES = "ablate_volume_features"
 private const val KEY_ABLATE_TIMING_FEATURES = "ablate_timing_features"
 private const val KEY_ABLATE_DESTINATION_FEATURES = "ablate_destination_features"
 private const val KEY_CUSTOM_PRIVACY_OPTIONS = "custom_privacy_options"
+private const val KEY_PROTECTED_BRANDS = "protected_brands"
 
 private fun roundWeight(value: Double): String = "%.3f".format(value)
+
+private val DEFAULT_PROTECTED_BRANDS = listOf(
+    "google",
+    "microsoft",
+    "apple",
+    "meta",
+    "paypal",
+    "amazon",
+    "github",
+    "facebook",
+    "instagram",
+    "whatsapp",
+    "telegram",
+    "outlook",
+    "gmail",
+    "dropbox",
+    "icloud",
+    "netflix",
+    "spotify",
+    "bankofamerica",
+    "chase",
+    "wellsfargo"
+).joinToString("\n")
 
 private val SUPPORTED_DETECTION_MODELS = setOf(
     "ensemble_fusion",
@@ -231,7 +255,8 @@ data class EndpointConfig(
     val customPrivacy: CustomPrivacyOptions,
     val ablateVolumeFeatures: Boolean,
     val ablateTimingFeatures: Boolean,
-    val ablateDestinationFeatures: Boolean
+    val ablateDestinationFeatures: Boolean,
+    val protectedBrandsCsv: String
 ) {
     fun isConfigured(): Boolean = backendUrl.isNotBlank() && apiToken.isNotBlank()
     fun isEffectiveExportEnabled(): Boolean = exportEnabled
@@ -273,7 +298,7 @@ class SecureSettingsStore(context: Context) {
             prefs.edit().putInt(KEY_POLICY_VERSION, 1).apply()
         }
         if (!prefs.contains(KEY_RETENTION_DAYS)) {
-            prefs.edit().putInt(KEY_RETENTION_DAYS, 7).apply()
+            prefs.edit().putInt(KEY_RETENTION_DAYS, 90).apply()
         }
         if (!prefs.contains(KEY_APP_THRESHOLD_OVERRIDES)) {
             prefs.edit().putString(KEY_APP_THRESHOLD_OVERRIDES, "{}").apply()
@@ -361,6 +386,9 @@ class SecureSettingsStore(context: Context) {
         if (!prefs.contains(KEY_CUSTOM_PRIVACY_OPTIONS)) {
             prefs.edit().putString(KEY_CUSTOM_PRIVACY_OPTIONS, CustomPrivacyOptions().toJson()).apply()
         }
+        if (!prefs.contains(KEY_PROTECTED_BRANDS)) {
+            prefs.edit().putString(KEY_PROTECTED_BRANDS, DEFAULT_PROTECTED_BRANDS).apply()
+        }
 
         configState = MutableStateFlow(readConfig())
     }
@@ -377,7 +405,7 @@ class SecureSettingsStore(context: Context) {
             mediumThreshold = prefs.getString(KEY_MEDIUM_THRESHOLD, "0.60")?.toDoubleOrNull() ?: 0.60,
             highThreshold = prefs.getString(KEY_HIGH_THRESHOLD, "0.85")?.toDoubleOrNull() ?: 0.85,
             policyVersion = prefs.getInt(KEY_POLICY_VERSION, 1),
-            retentionDays = prefs.getInt(KEY_RETENTION_DAYS, 7).coerceIn(1, 90),
+            retentionDays = prefs.getInt(KEY_RETENTION_DAYS, 90).coerceIn(1, 90),
             consentAccepted = prefs.getBoolean(KEY_CONSENT_ACCEPTED, false),
             detectionModel = sanitizeDetectionModel(prefs.getString(KEY_DETECTION_MODEL, "ensemble_fusion")),
             shadowModel = sanitizeShadowModel(prefs.getString(KEY_SHADOW_MODEL, "")),
@@ -419,7 +447,8 @@ class SecureSettingsStore(context: Context) {
             customPrivacy = CustomPrivacyOptions.fromJson(prefs.getString(KEY_CUSTOM_PRIVACY_OPTIONS, null)),
             ablateVolumeFeatures = prefs.getBoolean(KEY_ABLATE_VOLUME_FEATURES, false),
             ablateTimingFeatures = prefs.getBoolean(KEY_ABLATE_TIMING_FEATURES, false),
-            ablateDestinationFeatures = prefs.getBoolean(KEY_ABLATE_DESTINATION_FEATURES, false)
+            ablateDestinationFeatures = prefs.getBoolean(KEY_ABLATE_DESTINATION_FEATURES, false),
+            protectedBrandsCsv = prefs.getString(KEY_PROTECTED_BRANDS, DEFAULT_PROTECTED_BRANDS).orEmpty()
         )
     }
 
@@ -506,6 +535,22 @@ class SecureSettingsStore(context: Context) {
         configState.value = readConfig()
     }
 
+    fun setProtectedBrandsCsv(value: String) {
+        val normalized = normalizeProtectedBrandsCsv(value)
+        prefs.edit()
+            .putString(KEY_PROTECTED_BRANDS, normalized)
+            .apply()
+        configState.value = readConfig()
+    }
+
+    fun getProtectedBrands(): List<String> {
+        return readConfig().protectedBrandsCsv.lineSequence()
+            .map { it.trim().lowercase() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .toList()
+    }
+
     fun setFusionWeights(value: FusionWeights) {
         val normalized = value.normalize()
         prefs.edit()
@@ -550,9 +595,9 @@ class SecureSettingsStore(context: Context) {
     }
 
     fun setBaseThresholds(low: Double, profile: ThresholdProfile) {
-        val normalized = profile.normalize()
+        val normalized = ThresholdProfile(low = low, medium = profile.medium, high = profile.high).normalize()
         prefs.edit()
-            .putString(KEY_LOW_THRESHOLD, roundWeight(low.coerceIn(0.0, normalized.medium)))
+            .putString(KEY_LOW_THRESHOLD, roundWeight(normalized.low))
             .putString(KEY_MEDIUM_THRESHOLD, roundWeight(normalized.medium))
             .putString(KEY_HIGH_THRESHOLD, roundWeight(normalized.high))
             .apply()
@@ -564,12 +609,14 @@ class SecureSettingsStore(context: Context) {
         val value = overrides.optJSONObject(appId)
         if (value != null) {
             return ThresholdProfile(
+                low = value.optDouble("low", readConfig().lowThreshold),
                 medium = value.optDouble("medium", readConfig().mediumThreshold),
                 high = value.optDouble("high", readConfig().highThreshold)
             ).normalize()
         }
 
         return ThresholdProfile(
+            low = readConfig().lowThreshold,
             medium = readConfig().mediumThreshold,
             high = readConfig().highThreshold
         ).normalize()
@@ -581,6 +628,7 @@ class SecureSettingsStore(context: Context) {
         root.put(
             appId,
             JSONObject()
+                .put("low", normalized.low)
                 .put("medium", normalized.medium)
                 .put("high", normalized.high)
         )
@@ -597,6 +645,7 @@ class SecureSettingsStore(context: Context) {
             overrideRoot.put(
                 appId,
                 JSONObject()
+                    .put("low", normalized.low)
                     .put("medium", normalized.medium)
                     .put("high", normalized.high)
             )
@@ -621,6 +670,7 @@ class SecureSettingsStore(context: Context) {
         ).normalize()
 
         prefs.edit()
+            .putString(KEY_LOW_THRESHOLD, normalizedThresholds.low.toString())
             .putString(KEY_MEDIUM_THRESHOLD, normalizedThresholds.medium.toString())
             .putString(KEY_HIGH_THRESHOLD, normalizedThresholds.high.toString())
             .putInt(KEY_POLICY_VERSION, policy.policyVersion)
@@ -651,6 +701,9 @@ class SecureSettingsStore(context: Context) {
             .putBoolean(KEY_ABLATE_DESTINATION_FEATURES, policy.disableDestinationFeatures)
             .putString(KEY_APP_PROFILES, profileRoot.toString())
             .putString(KEY_APP_THRESHOLD_OVERRIDES, overrideRoot.toString())
+            .apply {
+                policy.protectedBrandsCsv?.let { putString(KEY_PROTECTED_BRANDS, normalizeProtectedBrandsCsv(it)) }
+            }
             .apply()
 
         configState.value = readConfig()
@@ -840,11 +893,22 @@ class SecureSettingsStore(context: Context) {
         if (before.fusionWeights != after.fusionWeights) {
             changes += "fusion weights updated"
         }
+        if (before.protectedBrandsCsv != after.protectedBrandsCsv) {
+            changes += "protected brands updated"
+        }
         return if (changes.isEmpty()) {
             "Policy synced with no visible changes."
         } else {
             changes.joinToString(" | ")
         }
+    }
+
+    private fun normalizeProtectedBrandsCsv(value: String): String {
+        return value.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .joinToString("\n")
+            .ifBlank { DEFAULT_PROTECTED_BRANDS }
     }
 
     private fun defaultProfileForApp(appId: String): AppProfile {
