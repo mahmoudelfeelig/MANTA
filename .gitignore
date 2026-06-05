@@ -6,6 +6,8 @@ Thumbs.db
 .idea/
 .vscode/
 *.iml
+/.codex
+
 
 # Logs
 *.log
@@ -84,9 +86,13 @@ config.*
 /reports/
 /exports/
 
-# Thesis / animation assets
+# Local assets
 /presentation/
-/animations/
-/thesis-paper/
-/.venv-manim
 /media/
+
+# Local logos
+/Logo.png
+/Logo.ico
+/logo.png
+/logo.ico
+/android-app/app/src/main/res/drawable/logo.png
