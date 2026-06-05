@@ -7,8 +7,6 @@ This folder contains the thesis manuscript source (LaTeX).
 - `../docs/FEATURES.md` - scope/completion checklist grouped by subsystem.
 - `../docs/LICENSES.md` - license and dataset compliance checklist.
 - `../docs/REFERENCES.md` - curated technical and academic references.
-- `../docs/VALIDATION.md` - experiment and metric gates.
-- `../docs/PRIVACY_ETHICS.md` - privacy and ethics position for MANTA.
 
 ## Build
 ```bash
@@ -20,7 +18,7 @@ Output PDF is written to `thesis-paper/build/`.
 
 ## Structure
 - `main.tex` - document entry point
-- `metadata.tex` - title/author/supervisor placeholders
+- `metadata.tex` - title page and submission metadata
 - `preamble.tex` - packages and macros
 - `chapters/` - thesis chapters
 - `appendices/` - appendices (reproducibility, extra tables, etc.)

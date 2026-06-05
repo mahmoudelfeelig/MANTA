@@ -16,11 +16,7 @@ MANTA (Mobile Anomaly and Network Threat Analysis) is an anomaly-first hybrid ID
 - `docs/FEATURES.md` - feature checklist and implementation scope grouped by subsystem
 - `docs/REFERENCES.md` - implementation references, literature register, and thesis-story paper links
 - `docs/LICENSES.md` - license, dataset, and raw-vs-derived data compliance policy
-- `docs/VALIDATION.md` - formal metric, privacy, reliability, and performance gates
-- `docs/PRIVACY_ETHICS.md` - privacy-tier, leakage, and ethics analysis
-- `docs/SIEM_CONTRACTS.md` - backend/SIEM integration contracts and live verification entrypoint
 - `docs/EVIDENCE_PACKAGE.md` - appendix/publication evidence archiving flow
-- `THIRD_PARTY_NOTICES.md` - provenance and reuse notices
 
 ## Quick Start
 
@@ -50,13 +46,12 @@ pytest -q -s tests
 - Accept consent, start capture, and validate alerts, export, and policy sync.
 
 ## Project Direction
-MANTA is being rewritten toward:
-- anomaly-first hybrid IDS framing
-- stronger multivariate and sequence-aware anomaly detection
+MANTA is framed around:
+- anomaly-first hybrid IDS design
+- metadata-only Android/endpoint traffic capture
 - light on-device inference and heavier remote model options
-- privacy-tier benchmarking with documented utility degradation
-- rigorous replay, integration, and long-running evaluation gates
-- GitHub Actions-driven CI/CD and benchmark evidence
+- privacy-tier benchmarking with release-leakage and observer-leakage audits
+- reproducible public-corpus evidence for the thesis
 
 ## Component READMEs
 - `android-app/README.md`

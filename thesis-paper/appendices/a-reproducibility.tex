@@ -1,0 +1,50 @@
+\section{Artifact Package}
+The main experiment artifacts used in this manuscript are the March 20--21, 2026 public-corpus
+report bundle. During the experiment run these reports were written to \texttt{ml-pipeline/reports/};
+the submission snapshot mirrors the selected thesis reports under
+\texttt{exports/thesis-final-2026-03-22/reports/}:
+\begin{itemize}[leftmargin=*]
+  \item \texttt{ml-pipeline/reports/dataset-manifest.json}
+  \item \texttt{ml-pipeline/reports/evaluation-protocol.json}
+  \item \texttt{ml-pipeline/reports/android-model-evaluation.json}
+  \item \texttt{ml-pipeline/reports/tflite-autoencoder-evaluation.json}
+  \item \texttt{ml-pipeline/reports/remote-assisted-model.json}
+  \item \texttt{ml-pipeline/reports/privacy-ablation.json}
+  \item \texttt{ml-pipeline/reports/privacy-leakage.json}
+  \item \texttt{ml-pipeline/reports/traffic-fingerprint.json}
+  \item \texttt{ml-pipeline/reports/privacy-student-report.json}
+  \item \texttt{ml-pipeline/reports/federated-report.json}
+  \item \texttt{ml-pipeline/reports/performance-gates.json}
+  \item \texttt{ml-pipeline/reports/privacy-gate.json}
+  \item \texttt{ml-pipeline/reports/full-model-matrix.json}
+\end{itemize}
+
+\section{Core Reproduction Commands}
+The full public-corpus workflow is documented in \texttt{ml-pipeline/README.md}. The compact
+reproduction path is:
+\begin{verbatim}
+cd ml-pipeline
+python -m pip install -e .[tflite,test]
+
+python -m ml_pipeline.dataset_manifest \
+  --input data/real/manta-real-training.csv \
+  --output reports/dataset-manifest.json
+
+python -m ml_pipeline.evaluation_protocol_report \
+  --input data/real/manta-real-training.csv \
+  --output reports/evaluation-protocol.json
+
+python -m ml_pipeline.train_all \
+  --input data/real/manta-real-training.csv \
+  --runs-root experiment-runs
+
+python -m ml_pipeline.run_experiment_suite \
+  --input data/real/manta-real-training.csv \
+  --output-dir experiment-runs/real-run-001 \
+  --model-threshold 0.5 \
+  --ids-threshold 0.55
+\end{verbatim}
+
+The normalized input CSV is derived from the public datasets listed in
+\Cref{tab:dataset-sources}. Raw datasets are not redistributed with the thesis archive; the archive
+contains the derived report bundle used for the manuscript tables.

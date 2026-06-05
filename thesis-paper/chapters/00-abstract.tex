@@ -1,0 +1,28 @@
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+
+This thesis investigates MANTA (Mobile Anomaly and Network Threat Analysis), an anomaly-first
+hybrid intrusion-detection system for encrypted mobile and endpoint traffic that operates
+on flow metadata rather than packet payloads. The implemented artifact spans three modules: 
+an Android endpoint based on \texttt{VpnService} \citep{android_vpnservice}, a backend adapter
+for authenticated ingest and analyst feedback, and a reproducible machine-learning pipeline
+for training, privacy benchmarking, and model export.
+
+The evaluation uses a public-only merged corpus of 6,034,487 flows drawn from seven dataset
+sources and 904,371 aggregated 60-second windows. It compares on-device linear and
+TFLite-compatible detectors, remote hybrid models, privacy-student variants, federated simulation,
+and privacy-reduced feature views under grouped, source-aware splits. The strongest anomaly result
+in the March 2026 matrix is a remote gradient-boosted tree with F1 \(0.449\), PR-AUC \(0.482\), and
+ROC-AUC \(0.765\), while lighter on-device models remain substantially weaker.
+
+The privacy evaluation separates two attack surfaces. \emph{Release leakage} is inference from the
+feature representation that the system intentionally exports or shares. \emph{Observer leakage} is
+inference from the encrypted traffic sequence visible to an on-path network observer before any
+export-time reduction is applied. The reduced privacy views (\texttt{medium} and \texttt{strict})
+preserve anomaly utility in the March 2026 ablation study and lower exact app-identification leakage
+from \(0.235\) normalized leakage in the full view to \(0.113\) and \(0.099\), respectively.
+However, stronger metadata leakage remains high for app family, destination behavior, and dataset
+source, and the encrypted-flow sequence audit shows severe observer leakage, with normalized
+leakage \(0.544\) for app identification and \(0.981\) for dataset-source inference. I conclude
+that feature-level coarsening and privacy-aware representation learning improve the released
+representation, but do not hide the traffic patterns available to passive observers.

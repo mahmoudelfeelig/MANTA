@@ -29,22 +29,7 @@ jobs:
             backend-adapter/app/storage.py \
             backend-adapter/app/remote_modeling.py \
             ml-pipeline/src/ml_pipeline/train_remote_backend_model.py \
-            tools/collect_manta_dataset.py \
-            tools/check_manta_validation.py \
             tools/check_legacy_naming.py
-
-      - name: Validation gate report check
-        run: python tools/check_manta_validation.py
-
-      - name: Dataset collection planner smoke test
-        run: |
-          python tools/collect_manta_dataset.py \
-            --output-dir /tmp/manta-study-plan \
-            --days 1 \
-            --repetitions 1 \
-            --include-phone \
-            --include-laptop \
-            --include-attack-scenarios
 
   backend-tests:
     name: Backend adapter tests

@@ -1,0 +1,96 @@
+\section{Android Endpoint Implementation}
+\subsection{VPN Capture and Userspace Forwarding}
+The endpoint capture loop is implemented around \texttt{FlowVpnService}, which establishes a TUN
+interface and starts a foreground service session. A dedicated userspace forwarder relays packets
+to upstream sockets while protecting those sockets from tunnel recursion via
+\texttt{VpnService.protect(...)} \citep{android_vpnservice}. Parsed packets are aggregated into
+flow records keyed by app identity and network tuple attributes.
+
+App attribution uses Android connection-owner resolution where available, and flows are persisted to
+Room-backed storage \citep{android_room}. Background workers handle retention cleanup and export
+retries using WorkManager scheduling \citep{android_workmanager}.
+
+\subsection{Feature Windows and On-Device Detection}
+The feature window builder aggregates 60-second windows and computes a richer metadata-only feature
+set than the first prototype. In addition to core counters and ratios, the implemented pipeline derives
+timing, novelty, balance, diversity, burstiness, and graph-inspired contextual signals such as
+destination concentration, transition entropy, flow-count deviation, and byte-rate deviation. These
+features are used internally for anomaly scoring, but only a reduced subset is exposed in the
+privacy-reduced views.
+
+On-device inference supports linear and TFLite-compatible paths. The Android-ready linear
+model is exported as a JSON artifact, while the one-class path exports a TFLite autoencoder
+\citep{tensorflow_lite_guide}. These models are intentionally lightweight, but they serve mainly as
+feasibility baselines relative to the stronger remote models rather than as the final thesis
+headline.
+
+Alert generation includes severity stabilization and false-positive budget enforcement, then stores
+triage-ready records with explanation text and feature contributors.
+
+\subsection{UI and Triage Workflow}
+The Compose UI exposes:
+\begin{itemize}[leftmargin=*]
+  \item consent/disclosure and capture controls,
+  \item backend URL/token and export toggle,
+  \item alert center with triage states (\texttt{OPEN}, \texttt{INVESTIGATING},
+  \texttt{RESOLVED}, \texttt{FALSE\_POSITIVE}),
+  \item local data purge and anonymized CSV snapshot export.
+\end{itemize}
+This supports both standalone local operation and analyst-assisted workflows.
+
+\section{Backend Adapter Implementation}
+The backend adapter is a FastAPI service with token authentication, strict request validation, and
+defense-in-depth response headers. Incoming events are enqueued in SQLite and forwarded with bounded
+retry/backoff; exhausted items move to a dead-letter queue for replay.
+
+Beyond ingest, the adapter implements:
+\begin{itemize}[leftmargin=*]
+  \item alert triage APIs and incident summaries,
+  \item per-device policy storage and auto-tuning hooks,
+  \item policy simulation and quality summary endpoints,
+  \item retraining sample export and forensics bundle export,
+  \item optional Wazuh/Resistine connector routes \citep{wazuh_api}.
+\end{itemize}
+This architecture isolates endpoint concerns from SIEM-specific integration complexity.
+
+\section{ML Pipeline Implementation}
+The ML pipeline is organized as reproducible command-line stages that now operate over a merged
+public corpus rather than only over a controlled synthetic trace:
+\begin{itemize}[leftmargin=*]
+  \item public-dataset normalization and merged-corpus manifest generation,
+  \item grouped split audits and evaluation-protocol reports,
+  \item on-device linear and TFLite export,
+  \item remote backend training across multiple model families,
+  \item privacy ablation and metadata leakage attack benchmarking,
+  \item encrypted-flow sequence fingerprint benchmarking,
+  \item privacy-student training and federated simulation,
+  \item comparison-matrix and performance-gate generation.
+\end{itemize}
+
+\subsection{Privacy Views}
+The privacy mechanism is implemented as explicit feature views rather than as an afterthought.
+\texttt{off} and \texttt{low} retain the full feature set, while \texttt{medium} and \texttt{strict}
+replace many exact values with coarse or distribution-aware buckets. For example, activity,
+volume, duration, rate, burstiness, stability, and shape are represented through a small number of
+bucketized values, while direct host hints and several stronger destination/timing cues are removed
+from the exported representation.
+
+This is not packet padding or transport obfuscation. The system does not add dummy traffic. The
+privacy transformation happens at the feature-representation level.
+
+\subsection{Privacy Student and Federated Path}
+The privacy-student model is trained on the reduced \texttt{medium} view with reconstruction-style
+pretraining and multiple adversary heads. Those adversaries try to recover app identity, app
+family, dataset source, context bucket, and destination behavior from the learned latent
+representation. The objective is to preserve anomaly utility while reducing leakage of sensitive
+traffic attributes.
+
+The federated simulator then trains over the privacy-student latent representation using a FedProx
+style algorithm rather than over raw full-feature windows. This does not prove secure deployment by
+itself, but it makes the collaborative-learning design concrete and measurable.
+
+\subsection{Reproducibility Support}
+The \texttt{run\_experiment\_suite} path, cached privacy-view derivation, manifest reports, and
+full comparison matrix are all designed to support reproducibility. The archived report
+set used in this manuscript was produced from the March 20--21, 2026 public-corpus run and is
+archived in the evidence bundle described in the appendix.

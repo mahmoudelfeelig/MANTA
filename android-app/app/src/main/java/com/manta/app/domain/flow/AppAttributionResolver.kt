@@ -12,6 +12,7 @@ import android.util.Log
 import java.net.InetSocketAddress
 
 private const val TAG = "AppAttributionResolver"
+private const val FOREGROUND_CACHE_TTL_MILLIS = 2_000L
 
 private val KNOWN_BROWSER_PACKAGES = setOf(
     "com.android.chrome",
@@ -37,6 +38,9 @@ class AppAttributionResolver(
     private val packageManager = context.packageManager
     private val uidResolutionCache = mutableMapOf<Int, String>()
     private val endpointAttributionCache = linkedMapOf<String, String>()
+    private val recentForegroundCacheLock = Any()
+    private var recentForegroundCachedAtMillis = 0L
+    private var cachedRecentForegroundPackages: List<String> = emptyList()
     private val installedPackagesByUid: Map<Int, List<String>> by lazy {
         runCatching {
             packageManager.getInstalledApplications(ApplicationInfo.FLAG_INSTALLED)
@@ -163,16 +167,27 @@ class AppAttributionResolver(
     }
 
     private fun recentForegroundPackage(preferBrowsers: Boolean): String? {
+        val topPackages = recentForegroundPackages()
+        return if (preferBrowsers) {
+            topPackages.firstOrNull { it in KNOWN_BROWSER_PACKAGES } ?: topPackages.firstOrNull()
+        } else {
+            topPackages.firstOrNull()
+        }
+    }
+
+    private fun recentForegroundPackages(): List<String> {
         val now = System.currentTimeMillis()
+        synchronized(recentForegroundCacheLock) {
+            if (now - recentForegroundCachedAtMillis <= FOREGROUND_CACHE_TTL_MILLIS) {
+                return cachedRecentForegroundPackages
+            }
+        }
+
         val recent = runCatching {
             usageStatsManager?.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 90_000L, now)
                 .orEmpty()
                 .sortedByDescending { it.lastTimeUsed }
         }.getOrDefault(emptyList())
-        if (recent.isEmpty()) {
-            return null
-        }
-
         val topPackages = recent
             .asSequence()
             .map { it.packageName }
@@ -180,11 +195,11 @@ class AppAttributionResolver(
             .distinct()
             .toList()
 
-        return if (preferBrowsers) {
-            topPackages.firstOrNull { it in KNOWN_BROWSER_PACKAGES } ?: topPackages.firstOrNull()
-        } else {
-            topPackages.firstOrNull()
+        synchronized(recentForegroundCacheLock) {
+            recentForegroundCachedAtMillis = now
+            cachedRecentForegroundPackages = topPackages
         }
+        return topPackages
     }
 
     private fun endpointKey(packet: PacketMetadata): String {

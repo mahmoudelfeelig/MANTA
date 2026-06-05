@@ -1,0 +1,46 @@
+\section{Conclusion}
+I presented MANTA, an end-to-end framework for metadata-only anomaly detection over
+encrypted mobile and endpoint traffic. The project combines Android capture, backend-assisted
+triage, privacy-aware feature views, privacy-student and federated variants, and a reproducible
+public-corpus evaluation pipeline. The results identify a practical boundary: metadata coarsening
+can improve release privacy, but it does not provide strong observer privacy against
+traffic-analysis attacks.
+
+Answers to the research questions are:
+\begin{itemize}[leftmargin=*]
+  \item \textbf{RQ1 (metadata-only detection feasibility):} Metadata-only detection is feasible on
+  a large public corpus, but the evaluated models remain below deployment-grade quality thresholds.
+  The best detector in the March 2026 report matrix is a remote gradient-boosted-tree family variant with F1 \(0.449\),
+  PR-AUC \(0.482\), and ROC-AUC \(0.765\).
+  \item \textbf{RQ2 (variant comparison):} Remote models outperform the evaluated on-device,
+  privacy-student, and federated variants. The privacy-preserving variants are useful for
+  measurement, but not yet competitive as detectors.
+  \item \textbf{RQ3 (release privacy):} The reduced privacy views lower exact app-ID leakage while
+  keeping anomaly utility broadly intact in the March 2026 ablation study. This supports a limited
+  release-privacy result.
+  \item \textbf{RQ4 (observer privacy):} The encrypted-flow sequence benchmark shows severe
+  observer leakage. Release privacy and observer privacy are therefore not interchangeable, and
+  feature-level coarsening alone is insufficient for strong traffic-analysis privacy.
+\end{itemize}
+
+I claim that MANTA is a reproducible encrypted-traffic IDS framework that separates release privacy
+from observer privacy and shows that metadata-only coarsening can reduce exact app
+re-identification while remaining insufficient against stronger semantic and passive-observer
+inference.
+
+Practically, the project delivers an artifact package: Android app, backend adapter, ML pipeline,
+report bundle, manuscript, and reproducibility appendix. Its value is strongest as an empirical
+systems study and evaluation framework rather than as a finished privacy-preserving product.
+
+\section{Future Work}
+\begin{itemize}[leftmargin=*]
+  \item Stronger remote and on-device anomaly models under the same grouped public-corpus protocol.
+  \item Transport-level defenses such as padding or timing obfuscation if observer privacy is a hard
+  requirement.
+  \item Better privacy-student objectives that suppress app-family and behavior leakage more
+  strongly while preserving anomaly utility.
+  \item More realistic deployment studies on mobile overhead, battery, and long-running user
+  acceptance.
+  \item Stronger collaborative-learning paths with secure aggregation, client weighting, and
+  robustness against poisoning.
+\end{itemize}

@@ -12,7 +12,6 @@ SKIP_PARTS = {
     ".kotlin",
     ".pytest_cache",
     ".venv",
-    ".venv-manim",
     "node_modules",
     "build",
     "downloads",

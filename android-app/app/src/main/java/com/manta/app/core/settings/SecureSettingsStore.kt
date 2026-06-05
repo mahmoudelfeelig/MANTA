@@ -585,6 +585,17 @@ class SecureSettingsStore(context: Context) {
         }
     }
 
+    fun appProfilesSnapshot(): Map<String, AppProfile> {
+        val root = JSONObject(prefs.getString(KEY_APP_PROFILES, "{}") ?: "{}")
+        return buildMap {
+            val keys = root.keys()
+            while (keys.hasNext()) {
+                val appId = keys.next()
+                put(appId, sanitizeAppProfile(root.optString(appId)))
+            }
+        }
+    }
+
     fun setAblationFlags(volume: Boolean, timing: Boolean, destination: Boolean) {
         prefs.edit()
             .putBoolean(KEY_ABLATE_VOLUME_FEATURES, volume)
@@ -605,21 +616,41 @@ class SecureSettingsStore(context: Context) {
     }
 
     fun getThresholdForApp(appId: String): ThresholdProfile {
+        val config = readConfig()
         val overrides = JSONObject(prefs.getString(KEY_APP_THRESHOLD_OVERRIDES, "{}") ?: "{}")
         val value = overrides.optJSONObject(appId)
         if (value != null) {
             return ThresholdProfile(
-                low = value.optDouble("low", readConfig().lowThreshold),
-                medium = value.optDouble("medium", readConfig().mediumThreshold),
-                high = value.optDouble("high", readConfig().highThreshold)
+                low = value.optDouble("low", config.lowThreshold),
+                medium = value.optDouble("medium", config.mediumThreshold),
+                high = value.optDouble("high", config.highThreshold)
             ).normalize()
         }
 
         return ThresholdProfile(
-            low = readConfig().lowThreshold,
-            medium = readConfig().mediumThreshold,
-            high = readConfig().highThreshold
+            low = config.lowThreshold,
+            medium = config.mediumThreshold,
+            high = config.highThreshold
         ).normalize()
+    }
+
+    fun thresholdOverridesSnapshot(base: ThresholdProfile): Map<String, ThresholdProfile> {
+        val root = JSONObject(prefs.getString(KEY_APP_THRESHOLD_OVERRIDES, "{}") ?: "{}")
+        return buildMap {
+            val keys = root.keys()
+            while (keys.hasNext()) {
+                val appId = keys.next()
+                val value = root.optJSONObject(appId) ?: continue
+                put(
+                    appId,
+                    ThresholdProfile(
+                        low = value.optDouble("low", base.low),
+                        medium = value.optDouble("medium", base.medium),
+                        high = value.optDouble("high", base.high)
+                    ).normalize()
+                )
+            }
+        }
     }
 
     fun setThresholdOverride(appId: String, profile: ThresholdProfile) {

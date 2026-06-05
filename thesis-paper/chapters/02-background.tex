@@ -1,0 +1,82 @@
+\section{Android Networking and \texttt{VpnService}}
+Android exposes packet interception on non-rooted devices through \texttt{VpnService}, which
+creates a user-space TUN interface and routes device traffic through an application-controlled
+forwarding path \citep{android_vpnservice}. This design enables endpoint telemetry without kernel
+modification, but imposes practical constraints:
+\begin{itemize}[leftmargin=*]
+  \item a foreground service is required for long-running capture reliability
+  \citep{android_foreground_services},
+  \item upstream sockets must be protected from tunnel recursion (\texttt{protect(...)}),
+  \item packet processing must remain resource-aware to avoid user-visible overhead.
+\end{itemize}
+For this reason, MANTA restricts collection to metadata-level features and
+performs lightweight aggregation on-device rather than deep packet inspection.
+
+\section{Flow-Based Monitoring and Metadata-Only Detection}
+Flow telemetry abstracts packets into structured records keyed by protocol/endpoint tuples and
+timing/counter statistics. NetFlow v9 and IPFIX formalize this approach and define reusable fields
+for interoperable flow exchange \citep{rfc3954,rfc7011,rfc7012,iana_ipfix}. Compared to payload
+inspection, flow representations:
+\begin{itemize}[leftmargin=*]
+  \item reduce sensitive content exposure,
+  \item compress observations for efficient local storage and export,
+  \item retain behaviorally meaningful signals (volume asymmetry, burstiness, novelty, and
+  frequency change).
+\end{itemize}
+Recent anomaly-detection systems such as Kitsune and N-BaIoT show that compact, flow-like
+representations can still be effective for intrusion detection when combined with lightweight
+autoencoder or ensemble machinery \citep{kitsune_2018,n_baiot_2018}. MANTA adopts the same
+metadata-only philosophy, but targets encrypted mobile and endpoint traffic while emphasizing
+privacy-sensitive deployment constraints.
+
+\section{Encrypted Traffic Analysis and Observer Leakage}
+Encrypted transport does not eliminate traffic analysis. Website-fingerprinting work has repeatedly
+shown that timing, size, and direction patterns can reveal a user's activity even when payloads are
+fully encrypted. Deep Fingerprinting demonstrated that deep-learning attackers can break many
+lightweight defenses \citep{deep_fingerprinting_2018}, and subsequent systems research has shown
+that efficient padding schemes remain difficult to deploy robustly in realistic settings
+\citep{wf_sok_2022}. Similar issues appear in mobile traffic: partial encrypted traces can support
+user-activity detection \citep{cnn_user_activity_2022}, and concurrent-flow relationships can be
+used to classify mobile applications from encrypted traffic \citep{gat_mobile_app_2023}.
+
+These attacks motivate the release/observer split used in MANTA. A coarsened or anonymized export
+can reduce what a data consumer learns, while the original encrypted sequence remains visible to an
+on-path observer. I evaluate those two surfaces separately.
+
+\section{Anomaly Detection for Network Security}
+Anomaly detection commonly operates in limited-label settings, where unsupervised baselines are
+attractive because they can be trained on predominantly normal traffic \citep{chandola_2009}.
+Isolation Forest remains a practical reference method for tabular anomaly scoring due to strong
+performance/complexity trade-offs \citep{isolation_forest_2008}. In operational security settings,
+threshold policy is often more consequential than raw score quality because base rates and alert
+costs strongly affect utility \citep{sommer_paxson_2010}.
+
+On-device deployment introduces additional constraints: inference must be lightweight, robust under
+battery pressure, and explainable enough for human triage. MANTA therefore combines statistical,
+linear, and TFLite-compatible scoring with lightweight feature-contribution summaries that can be
+generated during inference.
+
+\section{Privacy-Preserving Traffic Representation}
+Traditional anonymization work such as prefix-preserving pseudonymization protects explicit
+identifiers but may still leak semantics through traffic structure. PD-PAn argues that preserving
+utility while defending against semantic attacks requires attention to both prefix relationships and
+distributional characteristics \citep{pd_pan_2023}. MANTA follows that broader view: it does not
+only hash identifiers, but also evaluates what remains inferable from reduced feature views after
+identifiers and strong destination hints have been coarsened or removed.
+
+\section{Privacy-Aware Representation Learning and Collaboration}
+Self-supervised and reconstruction-based learning for encrypted traffic have recently become
+promising tools for anomaly detection under limited labels \citep{et_ssl_2025}. At the same time,
+federated-learning research has explored how intrusion-detection models can be improved without
+centralizing raw data \citep{federated_privacy_ids_2023,privacy_fl_ids_2024}. MANTA uses these
+ideas in a limited but concrete form: a privacy student is trained from fuller supervision onto a
+reduced view, and a federated simulation operates on that learned latent space rather than on raw
+full-feature tables.
+
+\section{Positioning}
+MANTA differs from earlier work in three ways. First, it integrates Android capture, backend
+triage, privacy views, privacy attack benchmarks, and manuscript-ready evidence generation into one
+artifact set. Second, it evaluates a public-only corpus with grouped source-aware splits rather
+than relying on a small controlled trace or a purely random split. Third, it treats privacy as two
+separate empirical questions: what the released representation leaks, and what a passive encrypted
+traffic observer can still infer.

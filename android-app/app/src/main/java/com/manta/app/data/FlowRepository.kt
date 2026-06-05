@@ -52,6 +52,9 @@ private const val ALERT_CORRELATION_WINDOW_MILLIS = 10 * 60_000L
 private const val FEEDBACK_ADJUST_STEP_FP = 0.02
 private const val FEEDBACK_ADJUST_STEP_TRUE_POSITIVE = 0.01
 private const val TAG = "FlowRepository"
+private const val RECENT_FLOW_WINDOW_LIMIT = 240
+private const val PENDING_EXPORT_COUNT_CACHE_TTL_MILLIS = 2_000L
+private const val SETTINGS_LOOKUP_CACHE_TTL_MILLIS = 5_000L
 
 private val BROWSER_PACKAGES = setOf(
     "com.android.chrome",
@@ -87,6 +90,13 @@ class FlowRepository(
     private val dao = db.flowDao()
     private val siteHintCache = mutableMapOf<String, String?>()
     private val dnsAnswerCache = mutableMapOf<String, String>()
+    private val pendingExportCountLock = Any()
+    private var pendingExportCountCachedAtMillis = 0L
+    private var pendingExportCountCachedValue = 0
+    private val protectedBrandsLock = Any()
+    private var protectedBrandsCachedCsv = ""
+    private var protectedBrandsCachedValue: List<String> = emptyList()
+    private val appProfileCache = linkedMapOf<String, Pair<Long, AppProfile>>()
 
     suspend fun persistFlow(flow: FlowRecord): AnomalyAlert? = withContext(Dispatchers.IO) {
         val config = settingsStore.readConfig()
@@ -94,7 +104,7 @@ class FlowRepository(
         val destinationInsight = destinationInsightEngine.analyze(
             flow,
             resolvedSiteHint,
-            settingsStore.getProtectedBrands()
+            protectedBrandsFor(config.protectedBrandsCsv)
         )
         val enrichedFlow = flow.copy(
             siteHint = resolvedSiteHint ?: flow.siteHint,
@@ -142,7 +152,7 @@ class FlowRepository(
         )
 
         val quality = dataQualityMonitor.evaluate(enrichedFlow)
-        val pendingExportQueue = dao.countPendingExports()
+        val pendingExportQueue = cachedPendingExportCount()
         val guardrail = runtimeGuardrailManager.decide(
             context = appContext,
             pendingExportQueue = pendingExportQueue
@@ -150,7 +160,7 @@ class FlowRepository(
         val beaconScore = periodicBeaconDetector.observe(enrichedFlow)
 
         val windowStart = enrichedFlow.timestampEndMillis - WINDOW_MILLIS
-        val recent = dao.getRecentFlowsByApp(enrichedFlow.appId, windowStart).map { entity ->
+        val recent = dao.getRecentFlowsByApp(enrichedFlow.appId, windowStart, RECENT_FLOW_WINDOW_LIMIT).map { entity ->
             FlowRecord(
                 id = entity.id,
                 timestampStartMillis = entity.timestampStartMillis,
@@ -194,7 +204,7 @@ class FlowRepository(
         val activeModel = config.detectionModel
         val shadowModel = config.shadowModel
         val appProfile = effectiveAppProfile(
-            base = settingsStore.getAppProfile(enrichedFlow.appId),
+            base = cachedAppProfile(enrichedFlow.appId),
             flow = enrichedFlow,
             siteHint = siteHint
         )
@@ -556,6 +566,57 @@ class FlowRepository(
 
     suspend fun alertsByTriage(status: TriageStatus, limit: Int = 50): List<AnomalyAlert> = withContext(Dispatchers.IO) {
         dao.getScoresByTriage(status.name, limit).map { mapEntityToAlert(it) }
+    }
+
+    private suspend fun cachedPendingExportCount(): Int {
+        val now = System.currentTimeMillis()
+        synchronized(pendingExportCountLock) {
+            if (now - pendingExportCountCachedAtMillis <= PENDING_EXPORT_COUNT_CACHE_TTL_MILLIS) {
+                return pendingExportCountCachedValue
+            }
+        }
+        val fresh = dao.countPendingExports()
+        synchronized(pendingExportCountLock) {
+            pendingExportCountCachedAtMillis = now
+            pendingExportCountCachedValue = fresh
+        }
+        return fresh
+    }
+
+    private fun protectedBrandsFor(csv: String): List<String> {
+        synchronized(protectedBrandsLock) {
+            if (csv == protectedBrandsCachedCsv) {
+                return protectedBrandsCachedValue
+            }
+            val parsed = csv.lineSequence()
+                .map { it.trim().lowercase() }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .toList()
+            protectedBrandsCachedCsv = csv
+            protectedBrandsCachedValue = parsed
+            return parsed
+        }
+    }
+
+    private fun cachedAppProfile(appId: String): AppProfile {
+        val now = System.currentTimeMillis()
+        synchronized(appProfileCache) {
+            appProfileCache[appId]?.let { (cachedAt, profile) ->
+                if (now - cachedAt <= SETTINGS_LOOKUP_CACHE_TTL_MILLIS) {
+                    return profile
+                }
+            }
+        }
+        val fresh = settingsStore.getAppProfile(appId)
+        synchronized(appProfileCache) {
+            appProfileCache[appId] = now to fresh
+            while (appProfileCache.size > 512) {
+                val eldest = appProfileCache.entries.firstOrNull()?.key ?: break
+                appProfileCache.remove(eldest)
+            }
+        }
+        return fresh
     }
 
     suspend fun updateAlertTriage(alertId: String, status: TriageStatus, note: String) = withContext(Dispatchers.IO) {

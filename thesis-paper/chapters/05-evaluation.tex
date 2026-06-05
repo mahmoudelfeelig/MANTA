@@ -1,0 +1,215 @@
+\section{Experimental Setup}
+Primary quantitative results in this chapter are taken from the March 20--21, 2026 public-corpus
+report bundle generated under \texttt{ml-pipeline/reports/}. The submission snapshot mirrors the
+same report files under \texttt{exports/thesis-final-2026-03-22/reports/}. The evidence package
+includes dataset and protocol manifests, model reports, privacy ablation, metadata leakage,
+encrypted-flow fingerprinting, privacy-student and federated reports, performance gates, and the
+full comparison matrix.
+
+The core principle of the evaluation is to avoid optimistic random-row validation. Model and
+privacy reports instead use grouped splits keyed by dataset source, environment, session, app
+family, and time bucket wherever the report type supports them. The separate
+\texttt{evaluation-protocol.json} audit covers six grouped split strategies over a sampled
+250,000-window subset to verify that the methodology itself is source-aware.
+
+\section{Datasets and Trace Collection}
+The corpus is a public-only merge of seven normalized datasets: Android Mischief, Android
+Spyware, CICAndMal2017, ITC-Net-Blend-60 scenario E, a Parrot-derived metadata slice, SDNCampus,
+and Westermo. The merged corpus contains 6,034,487 flows and yields 904,371 60-second windows for
+feature extraction. \Cref{tab:dataset-sources} summarizes the dataset composition reported by
+\texttt{dataset-manifest.json}.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Public-only corpus composition.}
+  \label{tab:dataset-sources}
+  \small
+  \begin{tabular}{p{4.1cm}rrp{5.1cm}}
+    \toprule
+    Dataset source & Flow rows & Sessions & Label profile \\
+    \midrule
+    Android Mischief & 3,011 & 8 & anomaly-only slice \\
+    Android Spyware & 4,924 & 1 & mixed benign/anomalous \\
+    CICAndMal2017 & 2,587,130 & 2,119 & mixed benign/anomalous \\
+    ITC-Net-Blend-60 E & 17,199 & 211 & benign-only \\
+    Parrot metadata slice & 373,566 & 1 & benign-only \\
+    SDNCampus & 3,000,000 & 30 & benign-only \\
+    Westermo & 48,657 & 3 & mixed benign/anomalous \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The corpus spans malware-heavy Android traffic, benign campus/application traffic, and industrial
+network traces rather than a single-device lab trace. The resulting benchmark is harder than a
+controlled trace, but closer to the cross-source generalization problem MANTA is intended to study.
+
+\section{Metrics}
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Detection metrics:} precision, recall, F1, ROC-AUC, PR-AUC, and confusion matrix.
+  \item \textbf{Privacy/utility metrics:} anomaly utility under \texttt{off}, \texttt{low},
+  \texttt{medium}, and \texttt{strict} views.
+  \item \textbf{Metadata leakage metrics:} strongest-attacker accuracy and normalized leakage for
+  app ID, app family, dataset source, context bucket, and destination behavior.
+  \item \textbf{Observer leakage metrics:} encrypted-flow sequence fingerprinting accuracy and
+  normalized leakage.
+  \item \textbf{Performance metrics:} single-window and batch feature-extraction latency.
+\end{itemize}
+
+Normalized leakage is reported on a \(0\)--\(1\) scale after accounting for the baseline difficulty
+of the inference task. A value close to \(0\) means that the attacker is near the configured
+baseline or chance level for that task, while a value close to \(1\) means that the representation
+is highly identifying for the target attribute. The metric is therefore used as an empirical
+privacy-risk score rather than as a formal privacy guarantee.
+
+\section{Anomaly-Detection Results}
+\Cref{tab:model-matrix} summarizes the main anomaly-detection variants from the full comparison
+matrix. The best overall detection result in the March 2026 matrix is the remote
+gradient-boosted-tree family benchmark, with F1 \(0.449\), PR-AUC \(0.482\), and ROC-AUC
+\(0.765\). The on-device models are materially weaker, and none of the evaluated models clear the
+project's high deployment gates.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Representative model results from the March 2026 report set.}
+  \label{tab:model-matrix}
+  \small
+  \begin{tabular}{>{\raggedright\arraybackslash}p{4.0cm}cccc}
+    \toprule
+    Model & Precision & Recall & F1 & PR-AUC / ROC-AUC \\
+    \midrule
+    Android linear & 0.201 & 0.415 & 0.271 & 0.199 / 0.659 \\
+    TFLite one-class & 0.304 & 0.070 & 0.114 & 0.180 / 0.612 \\
+    Remote hybrid primary & 0.352 & 0.271 & 0.306 & 0.375 / 0.690 \\
+    Remote family: logistic regression & 0.455 & 0.292 & 0.356 & 0.301 / 0.691 \\
+    Remote family: gradient-boosted tree & 0.620 & 0.352 & 0.449 & 0.482 / 0.765 \\
+    Privacy student (\texttt{medium}) & 0.156 & 0.383 & 0.222 & 0.139 / 0.589 \\
+    Federated (\texttt{medium}) & 0.114 & 0.919 & 0.203 & 0.125 / 0.548 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The results show usable signal in metadata-only windows, especially for the remote tree model, but
+the measured operating points remain below the project gates. The privacy-oriented variants also
+lose substantial detection quality relative to the best remote benchmark.
+
+\section{Release-Privacy Utility Trade-off}
+The release-privacy ablation results are shown in \Cref{tab:ablation}. Contrary to the initial
+expectation that privacy-reduced views would necessarily hurt detection, the \texttt{medium} and
+\texttt{strict} views slightly \emph{improve} F1 on this benchmark while keeping ROC-AUC and
+PR-AUC close to the \texttt{off} view. This suggests that reduced views can remove some
+source-specific noise or over-specificity while still preserving anomaly-relevant structure.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Anomaly utility under privacy-reduced views.}
+  \label{tab:ablation}
+  \begin{tabular}{lcccc}
+    \toprule
+    View & Precision & Recall & F1 & PR-AUC / ROC-AUC \\
+    \midrule
+    \texttt{off} & 0.413 & 0.899 & 0.565 & 0.506 / 0.624 \\
+    \texttt{low} & 0.413 & 0.899 & 0.565 & 0.506 / 0.624 \\
+    \texttt{medium} & 0.425 & 0.923 & 0.581 & 0.531 / 0.652 \\
+    \texttt{strict} & 0.425 & 0.930 & 0.582 & 0.495 / 0.631 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Metadata Leakage from Released Views}
+\Cref{tab:leakage} summarizes the strongest metadata leakage tasks for the main release-privacy
+views. The important result is mixed. Exact app-ID leakage drops substantially from the
+\texttt{off} view to \texttt{medium} and \texttt{strict}. However, app-family, destination-behavior,
+and dataset-source leakage remain high even in the reduced views. This is why the release-privacy
+gate for \texttt{medium} and \texttt{strict} still fails.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Strongest metadata leakage by privacy view (normalized leakage).}
+  \label{tab:leakage}
+  \small
+  \begin{tabular}{lcccc}
+    \toprule
+    View & App ID & App family & Dataset source & Destination behavior \\
+    \midrule
+    \texttt{off} & 0.235 & 0.689 & 0.935 & 0.989 \\
+    \texttt{low} & 0.233 & 0.659 & 0.825 & 0.976 \\
+    \texttt{medium} & 0.113 & 0.611 & 0.702 & 0.688 \\
+    \texttt{strict} & 0.099 & 0.616 & 0.702 & 0.685 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+In both \texttt{medium} and \texttt{strict}, exact app re-identification falls below the configured
+threshold, but the app-family and destination-behavior checks remain false. The reduced views
+therefore improve release privacy for one target while leaving broader semantic leakage unresolved.
+
+\section{Observer Leakage from Encrypted Traffic}
+The observer benchmark directly evaluates what a passive on-path observer could infer from the
+encrypted traffic sequence. This benchmark is deliberately separate from the release views, because
+the observer sees the original traffic before any export-time coarsening. \Cref{tab:observer}
+shows that observer leakage remains severe.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Observer leakage from encrypted-flow sequence fingerprinting.}
+  \label{tab:observer}
+  \begin{tabular}{lcccc}
+    \toprule
+    Task & Accuracy & Normalized leakage & Top-5 accuracy & Strongest model \\
+    \midrule
+    App ID & 0.544 & 0.544 & 0.719 & MLP \\
+    App family & 0.810 & 0.783 & 0.979 & MLP \\
+    Dataset source & 0.984 & 0.981 & 1.000 & MLP \\
+    Context bucket & 0.046 & 0.044 & 0.107 & MLP \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The reduced privacy views improve the representation that MANTA exports, but they do not protect
+against an observer who sees timing, burst structure, and sequence-level metadata on the network
+path. The experiment marks the boundary between feature-level privacy controls and transport-level
+traffic-analysis defenses.
+
+\section{Privacy Student, Federated Path, and Performance}
+The privacy-student model improves representation privacy only partially. In the archived
+\texttt{medium}-view report, anomaly quality remains low (F1 \(0.222\), PR-AUC \(0.139\),
+ROC-AUC \(0.589\)), while adversary accuracy is reduced strongly for app ID but remains notable for
+app family, dataset source, and destination behavior. The federated path is even weaker as a
+detector in the present configuration (F1 \(0.203\), PR-AUC \(0.125\), ROC-AUC \(0.548\)).
+
+Performance gating is also incomplete. \Cref{tab:gates} summarizes the thesis-relevant gate
+outcomes. Single-window extraction meets the p95 target (\(22.5\) ms) but misses the p99 target
+(\(87.9\) ms versus the desired \(40\) ms). The feature-matrix construction itself is fast, but
+end-to-end single-window build time is not yet at the intended deployment threshold.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Selected thesis gates and measured outcomes.}
+  \label{tab:gates}
+  \footnotesize
+  \begin{tabular}{@{}p{3.0cm}p{2.7cm}p{4.7cm}p{1.2cm}@{}}
+    \toprule
+    Gate & Target & Measured outcome & Result \\
+    \midrule
+    Latency p95 & \(\leq 40\) ms & \(22.5\) ms & Pass \\
+    Latency p99 & \(\leq 40\) ms & \(87.9\) ms & Fail \\
+    Exact app-ID release leakage & below threshold & \texttt{medium}: \(0.113\), \texttt{strict}: \(0.099\) & Pass \\
+    Semantic release leakage & below threshold & app-family and destination leakage remain high & Fail \\
+    Observer-leakage audit & low fingerprint leakage & app ID \(0.544\), dataset source \(0.981\) & Fail \\
+    Detector quality & deployment-grade gates & best F1 \(0.449\) & Fail \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Interpretation}
+The report set supports four findings and rejects one stronger interpretation.
+\begin{itemize}[leftmargin=*]
+  \item Metadata-only anomaly detection is technically feasible on a large public corpus.
+  \item Remote models outperform the on-device, privacy-student, and federated variants in the
+  March 2026 report matrix.
+  \item Release-privacy transformations can reduce exact app re-identification while preserving
+  reasonable utility.
+  \item Observer leakage remains severe without transport-level defenses.
+  \item MANTA should be treated as an evaluation framework and research artifact rather
+  than as a product-ready privacy-preserving IDS.
+\end{itemize}

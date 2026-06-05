@@ -19,8 +19,8 @@ interface FlowDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun enqueueExport(entity: ExportQueueEntity): Long
 
-    @Query("SELECT * FROM raw_flow_records WHERE appId = :appId AND timestampStartMillis >= :sinceMillis ORDER BY timestampStartMillis DESC")
-    suspend fun getRecentFlowsByApp(appId: String, sinceMillis: Long): List<RawFlowEntity>
+    @Query("SELECT * FROM raw_flow_records WHERE appId = :appId AND timestampStartMillis >= :sinceMillis ORDER BY timestampStartMillis DESC LIMIT :limit")
+    suspend fun getRecentFlowsByApp(appId: String, sinceMillis: Long, limit: Int): List<RawFlowEntity>
 
     @Query("SELECT * FROM raw_flow_records ORDER BY timestampStartMillis DESC LIMIT :limit")
     suspend fun getLatestFlows(limit: Int): List<RawFlowEntity>

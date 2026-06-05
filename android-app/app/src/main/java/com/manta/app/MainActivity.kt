@@ -9,8 +9,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.manta.app.service.FlowVpnService
 import com.manta.app.ui.MainScreen
 import com.manta.app.ui.MainViewModel
@@ -36,15 +37,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-            val config by viewModel.config.collectAsState()
+            val config by viewModel.config.collectAsStateWithLifecycle()
             MantaTheme(themeMode = config.themeMode) {
-                val alerts by viewModel.alerts.collectAsState()
-                val alertsTotalCount by viewModel.alertsTotalCount.collectAsState()
-                val hasMoreAlerts by viewModel.hasMoreAlerts.collectAsState()
-                val isLoadingMoreAlerts by viewModel.isLoadingMoreAlerts.collectAsState()
-                val statusMessage by viewModel.statusMessage.collectAsState()
-                val runtimeHealth by viewModel.runtimeHealth.collectAsState()
-                val deviceIdPseudo = viewModel.deviceIdPseudo()
+                val alerts by viewModel.alerts.collectAsStateWithLifecycle()
+                val alertsTotalCount by viewModel.alertsTotalCount.collectAsStateWithLifecycle()
+                val hasMoreAlerts by viewModel.hasMoreAlerts.collectAsStateWithLifecycle()
+                val isLoadingMoreAlerts by viewModel.isLoadingMoreAlerts.collectAsStateWithLifecycle()
+                val statusMessage by viewModel.statusMessage.collectAsStateWithLifecycle()
+                val runtimeHealth by viewModel.runtimeHealth.collectAsStateWithLifecycle()
+                val deviceIdPseudo = remember { viewModel.deviceIdPseudo() }
 
                 MainScreen(
                     config = config,
@@ -86,8 +87,9 @@ class MainActivity : ComponentActivity() {
                     onMarkAlertDangerous = viewModel::markAlertDangerous,
                     onMarkAlertFalsePositive = viewModel::markAlertFalsePositive,
                     onDismissAlertNeutral = viewModel::dismissAlertNeutral,
-                    currentAppThresholdProfile = viewModel::thresholdProfile,
                     currentAppProfile = viewModel::appProfile,
+                    currentAppThresholdOverrides = viewModel::thresholdOverridesSnapshot,
+                    currentAppProfiles = viewModel::appProfilesSnapshot,
                     onSetAppThresholdOverride = { appId, low, medium, high ->
                         viewModel.setAppThresholdOverride(appId, low, medium, high)
                     },

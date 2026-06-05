@@ -7,7 +7,6 @@ import java.time.ZoneId
 import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.ln
-import kotlin.math.pow
 import kotlin.math.sqrt
 
 class FeatureWindowBuilder {
@@ -23,9 +22,66 @@ class FeatureWindowBuilder {
         processingCostMillis: Double = 0.0
     ): FeatureWindow {
         val flowCount = flows.size.coerceAtLeast(1)
-        val totalOut = flows.sumOf { it.bytesOut }
-        val totalIn = flows.sumOf { it.bytesIn }
-        val packetCount = flows.sumOf { it.packetsOut + it.packetsIn }.coerceAtLeast(1)
+        var totalOut = 0L
+        var totalIn = 0L
+        var packetCountRaw = 0
+        var totalFlowBytes = 0L
+        var totalActiveMillis = 0L
+        var noveltySum = 0.0
+        var ttlGapSum = 0.0
+        var ttlMetricsPresentSum = 0.0
+        var synRateTotalSum = 0.0
+        var rstRateTotalSum = 0.0
+        var ackRateTotalSum = 0.0
+        var finRateTotalSum = 0.0
+        var pshRateTotalSum = 0.0
+        var fragmentRateTotalSum = 0.0
+        var tcpWindowMeanSum = 0.0
+        var ackDelayMeanSum = 0.0
+        var interPacketGapMeanSum = 0.0
+        var payloadMeanSum = 0.0
+        var loadMeanSum = 0.0
+        var transportMetricsPresentSum = 0.0
+        var totalPacketsOut = 0
+        var totalPacketsIn = 0
+        var smallFlowCount = 0
+        var highPortCount = 0
+        val destinations = HashSet<String>()
+        val ports = HashSet<Int>()
+        val protocols = HashSet<String>()
+
+        flows.forEach { flow ->
+            val flowBytes = flow.bytesOut + flow.bytesIn
+            totalOut += flow.bytesOut
+            totalIn += flow.bytesIn
+            totalFlowBytes += flowBytes
+            packetCountRaw += flow.packetsOut + flow.packetsIn
+            totalPacketsOut += flow.packetsOut
+            totalPacketsIn += flow.packetsIn
+            totalActiveMillis += flow.durationMillis
+            noveltySum += flow.destinationNovelty
+            ttlGapSum += flow.ttlGap
+            ttlMetricsPresentSum += flow.ttlMetricsPresent
+            synRateTotalSum += flow.synRateTotal
+            rstRateTotalSum += flow.rstRateTotal
+            ackRateTotalSum += flow.ackRateTotal
+            finRateTotalSum += flow.finRateTotal
+            pshRateTotalSum += flow.pshRateTotal
+            fragmentRateTotalSum += flow.fragmentRateTotal
+            tcpWindowMeanSum += flow.tcpWindowMean
+            ackDelayMeanSum += flow.ackDelayMean
+            interPacketGapMeanSum += flow.interPacketGapMean
+            payloadMeanSum += flow.payloadMean
+            loadMeanSum += flow.loadMean
+            transportMetricsPresentSum += flow.transportMetricsPresent
+            destinations += flow.destinationHash
+            ports += flow.dstPort
+            protocols += flow.protocol.name
+            if (flowBytes <= 256L) smallFlowCount += 1
+            if (flow.dstPort >= 1024) highPortCount += 1
+        }
+
+        val packetCount = packetCountRaw.coerceAtLeast(1)
         val avgPacketSize = (totalOut + totalIn).toDouble() / packetCount.toDouble()
         val outboundRatio = totalOut.toDouble() / (totalOut + totalIn + 1)
         val bytesPerFlow = (totalOut + totalIn).toDouble() / flowCount.toDouble()
@@ -33,53 +89,49 @@ class FeatureWindowBuilder {
         val byteRate = (totalOut + totalIn).toDouble() / durationSeconds
         val packetRate = packetCount.toDouble() / durationSeconds
 
-        val perFlowBytes = flows.map { it.bytesOut + it.bytesIn }
-        val mean = perFlowBytes.average().takeIf { !it.isNaN() } ?: 0.0
-        val variance = perFlowBytes
-            .map { value -> abs(value - mean) }
-            .average()
-            .takeIf { !it.isNaN() } ?: 0.0
+        val mean = totalFlowBytes.toDouble() / flowCount.toDouble()
+        var variance = 0.0
+        var durationVariance = 0.0
+        val meanDurationMillis = totalActiveMillis.toDouble() / flowCount.toDouble()
+        flows.forEach { flow ->
+            variance += abs((flow.bytesOut + flow.bytesIn).toDouble() - mean)
+            val durationDelta = flow.durationMillis.toDouble() - meanDurationMillis
+            durationVariance += durationDelta * durationDelta
+        }
+        variance /= flowCount.toDouble()
+        durationVariance /= flowCount.toDouble()
         val normalizedBurstiness = if (mean > 0.0) {
             (variance / mean).coerceIn(0.0, 4.0)
         } else {
             0.0
         }
 
-        val noveltyScore = flows.map { it.destinationNovelty }.average().takeIf { !it.isNaN() } ?: 0.0
+        val noveltyScore = noveltySum / flowCount.toDouble()
         val connectionFrequencyDelta = ln(1.0 + (flows.size / durationSeconds))
-        val uniqueDestinations = flows.map { it.destinationHash }.distinct().size.coerceAtLeast(1)
+        val uniqueDestinations = destinations.size.coerceAtLeast(1)
         val destinationDiversity = (uniqueDestinations.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
-        val totalActiveMillis = flows.sumOf { it.durationMillis }
         val activityRatio = (totalActiveMillis.toDouble() / (windowEndMillis - windowStartMillis).coerceAtLeast(1L).toDouble())
             .coerceIn(0.0, 1.0)
-        val perFlowDurations = flows.map { it.durationMillis.toDouble() }
-        val meanDurationMillis = perFlowDurations.average().takeIf { !it.isNaN() } ?: 0.0
-        val durationVariance = perFlowDurations
-            .map { value -> (value - meanDurationMillis).pow(2) }
-            .average()
-            .takeIf { !it.isNaN() } ?: 0.0
         val durationJitter = sqrt(durationVariance)
-        val portDiversity = (flows.map { it.dstPort }.distinct().size.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
-        val protocolDiversity = (flows.map { it.protocol.name }.distinct().size.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
-        val totalPacketsOut = flows.sumOf { it.packetsOut }
-        val totalPacketsIn = flows.sumOf { it.packetsIn }
+        val portDiversity = (ports.size.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
+        val protocolDiversity = (protocols.size.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
         val packetImbalance = (abs(totalPacketsOut - totalPacketsIn).toDouble() / (packetCount.toDouble() + 1.0)).coerceIn(0.0, 1.0)
-        val smallFlowRatio = (flows.count { (it.bytesOut + it.bytesIn) <= 256L }.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
-        val highPortRatio = (flows.count { it.dstPort >= 1024 }.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
-        val ttlGap = flows.map { it.ttlGap }.average().takeIf { !it.isNaN() } ?: 0.0
-        val ttlMetricsPresent = flows.map { it.ttlMetricsPresent }.average().takeIf { !it.isNaN() } ?: 0.0
-        val synRateTotal = flows.map { it.synRateTotal }.average().takeIf { !it.isNaN() } ?: 0.0
-        val rstRateTotal = flows.map { it.rstRateTotal }.average().takeIf { !it.isNaN() } ?: 0.0
-        val ackRateTotal = flows.map { it.ackRateTotal }.average().takeIf { !it.isNaN() } ?: 0.0
-        val finRateTotal = flows.map { it.finRateTotal }.average().takeIf { !it.isNaN() } ?: 0.0
-        val pshRateTotal = flows.map { it.pshRateTotal }.average().takeIf { !it.isNaN() } ?: 0.0
-        val fragmentRateTotal = flows.map { it.fragmentRateTotal }.average().takeIf { !it.isNaN() } ?: 0.0
-        val tcpWindowMean = flows.map { it.tcpWindowMean }.average().takeIf { !it.isNaN() } ?: 0.0
-        val ackDelayMean = flows.map { it.ackDelayMean }.average().takeIf { !it.isNaN() } ?: 0.0
-        val interPacketGapMean = flows.map { it.interPacketGapMean }.average().takeIf { !it.isNaN() } ?: 0.0
-        val payloadMean = flows.map { it.payloadMean }.average().takeIf { !it.isNaN() } ?: 0.0
-        val loadMean = flows.map { it.loadMean }.average().takeIf { !it.isNaN() } ?: 0.0
-        val transportMetricsPresent = flows.map { it.transportMetricsPresent }.average().takeIf { !it.isNaN() } ?: 0.0
+        val smallFlowRatio = (smallFlowCount.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
+        val highPortRatio = (highPortCount.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
+        val ttlGap = ttlGapSum / flowCount.toDouble()
+        val ttlMetricsPresent = ttlMetricsPresentSum / flowCount.toDouble()
+        val synRateTotal = synRateTotalSum / flowCount.toDouble()
+        val rstRateTotal = rstRateTotalSum / flowCount.toDouble()
+        val ackRateTotal = ackRateTotalSum / flowCount.toDouble()
+        val finRateTotal = finRateTotalSum / flowCount.toDouble()
+        val pshRateTotal = pshRateTotalSum / flowCount.toDouble()
+        val fragmentRateTotal = fragmentRateTotalSum / flowCount.toDouble()
+        val tcpWindowMean = tcpWindowMeanSum / flowCount.toDouble()
+        val ackDelayMean = ackDelayMeanSum / flowCount.toDouble()
+        val interPacketGapMean = interPacketGapMeanSum / flowCount.toDouble()
+        val payloadMean = payloadMeanSum / flowCount.toDouble()
+        val loadMean = loadMeanSum / flowCount.toDouble()
+        val transportMetricsPresent = transportMetricsPresentSum / flowCount.toDouble()
         val zoned = Instant.ofEpochMilli(windowEndMillis).atZone(ZoneId.systemDefault())
         val hourOfDay = zoned.hour
         val dayOfWeek = zoned.dayOfWeek.value

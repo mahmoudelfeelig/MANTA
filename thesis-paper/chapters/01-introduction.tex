@@ -1,0 +1,64 @@
+\section{Motivation}
+Mobile endpoints continuously communicate across Wi-Fi, cellular, enterprise, and home networks,
+yet defenders rarely have visibility into those flows without either rooting the device or
+inspecting sensitive payload content. Android's \texttt{VpnService} provides a practical middle
+ground by enabling user-space packet interception on non-rooted devices
+\citep{android_vpnservice}. This makes metadata-only monitoring possible, but it also creates two
+competing requirements: detection quality must be operationally useful, and data collection must
+stay meaningfully privacy-constrained.
+
+This tension is especially acute for encrypted traffic. Payload encryption removes content but not
+all side channels. Flow timing, volume, burst shape, destination characteristics, and session
+structure can still reveal application identity or user behavior. I therefore treat privacy as two
+separate questions: what can be inferred from the representation MANTA releases, and what can be
+inferred by a passive observer that sees the encrypted traffic on the wire.
+
+\section{Problem Statement}
+I study whether a practical, metadata-only IDS can be built and evaluated as an end-to-end artifact
+while keeping the privacy boundary explicit. The project asks whether MANTA can:
+\begin{enumerate}[leftmargin=*]
+  \item capture and aggregate application-attributed flow metadata without payload inspection,
+  \item support anomaly scoring across on-device, remote, privacy-student, and federated variants,
+  \item quantify the privacy properties of released traffic representations, and
+  \item distinguish those release-privacy properties from observer leakage visible in encrypted
+  traffic sequences.
+\end{enumerate}
+The evaluation follows the same artifact through detection, release-view reduction, leakage
+attacks, observer fingerprinting, and reproducibility packaging. That gives one place to compare
+utility, privacy, and operating constraints instead of treating them as separate experiments.
+
+\section{Research Questions}
+\begin{itemize}[leftmargin=*]
+  \item RQ1: To what extent can metadata-only flow windows support anomaly detection across a
+  heterogeneous public encrypted-traffic corpus under grouped, source-aware evaluation?
+  \item RQ2: How do on-device, remote, privacy-student, and federated variants compare in terms of
+  anomaly-detection quality and practical deployment readiness?
+  \item RQ3: What privacy-preserving properties do the reduced privacy views actually provide for
+  \emph{released} traffic representations?
+  \item RQ4: How different are those release-privacy properties from privacy against a passive
+  observer of encrypted traffic sequences?
+\end{itemize}
+
+\section{Contributions}
+\begin{itemize}[leftmargin=*]
+  \item An end-to-end implementation that connects Android metadata capture, backend triage, and a
+  reproducible machine-learning pipeline.
+  \item A public-only training and evaluation corpus assembled from Android malware, enterprise,
+  IoT, campus, and mobile-app traffic datasets with source/session-aware metadata carried through
+  the entire pipeline.
+  \item An evaluation protocol that compares on-device, remote, privacy-student, and
+  federated variants under grouped source-aware holdouts instead of optimistic random splits.
+  \item A split privacy methodology that distinguishes release privacy from observer leakage and
+  measures both explicitly through metadata leakage attacks and encrypted-flow sequence audits.
+  \item An empirical result showing that metadata coarsening can reduce exact app-ID leakage while
+  still leaving substantial app-family, destination-behavior, and observer leakage.
+\end{itemize}
+
+\section{Thesis Structure}
+Chapter 2 summarizes Android networking constraints, encrypted-traffic analysis, privacy
+fingerprinting, and privacy-aware learning literature. Chapter 3 defines the system architecture,
+trust boundaries, and the distinction between release privacy and observer privacy. Chapter 4
+details the implementation of the Android endpoint, backend adapter, privacy views, privacy
+student, and federated path. Chapter 5 presents the public-corpus evaluation methodology and
+results. Chapter 6 discusses privacy-preserving properties, ethics, and limitations. Chapter 7
+closes with future work.

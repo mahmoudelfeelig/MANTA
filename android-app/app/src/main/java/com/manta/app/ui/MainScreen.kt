@@ -7,6 +7,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -73,10 +75,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.manta.app.R
 import com.manta.app.core.model.AlertSeverity
 import com.manta.app.core.model.AnomalyAlert
 import com.manta.app.core.model.RuntimeHealth
@@ -208,8 +212,9 @@ fun MainScreen(
     onMarkAlertDangerous: (String) -> Unit,
     onMarkAlertFalsePositive: (String) -> Unit,
     onDismissAlertNeutral: (String) -> Unit,
-    currentAppThresholdProfile: (String) -> ThresholdProfile,
     currentAppProfile: (String) -> AppProfile,
+    currentAppThresholdOverrides: (ThresholdProfile) -> Map<String, ThresholdProfile>,
+    currentAppProfiles: () -> Map<String, AppProfile>,
     onSetAppThresholdOverride: (String, Double, Double, Double) -> Unit,
     onSetAppProfile: (String, AppProfile) -> Unit
 ) {
@@ -251,6 +256,7 @@ fun MainScreen(
     var appAlertsSeverityFilter by rememberSaveable { mutableStateOf(SeverityFilter.ALL) }
     var appAlertsSelectedModelFilter by rememberSaveable { mutableStateOf(ALL_MODELS_KEY) }
     var appAlertsSelectedShadowFilter by rememberSaveable { mutableStateOf(ALL_SHADOWS_KEY) }
+    var appAlertsPage by rememberSaveable { mutableStateOf(1) }
 
     LaunchedEffect(
         config.backendUrl,
@@ -390,17 +396,50 @@ fun MainScreen(
     }
 
     val packageManager = LocalContext.current.packageManager
-    val installedApps = remember(packageManager, appRescanNonce) {
-        loadInstalledApps(packageManager)
+    val baseThresholdProfile = remember(config.lowThreshold, config.mediumThreshold, config.highThreshold) {
+        ThresholdProfile(config.lowThreshold, config.mediumThreshold, config.highThreshold).normalize()
     }
-    val appInventory = buildAppInventory(
-        installedApps = installedApps,
-        alerts = alerts,
-        searchQuery = appsSearchQuery,
-        includeSystemApps = showSystemApps,
-        currentAppThresholdProfile = currentAppThresholdProfile,
-        currentAppProfile = currentAppProfile
-    )
+    val appThresholdOverrides = if (selectedTab == MainTab.APPS) {
+        currentAppThresholdOverrides(baseThresholdProfile)
+    } else {
+        emptyMap()
+    }
+    val appProfileOverrides = if (selectedTab == MainTab.APPS) {
+        currentAppProfiles()
+    } else {
+        emptyMap()
+    }
+    val installedApps = remember(packageManager, appRescanNonce, selectedTab) {
+        if (selectedTab == MainTab.APPS) {
+            loadInstalledApps(packageManager)
+        } else {
+            emptyList()
+        }
+    }
+    val appInventory = remember(
+        selectedTab,
+        installedApps,
+        alerts,
+        appsSearchQuery,
+        showSystemApps,
+        baseThresholdProfile,
+        appThresholdOverrides,
+        appProfileOverrides
+    ) {
+        if (selectedTab == MainTab.APPS) {
+            buildAppInventory(
+                installedApps = installedApps,
+                alerts = alerts,
+                searchQuery = appsSearchQuery,
+                includeSystemApps = showSystemApps,
+                baseThresholdProfile = baseThresholdProfile,
+                thresholdOverrides = appThresholdOverrides,
+                appProfileOverrides = appProfileOverrides
+            )
+        } else {
+            emptyList()
+        }
+    }
     val selectedAppEntry = remember(appInventory, selectedAppId) {
         appInventory.firstOrNull { it.appId == selectedAppId }
     }
@@ -468,8 +507,26 @@ fun MainScreen(
             }
         }
     }
+    val selectedAppTotalPages = remember(selectedAppFilteredAlerts) {
+        maxOf(1, (selectedAppFilteredAlerts.size + 19) / 20)
+    }
+    val currentAppAlertsPage = appAlertsPage.coerceIn(1, selectedAppTotalPages)
+    val selectedAppPagedAlerts = remember(selectedAppFilteredAlerts, currentAppAlertsPage) {
+        selectedAppFilteredAlerts.drop((currentAppAlertsPage - 1) * 20).take(20)
+    }
     LaunchedEffect(severityFilter, selectedModelFilter, selectedShadowFilter, searchQuery, alerts.size) {
         alertsPage = 1
+    }
+
+    LaunchedEffect(
+        selectedAppId,
+        appAlertsSeverityFilter,
+        appAlertsSelectedModelFilter,
+        appAlertsSelectedShadowFilter,
+        appAlertsSearchQuery,
+        selectedAppFilteredAlerts.size
+    ) {
+        appAlertsPage = 1
     }
 
     LaunchedEffect(selectedAppId) {
@@ -530,13 +587,23 @@ fun MainScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("MANTA Endpoint", style = MaterialTheme.typography.titleLarge)
-                        Text(
-                            "Policy v${config.policyVersion} • Retention ${config.retentionDays} days",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.logo),
+                            contentDescription = null,
+                            modifier = Modifier.size(36.dp)
                         )
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("MANTA Endpoint", style = MaterialTheme.typography.titleLarge)
+                            Text(
+                                "Policy v${config.policyVersion} • Retention ${config.retentionDays} days",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -585,7 +652,7 @@ fun MainScreen(
                 MainTab.APPS -> AppsView(
                     entries = appInventory,
                     selectedApp = selectedAppEntry,
-                    selectedAppAlerts = selectedAppFilteredAlerts,
+                    selectedAppAlerts = selectedAppPagedAlerts,
                     selectedAppAllFilteredAlerts = selectedAppFilteredAlerts,
                     statusMessage = statusMessage,
                     showSystemApps = showSystemApps,
@@ -607,10 +674,10 @@ fun MainScreen(
                     selectedAppShadowFilter = appAlertsSelectedShadowFilter,
                     onSelectedAppShadowFilterChange = { appAlertsSelectedShadowFilter = it },
                     onShowModelInfo = { modelInfoDialog = it },
-                    currentPage = 1,
-                    totalPages = 1,
-                    onPreviousPage = {},
-                    onNextPage = {},
+                    currentPage = currentAppAlertsPage,
+                    totalPages = selectedAppTotalPages,
+                    onPreviousPage = { appAlertsPage = (currentAppAlertsPage - 1).coerceAtLeast(1) },
+                    onNextPage = { appAlertsPage = (currentAppAlertsPage + 1).coerceAtMost(selectedAppTotalPages) },
                     onMarkDangerous = { alertId ->
                         alerts.find { it.id == alertId }?.let { queueUndoAction(it, AlertAction.DANGEROUS) }
                     },
@@ -802,9 +869,9 @@ private fun HomeView(
     onStartCapture: () -> Unit,
     onStopCapture: () -> Unit
 ) {
-    val highCount = alerts.count { it.severity == AlertSeverity.HIGH }
-    val mediumCount = alerts.count { it.severity == AlertSeverity.MEDIUM }
-    val openCount = alerts.count { it.triageStatus == TriageStatus.OPEN }
+    val highCount = remember(alerts) { alerts.count { it.severity == AlertSeverity.HIGH } }
+    val mediumCount = remember(alerts) { alerts.count { it.severity == AlertSeverity.MEDIUM } }
+    val openCount = remember(alerts) { alerts.count { it.triageStatus == TriageStatus.OPEN } }
 
     Column(
         modifier = Modifier
@@ -2684,13 +2751,10 @@ private fun AlertCard(
     currentProfile: AppProfile,
     onSetAppProfile: (AppProfile) -> Unit
 ) {
-    val packageManager = LocalContext.current.packageManager
     val container = alertContainerColor(alert.severity)
     val contentColor = alertContentColor(alert.severity)
     val accent = alertAccentColor(alert.severity)
-    val appLabel = remember(alert.appId) {
-        resolveInstalledAppLabel(alert.appId, packageManager) ?: displayAppName(alert.appId)
-    }
+    val appLabel = remember(alert.appId) { displayAppName(alert.appId) }
     val destinationSummary = formatDestinationSummary(alert = alert, privacyModeEnabled = privacyModeEnabled)
     val normalizedContributors = remember(alert.featureContributions, alert.responseScore) {
         normalizeContributors(alert.featureContributions, alert.responseScore)
@@ -3083,7 +3147,7 @@ private fun loadInstalledApps(packageManager: PackageManager?): List<InstalledAp
         return emptyList()
     }
     return runCatching {
-        packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+        packageManager.getInstalledApplications(0)
             .mapNotNull { appInfo ->
                 val packageName = appInfo.packageName?.trim().orEmpty()
                 if (packageName.isBlank()) {
@@ -3107,8 +3171,9 @@ private fun buildAppInventory(
     alerts: List<AnomalyAlert>,
     searchQuery: String,
     includeSystemApps: Boolean,
-    currentAppThresholdProfile: (String) -> ThresholdProfile,
-    currentAppProfile: (String) -> AppProfile
+    baseThresholdProfile: ThresholdProfile,
+    thresholdOverrides: Map<String, ThresholdProfile>,
+    appProfileOverrides: Map<String, AppProfile>
 ): List<AppInventoryEntry> {
     val alertsByApp = alerts.groupBy { it.appId }
     val installedById = installedApps.associateBy { it.appId }
@@ -3131,7 +3196,7 @@ private fun buildAppInventory(
             return@mapNotNull null
         }
 
-        val thresholdProfile = currentAppThresholdProfile(appId)
+        val thresholdProfile = thresholdOverrides[appId] ?: baseThresholdProfile
         AppInventoryEntry(
             appId = appId,
             label = label,
@@ -3144,12 +3209,20 @@ private fun buildAppInventory(
             thresholdLow = thresholdProfile.low,
             thresholdMedium = thresholdProfile.medium,
             thresholdHigh = thresholdProfile.high,
-            profile = currentAppProfile(appId)
+            profile = appProfileOverrides[appId] ?: defaultProfileForAppId(appId)
         )
     }.sortedWith(
         compareByDescending<AppInventoryEntry> { it.alertCount > 0 }
             .thenBy { it.label.lowercase() }
     )
+}
+
+private fun defaultProfileForAppId(appId: String): AppProfile {
+    return when {
+        appId.startsWith("com.android.") || appId.startsWith("android.") -> AppProfile.SYSTEM
+        appId in BROWSER_APP_IDS -> AppProfile.BROWSER
+        else -> AppProfile.DEFAULT
+    }
 }
 
 private fun AlertSeverity.rank(): Int = when (this) {

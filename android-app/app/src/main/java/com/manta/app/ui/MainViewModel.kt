@@ -19,6 +19,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
+private const val ALERT_REFRESH_INTERVAL_MILLIS = 15_000L
+private const val ALERT_REFRESH_LIMIT = 80
+
 class MainViewModel(
     private val container: AppContainer
 ) : ViewModel() {
@@ -41,7 +44,7 @@ class MainViewModel(
             while (true) {
                 refreshAlerts(isLoadMore = false)
                 _runtimeHealth.value = container.runtimeHealth()
-                delay(5_000)
+                delay(ALERT_REFRESH_INTERVAL_MILLIS)
             }
         }
         viewModelScope.launch {
@@ -192,7 +195,12 @@ class MainViewModel(
 
     fun appProfile(appId: String): AppProfile = container.settingsStore.getAppProfile(appId)
 
+    fun appProfilesSnapshot(): Map<String, AppProfile> = container.settingsStore.appProfilesSnapshot()
+
     fun thresholdProfile(appId: String): ThresholdProfile = container.settingsStore.getThresholdForApp(appId)
+
+    fun thresholdOverridesSnapshot(base: ThresholdProfile): Map<String, ThresholdProfile> =
+        container.settingsStore.thresholdOverridesSnapshot(base)
 
     fun setAppThresholdOverride(appId: String, low: Double, medium: Double, high: Double) {
         val normalized = ThresholdProfile(low = low, medium = medium, high = high).normalize()
@@ -312,7 +320,7 @@ class MainViewModel(
 
     fun loadMoreAlerts() {
         viewModelScope.launch {
-            refreshAlerts(isLoadMore = false)
+            refreshAlerts(isLoadMore = true)
         }
     }
 
@@ -376,10 +384,22 @@ class MainViewModel(
         }
         runCatching {
             val total = container.repository.alertCount()
-            val latest = container.repository.latestAlerts(limit = total.coerceIn(20, 250))
-            _alerts.value = latest
-            _alertsTotalCount.value = total
-            _hasMoreAlerts.value = total > latest.size
+            val requestedLimit = if (isLoadMore) {
+                (_alerts.value.size + ALERT_REFRESH_LIMIT).coerceAtMost(total.coerceAtLeast(ALERT_REFRESH_LIMIT))
+            } else {
+                ALERT_REFRESH_LIMIT.coerceAtMost(total.coerceAtLeast(20))
+            }
+            val latest = container.repository.latestAlerts(limit = requestedLimit)
+            if (_alerts.value != latest) {
+                _alerts.value = latest
+            }
+            if (_alertsTotalCount.value != total) {
+                _alertsTotalCount.value = total
+            }
+            val hasMore = total > latest.size
+            if (_hasMoreAlerts.value != hasMore) {
+                _hasMoreAlerts.value = hasMore
+            }
         }.onFailure { error ->
             _statusMessage.value = "Alert refresh failed: ${error.message}"
         }

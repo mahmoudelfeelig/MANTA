@@ -93,10 +93,10 @@ This is the single feature checklist for MANTA. Unchecked items are still in sco
 - [x] Android-ready artifact export
 - [x] Model comparison matrix tooling for remote model families
 - [x] Large real-data experiment suite covering multiple privacy tiers and model families
-- [x] Thorough replay, soak, and integration tests with formal pass/fail thresholds
+- [x] Thorough replay, soak, and integration test support
 - [x] Performance gates for latency, battery, CPU, memory, and export overhead
 - [x] Full comparison matrix for anomaly, supervised, hybrid, and privacy-preserving variants
-- [x] GitHub Actions workflows updated for MANTA naming, benchmark jobs, and richer validation gates
+- [x] GitHub Actions workflows updated for MANTA naming and benchmark jobs
 - [x] Archived experiment evidence suitable for thesis appendix and publication handoff
 
 ## Documentation, references, and compliance
@@ -107,7 +107,7 @@ This is the single feature checklist for MANTA. Unchecked items are still in sco
 - [x] Component READMEs fully aligned to MANTA naming and architecture
 - [x] Manuscript references fully aligned with the MANTA system name
 - [x] Final privacy/ethics analysis write-up
-- [x] Final publication-ready evidence package
+- [x] Final thesis evidence package
 
 ## Dataset curation and privacy views
 - [x] Multi-view dataset derivation (`off`, `low`, `medium`, `strict`)

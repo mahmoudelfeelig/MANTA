@@ -1,9 +1,17 @@
 package com.manta.app.data.db
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "raw_flow_records")
+@Entity(
+    tableName = "raw_flow_records",
+    indices = [
+        Index(value = ["appId", "timestampStartMillis"]),
+        Index(value = ["timestampStartMillis"]),
+        Index(value = ["timestampEndMillis"])
+    ]
+)
 data class RawFlowEntity(
     @PrimaryKey val id: String,
     val timestampStartMillis: Long,
@@ -41,7 +49,13 @@ data class RawFlowEntity(
     val destinationInsightJson: String = "{}"
 )
 
-@Entity(tableName = "feature_windows")
+@Entity(
+    tableName = "feature_windows",
+    indices = [
+        Index(value = ["appId", "windowEndMillis"]),
+        Index(value = ["windowEndMillis"])
+    ]
+)
 data class FeatureWindowEntity(
     @PrimaryKey val id: String,
     val appId: String,
@@ -90,7 +104,16 @@ data class FeatureWindowEntity(
     val processingCostMillis: Double = 0.0
 )
 
-@Entity(tableName = "anomaly_scores")
+@Entity(
+    tableName = "anomaly_scores",
+    indices = [
+        Index(value = ["createdAtMillis"]),
+        Index(value = ["triageStatus", "createdAtMillis"]),
+        Index(value = ["appId", "correlationKey", "lastSeenMillis"]),
+        Index(value = ["appId", "createdAtMillis"]),
+        Index(value = ["featureWindowId"])
+    ]
+)
 data class AnomalyScoreEntity(
     @PrimaryKey val id: String,
     val featureWindowId: String,
@@ -129,7 +152,13 @@ data class AnomalyScoreEntity(
     val lookalikeScore: Double = 0.0
 )
 
-@Entity(tableName = "export_queue")
+@Entity(
+    tableName = "export_queue",
+    indices = [
+        Index(value = ["exported", "nextAttemptMillis", "createdAtMillis"]),
+        Index(value = ["exported", "lastAttemptMillis"])
+    ]
+)
 data class ExportQueueEntity(
     @PrimaryKey(autoGenerate = true) val queueId: Long = 0,
     val eventType: String,
