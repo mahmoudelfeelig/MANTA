@@ -1,0 +1,65 @@
+\documentclass[12pt,a4paper]{report}
+
+\input{metadata}
+\input{preamble}
+
+\begin{document}
+
+\pagenumbering{gobble}
+\begin{titlepage}
+  \centering
+  {\Large \ThesisInstitution \par}
+  \vspace{1.5cm}
+  {\Large \ThesisProgram \par}
+  \vspace{1cm}
+  {\huge\bfseries \ThesisTitle \par}
+  \vspace{0.6cm}
+  {\Large \ThesisSubtitle \par}
+  \vfill
+  \begin{tabular}{@{}ll@{}}
+    Author: & \ThesisAuthor \\
+    Supervisor: & \ThesisSupervisor \\
+    Industry Partner: & \ThesisCompany \\
+    Submission Date: & \ThesisDate \\
+  \end{tabular}
+  \vfill
+\end{titlepage}
+
+\pagenumbering{roman}
+\input{chapters/00-abstract}
+\tableofcontents
+\listoftables
+\listoffigures
+
+\clearpage
+\pagenumbering{arabic}
+
+\chapter{Introduction}
+\input{chapters/01-introduction}
+
+\chapter{Background and Related Work}
+\input{chapters/02-background}
+
+\chapter{System Architecture and Design}
+\input{chapters/03-system-design}
+
+\chapter{Implementation}
+\input{chapters/04-implementation}
+
+\chapter{Experimental Methodology and Evaluation}
+\input{chapters/05-evaluation}
+
+\chapter{Privacy, Ethics, and Limitations}
+\input{chapters/06-privacy-ethics}
+
+\chapter{Conclusion and Future Work}
+\input{chapters/07-conclusion}
+
+\appendix
+\chapter{Reproducibility and Artifact Package}
+\input{appendices/a-reproducibility}
+
+\bibliographystyle{plainnat}
+\bibliography{bibliography/references}
+
+\end{document}

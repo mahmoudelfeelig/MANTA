@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">MANTA Endpoint</string>
+    <string name="notification_channel_name">Flow capture</string>
+    <string name="notification_channel_description">Capturing metadata-only network flows</string>
+    <string name="notification_title">Flow collection active</string>
+    <string name="notification_text">Metadata-only VPN capture is running</string>
+</resources>

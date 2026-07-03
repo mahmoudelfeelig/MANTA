@@ -1,0 +1,1807 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MANTA Admin Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d1318;
+      --panel: rgba(20, 30, 38, 0.92);
+      --panel-2: #1d2a33;
+      --surface: #243540;
+      --surface-soft: #1a252d;
+      --text: #eff6f8;
+      --muted: #9db3bf;
+      --accent: #62d8bb;
+      --accent-2: #f1c86a;
+      --danger: #ff7b7b;
+      --warn: #ffb562;
+      --border: rgba(255,255,255,0.08);
+      --shadow: 0 18px 50px rgba(0,0,0,0.26);
+      --radius: 18px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "SF Pro Display", "Helvetica Neue", sans-serif;
+      background: radial-gradient(circle at top, #1c2a33, var(--bg) 42%);
+      color: var(--text);
+    }
+    button, input, select, textarea { font: inherit; }
+    .wrap { max-width: 1560px; margin: 0 auto; padding: 22px; }
+    .hero, .panel {
+      background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01));
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+    .hero { padding: 22px; margin-bottom: 16px; }
+    .hero-top {
+      display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap;
+    }
+    .hero h1 { margin: 0 0 8px; font-size: 34px; }
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; }
+    .panel { padding: 18px; }
+    .panel.collapsed .collapsible-content { display: none; }
+    .panel-toggle {
+      min-width: 88px;
+      text-align: center;
+    }
+    .collapsible-content {
+      display: grid;
+      gap: 12px;
+    }
+    .panel h2, .panel h3 { margin: 0; }
+    .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
+    .span-12 { grid-column: span 12; }
+    .span-8 { grid-column: span 8; }
+    .span-7 { grid-column: span 7; }
+    .span-6 { grid-column: span 6; }
+    .span-5 { grid-column: span 5; }
+    .span-4 { grid-column: span 4; }
+    .span-3 { grid-column: span 3; }
+    .toolbar, .form-grid {
+      display: grid;
+      gap: 12px;
+      align-items: end;
+    }
+    .toolbar { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .form-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+    .dashboard-filter-grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 12px;
+      align-items: start;
+    }
+    .filter-group {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }
+    .filter-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .filter-chip {
+      position: relative;
+      display: inline-flex;
+    }
+    .filter-chip input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .filter-chip span {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface-soft);
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
+    }
+    .filter-chip span:hover {
+      transform: translateY(-1px);
+      color: var(--text);
+    }
+    .filter-chip input:checked + span {
+      color: #05211c;
+      border-color: rgba(98, 216, 187, 0.45);
+      background: linear-gradient(180deg, #54d4b5, #2ea78d);
+    }
+    label { display: grid; gap: 6px; }
+    .label { color: var(--muted); font-size: 12px; }
+    input, select, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      color: var(--text);
+      background: var(--surface-soft);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    textarea { min-height: 110px; resize: vertical; }
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 120ms ease, opacity 120ms ease;
+      background: linear-gradient(180deg, #54d4b5, #2ea78d);
+      color: #05211c;
+    }
+    button:hover { transform: translateY(-1px); }
+    button.secondary { background: var(--surface); color: var(--text); }
+    button.warn { background: linear-gradient(180deg, #f2bf66, #c8922f); color: #271900; }
+    button.danger { background: linear-gradient(180deg, #ff9c9c, #e45d5d); color: #2a0202; }
+    button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+    .stat {
+      background: var(--surface-soft);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 14px;
+      padding: 14px;
+    }
+    .stat .value { font-size: 28px; font-weight: 800; margin-top: 8px; }
+    .device-toolbar {
+      display: flex; gap: 10px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; margin-bottom: 12px;
+    }
+    .device-toolbar > div:first-child { flex: 1 1 440px; min-width: 0; }
+    .device-toolbar .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; flex: 1 1 320px; }
+    .device-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+      gap: 12px;
+      align-items: stretch;
+    }
+    .device-card {
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0.01));
+      padding: 14px;
+      display: grid;
+      gap: 8px;
+      cursor: pointer;
+      min-width: 0;
+    }
+    .device-card.selected { border-color: rgba(98, 216, 187, 0.7); box-shadow: 0 0 0 1px rgba(98, 216, 187, 0.35) inset; }
+    .device-card.dimmed { opacity: 0.72; }
+    .device-title {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: start;
+      gap: 10px;
+    }
+    .device-id {
+      font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      word-break: break-all;
+    }
+    .device-card .section-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    .chip {
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      font-size: 12px;
+    }
+    .chip.online { color: var(--accent); }
+    .chip.recent { color: var(--accent-2); }
+    .chip.stale { color: var(--muted); }
+    .chip.high { color: var(--danger); }
+    .split { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .list, .table-wrap { max-height: 720px; overflow: auto; }
+    .stack { display: grid; gap: 12px; }
+    .event-card, .alert-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 16px;
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }
+    .alert-card.primary {
+      border-color: rgba(98,216,187,0.22);
+      background: linear-gradient(180deg, rgba(98,216,187,0.08), rgba(255,255,255,0.02));
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .risk-danger { color: var(--danger); }
+    .risk-review { color: var(--warn); }
+    .risk-clean { color: var(--accent); }
+    .risk-muted { color: var(--muted); }
+    .alert-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .alert-actions button {
+      padding: 8px 12px;
+      font-size: 12px;
+    }
+    .event-card pre, .alert-card pre, pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 0;
+      padding: 12px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 12px;
+      font-size: 12px;
+      color: #d7e7ed;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align: top; }
+    th { position: sticky; top: 0; background: var(--panel); color: var(--muted); }
+    .section-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .danger-text { color: var(--danger); }
+    .success-text { color: var(--accent); }
+    .warn-text { color: var(--warn); }
+    .hint-box {
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: rgba(98, 216, 187, 0.08);
+      border: 1px solid rgba(98, 216, 187, 0.18);
+    }
+    details { border: 1px solid var(--border); border-radius: 14px; background: rgba(255,255,255,0.02); }
+    details summary { cursor: pointer; padding: 12px 14px; font-weight: 700; }
+    details > div { padding: 0 14px 14px; }
+    .json-help { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .mono { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace; }
+    .empty { color: var(--muted); padding: 16px 0; }
+    .pagination {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+    .pagination .page-info {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .device-display-name {
+      font-size: 16px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .device-subtitle {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 2px;
+      overflow-wrap: anywhere;
+    }
+    @media (max-width: 1200px) {
+      .toolbar, .stats, .summary-grid { grid-template-columns: 1fr 1fr; }
+      .dashboard-filter-grid { grid-template-columns: 1fr 1fr; }
+      .span-8, .span-7, .span-6, .span-5, .span-4, .span-3, .span-12 { grid-column: span 12; }
+    }
+    @media (max-width: 760px) {
+      .toolbar, .stats, .summary-grid, .dashboard-filter-grid { grid-template-columns: 1fr; }
+      .wrap { padding: 14px; }
+      .device-card .section-actions { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <div class="hero-top">
+        <div>
+          <h1>MANTA Admin Dashboard</h1>
+          <div class="muted">Single-place control for device selection, policy management, exported event inspection, alert review, queue state, and remote-assisted model management.</div>
+        </div>
+        <div class="section-actions">
+          <button id="refreshBtn">Refresh</button>
+          <button id="clearEventsBtn" class="secondary">Clear events</button>
+          <button id="clearAlertsBtn" class="secondary">Clear alerts</button>
+          <button id="purgeTestBtn" class="warn">Purge test/manual data</button>
+          <button id="logoutBtn" class="ghost">Logout</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-bottom:16px;">
+      <div class="device-toolbar">
+        <div>
+          <h2>Devices</h2>
+          <div class="muted small" id="selectionSummary">Loading devices…</div>
+          <div class="muted small">Select one or more devices once here. Policy, alert review, events, and model actions use the current primary device automatically when they need a single target.</div>
+        </div>
+        <div class="actions">
+          <label style="display:flex;align-items:center;gap:8px;padding:0 2px;">
+            <input id="selectAllDevices" type="checkbox" style="width:auto;" />
+            <span>All devices</span>
+          </label>
+          <button id="selectOnlineBtn" class="secondary">Select online</button>
+          <button id="clearDeviceSelectionBtn" class="secondary">Clear selected</button>
+          <button id="removeSelectedDevicesBtn" class="danger">Remove selected devices</button>
+        </div>
+      </div>
+      <div class="device-grid" id="deviceCards"></div>
+    </section>
+
+    <div class="grid">
+      <section class="panel span-12">
+        <div class="split" style="margin-bottom: 12px;">
+          <h2>Queue & health</h2>
+          <div class="muted small" id="healthNote">Waiting for backend health…</div>
+        </div>
+        <div class="stats" id="stats"></div>
+      </section>
+
+      <section class="panel span-12">
+        <div class="split" style="margin-bottom:12px;">
+            <h2>Alert Posture</h2>
+        </div>
+        <div class="summary-grid" id="alertSummary"></div>
+      </section>
+
+      <section class="panel span-12">
+        <div class="split" style="margin-bottom:12px;">
+          <div>
+            <h2>Dashboard filters</h2>
+            <div class="muted small">The same filter set applies to both Alerts and Recent exported events.</div>
+          </div>
+          <div class="section-actions">
+            <button id="applyDashboardFiltersBtn" class="secondary">Apply filters</button>
+            <button id="clearDashboardFiltersBtn" class="secondary">Clear filters</button>
+          </div>
+        </div>
+        <div class="dashboard-filter-grid">
+          <div class="filter-group span-3">
+            <span class="label">Severity</span>
+            <div class="filter-chip-row" id="severityFilterGroup">
+              <label class="filter-chip"><input type="checkbox" value="HIGH" /><span>High</span></label>
+              <label class="filter-chip"><input type="checkbox" value="MEDIUM" /><span>Medium</span></label>
+              <label class="filter-chip"><input type="checkbox" value="LOW" /><span>Low</span></label>
+            </div>
+          </div>
+          <div class="filter-group span-3">
+            <span class="label">Triage</span>
+            <div class="filter-chip-row" id="triageFilterGroup">
+              <label class="filter-chip"><input type="checkbox" value="OPEN" /><span>Open</span></label>
+              <label class="filter-chip"><input type="checkbox" value="INVESTIGATING" /><span>Investigating</span></label>
+              <label class="filter-chip"><input type="checkbox" value="RESOLVED" /><span>Resolved</span></label>
+              <label class="filter-chip"><input type="checkbox" value="FALSE_POSITIVE" /><span>False positive</span></label>
+            </div>
+          </div>
+          <div class="filter-group span-3">
+            <span class="label">Event type</span>
+            <div class="filter-chip-row" id="eventTypeFilterGroup">
+              <label class="filter-chip"><input type="checkbox" value="mobile_alert" /><span>Alerts</span></label>
+              <label class="filter-chip"><input type="checkbox" value="mobile_flow" /><span>Flows</span></label>
+            </div>
+          </div>
+          <div class="filter-group span-3">
+            <span class="label">Event status</span>
+            <div class="filter-chip-row" id="eventStatusFilterGroup">
+              <label class="filter-chip"><input type="checkbox" value="sent" /><span>Sent</span></label>
+              <label class="filter-chip"><input type="checkbox" value="pending" /><span>Pending</span></label>
+            </div>
+          </div>
+          <label class="span-3">
+            <span class="label">Model</span>
+            <input id="modelFilter" placeholder="remote_assisted" />
+          </label>
+          <label class="span-3">
+            <span class="label">ATT&CK</span>
+            <input id="attackFilter" placeholder="T1566" />
+          </label>
+          <label class="span-6">
+            <span class="label">Search</span>
+            <input id="searchFilter" placeholder="device, app, site, explanation, feature" />
+          </label>
+        </div>
+      </section>
+
+      <section class="panel span-12">
+        <div class="split" style="margin-bottom:12px;">
+          <div>
+            <h2>Alerts</h2>
+            <div class="muted small" id="alertsCount">0 items</div>
+          </div>
+          <div class="section-actions">
+            <button id="clearSectionAlertsBtn" class="secondary">Clear section alerts</button>
+            <button id="copyAlertsBtn" class="secondary">Copy JSON</button>
+          </div>
+        </div>
+        <div class="stack list" id="alerts"></div>
+        <div class="pagination">
+          <div class="page-info" id="alertsPageInfo">Page 1 of 1</div>
+          <div class="section-actions">
+            <button id="alertsPrevBtn" class="secondary">Previous</button>
+            <button id="alertsNextBtn" class="secondary">Next</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel span-12">
+        <div class="split" style="margin-bottom:12px;">
+          <div>
+            <h2>Recent exported events</h2>
+            <div class="muted small">Secondary evidence stream. Flow noise lives here; operator decisions live in Alerts.</div>
+          </div>
+          <div class="section-actions">
+            <button id="clearSectionEventsBtn" class="secondary">Clear section events</button>
+            <button id="copyEventsBtn" class="secondary">Copy JSON</button>
+          </div>
+        </div>
+        <div class="stack list" id="events"></div>
+        <div class="pagination">
+          <div class="page-info" id="eventsPageInfo">Page 1 of 1</div>
+          <div class="section-actions">
+            <button id="eventsPrevBtn" class="secondary">Previous</button>
+            <button id="eventsNextBtn" class="secondary">Next</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel span-6">
+        <div class="split" style="margin-bottom:12px;">
+          <h2>Incidents</h2>
+          <span class="muted small">Grouped correlated alerts</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Correlation key</th><th>Device</th><th>App</th><th>Alerts</th><th>Max</th><th>Latest</th></tr>
+            </thead>
+            <tbody id="incidents"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel span-6">
+        <div class="split" style="margin-bottom:12px;">
+          <h2>Quality summary</h2>
+          <span class="muted small">Data-quality warnings from stored alerts</span>
+        </div>
+        <pre id="quality">No quality data yet.</pre>
+      </section>
+
+      <section class="panel span-12">
+        <div class="split" style="margin-bottom:12px;">
+          <div>
+            <h2>Policy editor</h2>
+            <div class="muted small">Loads from the primary selected device. Saving applies to the selected devices, or to all known devices if “All devices” is enabled.</div>
+            <div class="muted small" id="policyDeviceHint">Primary device for policy load: none selected</div>
+          </div>
+          <div class="section-actions">
+            <button id="loadPolicyBtn" class="secondary">Load policy</button>
+            <button id="savePolicyBtn">Save policy</button>
+          </div>
+        </div>
+        <div class="hint-box" style="margin-bottom:12px;">
+          Policy covers the remotely managed app settings: capture, cloud sync, thresholds, detection and shadow model, theme, diagnostics, local data window, alert budget, drift threshold, tuning weights, protected-brand watchlist, and app profile overrides. Privacy mode remains local-only by design.
+        </div>
+        <div class="form-grid">
+          <label class="span-3">
+            <span class="label">Detection model</span>
+            <select id="policyDetectionModel">
+              <option value="ensemble_fusion">Fusion</option>
+              <option value="statistical">Statistical</option>
+              <option value="multivariate">Correlation</option>
+              <option value="sequence">Temporal transition</option>
+              <option value="local">Standard RF</option>
+              <option value="local_sensitive">High-recall RF</option>
+              <option value="local_quiet">Low-FPR RF</option>
+              <option value="local_balanced">Adaptive hybrid RF</option>
+              <option value="local_privacy">Privacy RF</option>
+              <option value="tflite">TFLite</option>
+              <option value="remote_assisted">Backend</option>
+            </select>
+          </label>
+          <label class="span-3">
+            <span class="label">Shadow model</span>
+            <select id="policyShadowModel">
+              <option value="">Disabled</option>
+              <option value="ensemble_fusion">Fusion</option>
+              <option value="statistical">Statistical</option>
+              <option value="multivariate">Correlation</option>
+              <option value="sequence">Temporal transition</option>
+              <option value="local">Standard RF</option>
+              <option value="local_sensitive">High-recall RF</option>
+              <option value="local_quiet">Low-FPR RF</option>
+              <option value="local_balanced">Adaptive hybrid RF</option>
+              <option value="local_privacy">Privacy RF</option>
+              <option value="tflite">TFLite</option>
+              <option value="remote_assisted">Backend</option>
+            </select>
+          </label>
+          <label class="span-2">
+            <span class="label">Theme</span>
+            <select id="policyThemeMode">
+              <option value="SYSTEM">System</option>
+              <option value="LIGHT">Light</option>
+              <option value="DARK">Dark</option>
+            </select>
+          </label>
+          <label class="span-2">
+            <span class="label">Capture enabled</span>
+            <select id="policyCaptureEnabled">
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+          <label class="span-2">
+            <span class="label">Export enabled</span>
+            <select id="policyExportEnabled">
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+
+          <label class="span-2"><span class="label">Low threshold</span><input id="policyLow" value="0.30" /></label>
+          <label class="span-2"><span class="label">Medium threshold</span><input id="policyMedium" value="0.60" /></label>
+          <label class="span-2"><span class="label">High threshold</span><input id="policyHigh" value="0.85" /></label>
+          <label class="span-2"><span class="label">Local data window</span><input id="policyRetention" value="30" /></label>
+          <label class="span-2"><span class="label">Alert budget</span><input id="policyBudget" value="12" /></label>
+          <label class="span-2"><span class="label">Drift threshold</span><input id="policyDrift" value="0.65" /></label>
+          <label class="span-2">
+            <span class="label">Debug mode</span>
+            <select id="policyDebugEnabled">
+              <option value="false">false</option>
+              <option value="true">true</option>
+            </select>
+          </label>
+        </div>
+
+        <details style="margin-top:14px;">
+          <summary>Fusion weights</summary>
+          <div class="form-grid">
+            <label class="span-3"><span class="label">Baseline</span><input id="fusionStat" value="0.28" /></label>
+            <label class="span-3"><span class="label">Correlation</span><input id="fusionMultivariate" value="0.20" /></label>
+            <label class="span-3"><span class="label">Timing</span><input id="fusionSequence" value="0.12" /></label>
+            <label class="span-3"><span class="label">On-device</span><input id="fusionLinear" value="0.16" /></label>
+            <label class="span-3"><span class="label">Experimental</span><input id="fusionTflite" value="0.12" /></label>
+            <label class="span-3"><span class="label">Cloud</span><input id="fusionRemote" value="0.12" /></label>
+            <label class="span-3"><span class="label">Beacon</span><input id="fusionBeacon" value="0.15" /></label>
+            <label class="span-3"><span class="label">Drift</span><input id="fusionDrift" value="0.10" /></label>
+            <label class="span-3"><span class="label">Reputation</span><input id="fusionReputation" value="0.18" /></label>
+            <label class="span-3"><span class="label">Quality</span><input id="fusionDataQuality" value="0.10" /></label>
+            <label class="span-3"><span class="label">Anomaly</span><input id="fusionResponseAnomaly" value="0.82" /></label>
+            <label class="span-3"><span class="label">Context</span><input id="fusionResponseContext" value="0.18" /></label>
+          </div>
+        </details>
+
+        <details style="margin-top:12px;">
+          <summary>Per-app overrides</summary>
+          <div class="stack">
+            <label>
+              <span class="label">Protected brands (one per line)</span>
+              <textarea id="policyProtectedBrands"></textarea>
+              <div class="json-help">These names drive local lookalike-domain detection on the phone and backend-side destination enrichment.</div>
+            </label>
+            <label>
+              <span class="label">App threshold overrides (JSON)</span>
+              <textarea id="policyThresholdOverrides">{}</textarea>
+              <div class="json-help">Example: {"com.android.chrome": {"low": 0.30, "medium": 0.72, "high": 0.92}}</div>
+            </label>
+            <label>
+              <span class="label">App profile overrides (JSON)</span>
+              <textarea id="policyAppProfiles">{}</textarea>
+              <div class="json-help">Example: {"com.android.chrome": "BROWSER", "com.google.android.youtube": "HIGH_CHURN"}</div>
+            </label>
+          </div>
+        </details>
+        <pre id="policyEditorOutput">No policy loaded yet.</pre>
+      </section>
+
+      <section class="panel span-12">
+        <div class="split" style="margin-bottom:12px;">
+          <div>
+            <h2>Cloud model control</h2>
+            <div class="muted small" id="remoteModelDeviceHint">Uses the primary selected device.</div>
+          </div>
+          <div class="section-actions">
+            <button id="loadModelBtn" class="secondary">Load model</button>
+            <button id="retrainModelBtn">Retrain model</button>
+          </div>
+        </div>
+        <div class="hint-box" style="margin-bottom:12px;">
+          Retraining updates the backend remote-assisted model for the primary selected device. Multiple cloud model families can coexist in the registry, and activating a different version changes the current remote scorer for that device. This affects <span class="mono">remote_assisted</span> directly and the remote contribution inside <span class="mono">ensemble_fusion</span>, while the local <span class="mono">multivariate</span> mode remains the covariance-aware on-device baseline. Live Android remote inference now includes the portable window features plus transport/header-side metadata such as TTL gap, TCP flag rates, TCP window mean, ACK timing, payload mean, load mean, and transport-metric availability.
+        </div>
+        <label style="display:grid; gap:6px; margin-bottom:12px; max-width:320px;">
+          <span class="label">Retrain / import family</span>
+          <select id="remoteModelFamily">
+            <option value="hybrid_dual_channel">hybrid_dual_channel</option>
+            <option value="logistic_regression">logistic_regression</option>
+            <option value="gradient_boosted_tree">gradient_boosted_tree</option>
+            <option value="mahalanobis_covariance">mahalanobis_covariance</option>
+          </select>
+        </label>
+        <pre id="remoteModel">No model loaded.</pre>
+        <details style="margin-top:12px;">
+          <summary>Import trained backend model JSON</summary>
+          <div class="stack">
+            <label>
+              <span class="label">Model JSON</span>
+              <textarea id="remoteModelImport" placeholder='Paste artifacts/backend/remote-assisted-model.json here'></textarea>
+            </label>
+            <div class="section-actions">
+              <button id="importModelBtn" class="secondary">Import and activate model</button>
+            </div>
+          </div>
+        </details>
+        <div class="grid" style="margin-top:12px;">
+          <section class="span-6">
+            <h3 style="margin-bottom:10px;">Model registry</h3>
+            <pre id="remoteRegistry">No versions loaded.</pre>
+          </section>
+          <section class="span-6">
+            <h3 style="margin-bottom:10px;">Training jobs</h3>
+            <pre id="remoteJobs">No jobs loaded.</pre>
+          </section>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const els = {
+      refreshBtn: document.getElementById("refreshBtn"),
+      clearEventsBtn: document.getElementById("clearEventsBtn"),
+      clearAlertsBtn: document.getElementById("clearAlertsBtn"),
+      purgeTestBtn: document.getElementById("purgeTestBtn"),
+      logoutBtn: document.getElementById("logoutBtn"),
+      selectAllDevices: document.getElementById("selectAllDevices"),
+      selectOnlineBtn: document.getElementById("selectOnlineBtn"),
+      clearDeviceSelectionBtn: document.getElementById("clearDeviceSelectionBtn"),
+      removeSelectedDevicesBtn: document.getElementById("removeSelectedDevicesBtn"),
+      selectionSummary: document.getElementById("selectionSummary"),
+      deviceCards: document.getElementById("deviceCards"),
+      healthNote: document.getElementById("healthNote"),
+      stats: document.getElementById("stats"),
+      alertSummary: document.getElementById("alertSummary"),
+      severityFilterGroup: document.getElementById("severityFilterGroup"),
+      triageFilterGroup: document.getElementById("triageFilterGroup"),
+      eventTypeFilterGroup: document.getElementById("eventTypeFilterGroup"),
+      eventStatusFilterGroup: document.getElementById("eventStatusFilterGroup"),
+      applyDashboardFiltersBtn: document.getElementById("applyDashboardFiltersBtn"),
+      clearDashboardFiltersBtn: document.getElementById("clearDashboardFiltersBtn"),
+      events: document.getElementById("events"),
+      clearSectionEventsBtn: document.getElementById("clearSectionEventsBtn"),
+      copyEventsBtn: document.getElementById("copyEventsBtn"),
+      eventsPageInfo: document.getElementById("eventsPageInfo"),
+      eventsPrevBtn: document.getElementById("eventsPrevBtn"),
+      eventsNextBtn: document.getElementById("eventsNextBtn"),
+      modelFilter: document.getElementById("modelFilter"),
+      attackFilter: document.getElementById("attackFilter"),
+      searchFilter: document.getElementById("searchFilter"),
+      clearSectionAlertsBtn: document.getElementById("clearSectionAlertsBtn"),
+      alerts: document.getElementById("alerts"),
+      alertsCount: document.getElementById("alertsCount"),
+      copyAlertsBtn: document.getElementById("copyAlertsBtn"),
+      alertsPageInfo: document.getElementById("alertsPageInfo"),
+      alertsPrevBtn: document.getElementById("alertsPrevBtn"),
+      alertsNextBtn: document.getElementById("alertsNextBtn"),
+      incidents: document.getElementById("incidents"),
+      quality: document.getElementById("quality"),
+      policyDeviceHint: document.getElementById("policyDeviceHint"),
+      loadPolicyBtn: document.getElementById("loadPolicyBtn"),
+      savePolicyBtn: document.getElementById("savePolicyBtn"),
+      policyDetectionModel: document.getElementById("policyDetectionModel"),
+      policyShadowModel: document.getElementById("policyShadowModel"),
+      policyThemeMode: document.getElementById("policyThemeMode"),
+      policyCaptureEnabled: document.getElementById("policyCaptureEnabled"),
+      policyExportEnabled: document.getElementById("policyExportEnabled"),
+      policyLow: document.getElementById("policyLow"),
+      policyMedium: document.getElementById("policyMedium"),
+      policyHigh: document.getElementById("policyHigh"),
+      policyRetention: document.getElementById("policyRetention"),
+      policyBudget: document.getElementById("policyBudget"),
+      policyDrift: document.getElementById("policyDrift"),
+      policyDebugEnabled: document.getElementById("policyDebugEnabled"),
+      fusionStat: document.getElementById("fusionStat"),
+      fusionMultivariate: document.getElementById("fusionMultivariate"),
+      fusionSequence: document.getElementById("fusionSequence"),
+      fusionLinear: document.getElementById("fusionLinear"),
+      fusionTflite: document.getElementById("fusionTflite"),
+      fusionRemote: document.getElementById("fusionRemote"),
+      fusionBeacon: document.getElementById("fusionBeacon"),
+      fusionDrift: document.getElementById("fusionDrift"),
+      fusionReputation: document.getElementById("fusionReputation"),
+      fusionDataQuality: document.getElementById("fusionDataQuality"),
+      fusionResponseAnomaly: document.getElementById("fusionResponseAnomaly"),
+      fusionResponseContext: document.getElementById("fusionResponseContext"),
+      policyProtectedBrands: document.getElementById("policyProtectedBrands"),
+      policyThresholdOverrides: document.getElementById("policyThresholdOverrides"),
+      policyAppProfiles: document.getElementById("policyAppProfiles"),
+      policyEditorOutput: document.getElementById("policyEditorOutput"),
+      remoteModelDeviceHint: document.getElementById("remoteModelDeviceHint"),
+      remoteModelFamily: document.getElementById("remoteModelFamily"),
+      loadModelBtn: document.getElementById("loadModelBtn"),
+      retrainModelBtn: document.getElementById("retrainModelBtn"),
+      remoteModel: document.getElementById("remoteModel"),
+      remoteRegistry: document.getElementById("remoteRegistry"),
+      remoteJobs: document.getElementById("remoteJobs")
+      ,remoteModelImport: document.getElementById("remoteModelImport")
+      ,importModelBtn: document.getElementById("importModelBtn")
+    };
+
+    const state = {
+      devices: [],
+      selectedIds: new Set(),
+      selectAll: false,
+      primaryId: null,
+      currentPolicyVersion: 1,
+      allEvents: [],
+      filteredEvents: [],
+      allAlerts: [],
+      filteredAlerts: [],
+      expandedEventIds: new Set(),
+      expandedAlertIds: new Set(),
+      eventsPage: 1,
+      alertsPage: 1,
+      pageSize: 20,
+      lastEvents: [],
+      lastAlerts: []
+    };
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        credentials: "same-origin",
+        headers: {
+          ...(options.body ? { "Content-Type": "application/json" } : {}),
+          ...(options.headers || {})
+        },
+        ...options
+      });
+      const isJson = response.headers.get("content-type")?.includes("application/json");
+      const payload = isJson ? await response.json() : await response.text();
+      if (!response.ok) {
+        const detail = typeof payload === "object" && payload ? (payload.detail || JSON.stringify(payload)) : String(payload);
+        throw new Error(detail || `${response.status} ${response.statusText}`);
+      }
+      return payload;
+    }
+
+    function primaryDeviceId() {
+      if (state.selectAll) {
+        if (state.primaryId && state.devices.some(device => device.device_id_pseudo === state.primaryId)) {
+          return state.primaryId;
+        }
+        return state.devices[0]?.device_id_pseudo || null;
+      }
+      if (state.primaryId && state.selectedIds.has(state.primaryId)) {
+        return state.primaryId;
+      }
+      return Array.from(state.selectedIds)[0] || null;
+    }
+
+    function selectedDeviceIds() {
+      return state.selectAll ? state.devices.map(device => device.device_id_pseudo) : Array.from(state.selectedIds);
+    }
+
+    function deviceQuery(params = new URLSearchParams()) {
+      const selected = selectedDeviceIds();
+      if (!state.selectAll && selected.length) {
+        params.set("device_ids", selected.join(","));
+      }
+      return params;
+    }
+
+    function policyScopePayload() {
+      const selected = selectedDeviceIds();
+      if (state.selectAll) {
+        return { scope: "all_devices", device_ids: [] };
+      }
+      if (selected.length === 1) {
+        return { scope: "device", device_ids: selected };
+      }
+      return { scope: "selected_devices", device_ids: selected };
+    }
+
+    function cardStat(label, value) {
+      return `<div class="stat"><div class="muted small">${label}</div><div class="value">${value}</div></div>`;
+    }
+
+    function bindDetailsState(container, kind) {
+      const targetSet = kind === "event" ? state.expandedEventIds : state.expandedAlertIds;
+      container.querySelectorAll(`details[data-kind="${kind}"]`).forEach(node => {
+        const id = node.getAttribute("data-id") || "";
+        node.open = targetSet.has(id);
+        node.addEventListener("toggle", () => {
+          if (node.open) {
+            targetSet.add(id);
+          } else {
+            targetSet.delete(id);
+          }
+        });
+      });
+    }
+
+    function hasExpandedDetails() {
+      return state.expandedEventIds.size > 0 || state.expandedAlertIds.size > 0;
+    }
+
+    const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
+    const epochFormatter = new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+      timeZone: browserTimeZone
+    });
+
+    function formatEpoch(epoch) {
+      if (!epoch) return "-";
+      return `${epochFormatter.format(new Date(epoch * 1000))} (${browserTimeZone})`;
+    }
+
+    function shortId(value) {
+      if (!value) return "-";
+      return value.length > 18 ? `${value.slice(0, 10)}…${value.slice(-6)}` : value;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function displayDeviceName(device) {
+      return device?.device_name || device?.display_name || device?.observed_name || device?.device_label || device?.device_id_pseudo || "Unknown device";
+    }
+
+    function paginate(items, page) {
+      const pageSize = state.pageSize;
+      const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+      const safePage = Math.min(Math.max(1, page), totalPages);
+      const start = (safePage - 1) * pageSize;
+      return {
+        pageItems: items.slice(start, start + pageSize),
+        page: safePage,
+        totalPages
+      };
+    }
+
+    function selectedFilterValues(container) {
+      if (!container) {
+        return [];
+      }
+      return Array.from(container.querySelectorAll('input[type="checkbox"]:checked'))
+        .map(input => String(input.value || "").trim())
+        .filter(Boolean);
+    }
+
+    function clearFilterValues(container) {
+      if (!container) {
+        return;
+      }
+      container.querySelectorAll('input[type="checkbox"]').forEach(input => {
+        input.checked = false;
+      });
+    }
+
+    function applyDashboardFiltersAndRender({ resetPages = false } = {}) {
+      if (resetPages) {
+        state.eventsPage = 1;
+        state.alertsPage = 1;
+      }
+      renderEvents(applyEventFilters(state.allEvents));
+      renderAlerts(applyAlertFilters(state.allAlerts));
+    }
+
+    function renderSelectionSummary() {
+      const selected = selectedDeviceIds();
+      const primary = state.devices.find(device => device.device_id_pseudo === primaryDeviceId());
+      if (!state.devices.length) {
+        els.selectionSummary.textContent = "No known devices yet. Start the phone app, export events, or sync policy once to register a device.";
+        return;
+      }
+      if (state.selectAll) {
+        els.selectionSummary.textContent = `All ${state.devices.length} known devices selected. Primary device: ${displayDeviceName(primary)}.`;
+        return;
+      }
+      if (!selected.length) {
+        els.selectionSummary.textContent = "No devices selected. Choose one or more devices above, or enable All devices.";
+        return;
+      }
+      els.selectionSummary.textContent = `${selected.length} device(s) selected. Primary device: ${displayDeviceName(primary)}.`;
+    }
+
+    function renderDevices() {
+      renderSelectionSummary();
+      const primaryDevice = state.devices.find(device => device.device_id_pseudo === primaryDeviceId()) || null;
+      const primaryName = primaryDevice ? displayDeviceName(primaryDevice) : "none selected";
+      els.remoteModelDeviceHint.textContent = `Primary device for model control: ${primaryName}`;
+      els.policyDeviceHint.textContent = `Primary device for policy load: ${primaryName}`;
+      if (!state.devices.length) {
+        els.deviceCards.innerHTML = `<div class="empty">No devices registered yet.</div>`;
+        return;
+      }
+      els.deviceCards.innerHTML = state.devices.map(device => {
+        const isSelected = state.selectAll || state.selectedIds.has(device.device_id_pseudo);
+        const isPrimary = primaryDeviceId() === device.device_id_pseudo;
+        const visibleName = displayDeviceName(device);
+        return `
+          <div class="device-card ${isSelected ? "selected" : "dimmed"}" data-device-id="${device.device_id_pseudo}">
+            <div class="device-title">
+              <div>
+                <div class="device-display-name">${escapeHtml(visibleName)}</div>
+                <div class="device-subtitle mono">${escapeHtml(device.device_id_pseudo)}</div>
+              </div>
+              <div class="chips">
+                ${isPrimary ? `<span class="chip online">primary</span>` : ""}
+                <span class="chip ${device.status_label}">${device.status_label}</span>
+              </div>
+            </div>
+            ${device.observed_name && device.display_name ? `<div class="muted small">Observed device label: ${escapeHtml(device.observed_name)}</div>` : ""}
+            <div class="chips">
+              <span class="chip">events ${device.total_events}</span>
+              <span class="chip">activity ${device.activity_source}</span>
+              <span class="chip ${device.online ? "online" : device.status_label}">${device.online ? "online" : `${device.minutes_since_seen ?? "?"} min ago`}</span>
+              ${device.has_policy ? `<span class="chip online">policy</span>` : `<span class="chip">no policy</span>`}
+            </div>
+            <div class="muted small">Last activity ${formatEpoch(device.last_activity_epoch)}</div>
+            <div class="muted small">Last policy ${formatEpoch(device.last_policy_epoch)}</div>
+            <div class="section-actions">
+              <button class="secondary make-primary-btn" data-device-id="${device.device_id_pseudo}" type="button">Make primary</button>
+              <button class="secondary rename-device-btn" data-device-id="${device.device_id_pseudo}" type="button">Rename</button>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      document.querySelectorAll(".device-card").forEach(card => {
+        card.addEventListener("click", (event) => {
+          const deviceId = card.getAttribute("data-device-id");
+          if (!deviceId) return;
+          if (event.target instanceof HTMLElement && event.target.classList.contains("make-primary-btn")) {
+            state.primaryId = deviceId;
+            renderDevices();
+            return;
+          }
+          if (event.target instanceof HTMLElement && event.target.classList.contains("rename-device-btn")) {
+            renameDevice(deviceId).catch(showGlobalError);
+            return;
+          }
+          els.selectAllDevices.checked = false;
+          state.selectAll = false;
+          if (state.selectedIds.has(deviceId)) {
+            state.selectedIds.delete(deviceId);
+            if (state.primaryId === deviceId) {
+              state.primaryId = Array.from(state.selectedIds)[0] || null;
+            }
+          } else {
+            state.selectedIds.add(deviceId);
+            state.primaryId = deviceId;
+          }
+          renderDevices();
+          refreshData().catch(showGlobalError);
+        });
+      });
+    }
+
+    async function renameDevice(deviceId) {
+      const device = state.devices.find(item => item.device_id_pseudo === deviceId);
+      if (!device) {
+        throw new Error("Device not found.");
+      }
+      const currentName = device.display_name || device.observed_name || device.device_id_pseudo;
+      const nextName = window.prompt("Set a dashboard display name for this device. Leave blank to clear the custom name.", currentName);
+      if (nextName === null) {
+        return;
+      }
+      await api(`/api/v1/devices/${encodeURIComponent(deviceId)}/display-name`, {
+        method: "PUT",
+        body: JSON.stringify({ display_name: nextName.trim() || null })
+      });
+      await loadDevices();
+    }
+
+    function renderHealth(health) {
+      const queue = health.queue || {};
+      els.stats.innerHTML = [
+        cardStat("Pending", queue.pending ?? 0),
+        cardStat("Sent", queue.sent ?? 0),
+        cardStat("Dead letter", queue.dead_letter ?? 0),
+        cardStat("Alerts", queue.alerts ?? 0),
+        cardStat("Policies", queue.policies ?? 0),
+        cardStat("Configured warnings", (health.config_warnings || []).length)
+      ].join("");
+      const warnings = (health.config_warnings || []).join(" | ");
+      els.healthNote.textContent = warnings || `Wazuh ${health.wazuh_configured ? "configured" : "off"} • Resistine ${health.resistine_configured ? "configured" : "off"}`;
+    }
+
+    function classifyAlert(alert) {
+      const triage = String(alert.triage_status || "OPEN");
+      const severity = String(alert.severity || "LOW");
+      if (triage === "FALSE_POSITIVE") return { label: "False positive", cls: "risk-muted" };
+      if (triage === "RESOLVED") return { label: "Confirmed dangerous", cls: "risk-danger" };
+      if (triage === "INVESTIGATING") return { label: "Under investigation", cls: "risk-review" };
+      if (severity === "HIGH") return { label: "Dangerous", cls: "risk-danger" };
+      if (severity === "MEDIUM") return { label: "Needs review", cls: "risk-review" };
+      return { label: "Informational", cls: "risk-clean" };
+    }
+
+    function alertReasonSummary(alert) {
+      const raw = String(alert.explanation || "").trim();
+      if (!raw) return "No explanation provided.";
+      const withoutSuppression = raw.split(" Suppression:")[0].trim();
+      const beforeContributors = withoutSuppression.split("Top contributors:")[0].trim();
+      if (beforeContributors) {
+        return beforeContributors;
+      }
+      if (raw.startsWith("Top contributors:")) {
+        return "Feature pattern anomaly detected.";
+      }
+      return raw;
+    }
+
+    function renderAlertSummary(items) {
+      const dangerous = items.filter(alert => classifyAlert(alert).label === "Dangerous" || classifyAlert(alert).label === "Confirmed dangerous").length;
+      const review = items.filter(alert => classifyAlert(alert).label === "Needs review" || classifyAlert(alert).label === "Under investigation").length;
+      const informational = items.filter(alert => classifyAlert(alert).label === "Informational").length;
+      const falsePositive = items.filter(alert => String(alert.triage_status || "") === "FALSE_POSITIVE").length;
+      const open = items.filter(alert => String(alert.triage_status || "OPEN") === "OPEN").length;
+      const incidents = new Set(items.map(alert => alert.correlation_key).filter(Boolean)).size;
+      els.alertSummary.innerHTML = [
+        cardStat("Dangerous", dangerous),
+        cardStat("Needs review", review),
+        cardStat("Informational", informational),
+        cardStat("False positive", falsePositive),
+        cardStat("Open triage", open),
+        cardStat("Incidents", incidents)
+      ].join("");
+    }
+
+    function eventSummary(payload) {
+      if (!payload) return "No payload";
+      if (payload.event_type === "mobile_flow") {
+        const site = payload.site_hint || (payload.dst_port ? `port ${payload.dst_port}` : "no site hint");
+        return `${payload.app_id} • ${payload.protocol} • ${site} • ↑${payload.bytes_out ?? 0} ↓${payload.bytes_in ?? 0}`;
+      }
+      if (payload.event_type === "mobile_alert") {
+        return `${payload.app_id} • ${payload.severity} • ${payload.source_model}${payload.site_hint ? ` • ${payload.site_hint}` : ""}`;
+      }
+      return JSON.stringify(payload);
+    }
+
+    function alertsFromEvents(items) {
+      return items
+        .filter(item => item.event_type === "mobile_alert" && item.payload)
+        .map(item => {
+          const payload = { ...item.payload };
+          if (typeof payload.top_features === "string") {
+            try {
+              payload.top_features = JSON.parse(payload.top_features);
+            } catch {
+              payload.top_features = [];
+            }
+          }
+          if (!Array.isArray(payload.top_features)) {
+            payload.top_features = [];
+          }
+          if (typeof payload.data_quality_warnings === "string") {
+            try {
+              payload.data_quality_warnings = JSON.parse(payload.data_quality_warnings);
+            } catch {
+              payload.data_quality_warnings = [];
+            }
+          }
+          if (!Array.isArray(payload.data_quality_warnings)) {
+            payload.data_quality_warnings = [];
+          }
+          return payload;
+        });
+    }
+
+    function renderEvents(items) {
+      state.filteredEvents = items;
+      const { pageItems, page, totalPages } = paginate(items, state.eventsPage);
+      state.eventsPage = page;
+      state.lastEvents = pageItems;
+      els.eventsPageInfo.textContent = `Page ${page} of ${totalPages} • ${items.length} item(s)`;
+      els.eventsPrevBtn.disabled = page <= 1;
+      els.eventsNextBtn.disabled = page >= totalPages;
+      if (!pageItems.length) {
+        els.events.innerHTML = `<div class="empty">No exported events for the current device selection and filters.</div>`;
+        return;
+      }
+      els.events.innerHTML = pageItems.map(item => {
+        const device = state.devices.find(entry => entry.device_id_pseudo === (item.payload?.device_id_pseudo || ""));
+        const deviceName = displayDeviceName(device || item.payload || {});
+        return `
+        <div class="event-card">
+          <div class="split" style="margin-bottom:8px;">
+            <strong>${item.event_type}</strong>
+            <div class="chips">
+              <span class="chip">${escapeHtml(deviceName)}</span>
+              <span class="chip ${item.status}">${item.status}</span>
+              <span class="chip">attempts ${item.attempts}</span>
+              <span class="chip">${formatEpoch(item.updated_epoch)}</span>
+            </div>
+          </div>
+          <div>${escapeHtml(eventSummary(item.payload))}</div>
+          ${item.last_error ? `<div class="danger-text small" style="margin-top:8px;">Last error: ${item.last_error}</div>` : ""}
+          <details data-kind="event" data-id="${escapeHtml(item.event_id)}" style="margin-top:10px;"><summary>Raw payload</summary><div><pre>${JSON.stringify(item.payload, null, 2)}</pre></div></details>
+        </div>
+      `;
+      }).join("");
+      bindDetailsState(els.events, "event");
+    }
+
+    function renderAlertFilterCounts(_items) {
+      return;
+    }
+
+    function renderAlerts(items) {
+      state.filteredAlerts = items;
+      renderAlertSummary(items);
+      renderAlertFilterCounts(items);
+      const { pageItems, page, totalPages } = paginate(items, state.alertsPage);
+      state.alertsPage = page;
+      state.lastAlerts = pageItems;
+      els.alertsCount.textContent = `${items.length} item(s)`;
+      els.alertsPageInfo.textContent = `Page ${page} of ${totalPages} • ${items.length} item(s)`;
+      els.alertsPrevBtn.disabled = page <= 1;
+      els.alertsNextBtn.disabled = page >= totalPages;
+      if (!pageItems.length) {
+        els.alerts.innerHTML = `<div class="empty">No alerts match the current filters. If the phone has local alerts but none appear here yet, enable backend export in the app and use Send queued.</div>`;
+        return;
+      }
+      els.alerts.innerHTML = pageItems.map(alert => {
+        const device = state.devices.find(entry => entry.device_id_pseudo === alert.device_id_pseudo);
+        const deviceName = displayDeviceName(device || alert);
+        const risk = classifyAlert(alert);
+        const reason = alertReasonSummary(alert);
+        const mitre = Array.isArray(alert.mitre_techniques) ? alert.mitre_techniques : [];
+        return `
+        <div class="alert-card ${risk.cls === 'risk-danger' ? 'primary' : ''}">
+          <div class="split" style="margin-bottom:8px;">
+            <div>
+              <strong>${escapeHtml(alert.app_id)}</strong>
+              <div class="muted small">${escapeHtml(deviceName)}${alert.site_hint ? ` • ${escapeHtml(alert.site_hint)}` : ""}</div>
+            </div>
+            <div class="chips">
+              <span class="chip ${risk.cls}">${risk.label}</span>
+              <span class="chip ${String(alert.severity || "").toLowerCase()}">${alert.severity}</span>
+              <span class="chip">${alert.triage_status}</span>
+              <span class="chip">${alert.source_model}</span>
+            </div>
+          </div>
+          <div class="chips" style="margin-bottom:8px;">
+            <span class="chip">response ${Number(alert.response_score ?? alert.anomaly_score ?? 0).toFixed(3)}</span>
+            <span class="chip">anomaly ${Number(alert.base_anomaly_score ?? alert.anomaly_score ?? 0).toFixed(3)}</span>
+            <span class="chip">context ${Number(alert.context_score ?? 0).toFixed(3)}</span>
+            <span class="chip">confidence ${Math.round(Number(alert.confidence ?? 0) * 100)}%</span>
+            ${alert.destination_identity ? `<span class="chip">${escapeHtml(alert.destination_identity)}</span>` : ""}
+            ${Number(alert.lookalike_score ?? 0) > 0 ? `<span class="chip warn-text">lookalike ${Number(alert.lookalike_score).toFixed(2)}</span>` : ""}
+          </div>
+          <div class="muted small">${escapeHtml(reason)}</div>
+          <div class="chips" style="margin:10px 0;">
+            ${(alert.top_features || []).slice(0, 4).map(feature => `<span class="chip">${escapeHtml(feature)}</span>`).join("")}
+            ${mitre.map(technique => `<span class="chip warn-text">${escapeHtml(technique)}</span>`).join("")}
+          </div>
+          <div class="alert-actions">
+            <button class="secondary alert-triage-btn" data-alert-id="${escapeHtml(alert.alert_id || alert.id)}" data-status="INVESTIGATING" type="button">Investigating</button>
+            <button class="warn alert-triage-btn" data-alert-id="${escapeHtml(alert.alert_id || alert.id)}" data-status="RESOLVED" type="button">Dangerous</button>
+            <button class="secondary alert-triage-btn" data-alert-id="${escapeHtml(alert.alert_id || alert.id)}" data-status="FALSE_POSITIVE" type="button">False positive</button>
+          </div>
+          <details data-kind="alert" data-id="${escapeHtml(alert.alert_id || alert.id)}"><summary>Alert JSON</summary><div><pre>${JSON.stringify(alert, null, 2)}</pre></div></details>
+        </div>
+      `;
+      }).join("");
+      bindDetailsState(els.alerts, "alert");
+      els.alerts.querySelectorAll(".alert-triage-btn").forEach(button => {
+        button.addEventListener("click", async () => {
+          const alertId = button.getAttribute("data-alert-id");
+          const nextStatus = button.getAttribute("data-status");
+          if (!alertId || !nextStatus) return;
+          try {
+            await api(`/api/v1/alerts/${encodeURIComponent(alertId)}/triage`, {
+              method: "PATCH",
+              body: JSON.stringify({ status: nextStatus, note: "" })
+            });
+            await refreshData();
+          } catch (error) {
+            showGlobalError(error);
+          }
+        });
+      });
+    }
+
+    function renderIncidents(items) {
+      if (!items.length) {
+        els.incidents.innerHTML = `<tr><td colspan="6" class="muted">No incidents found.</td></tr>`;
+        return;
+      }
+      els.incidents.innerHTML = items.map(item => `
+        <tr>
+          <td class="mono">${item.correlation_key}</td>
+          <td class="mono">${item.device_id_pseudo || "-"}</td>
+          <td>${item.app_id}</td>
+          <td>${item.alert_count}</td>
+          <td>${item.max_severity}</td>
+          <td>${formatEpoch(item.latest_seen_epoch)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function applyEventFilters(items) {
+      const eventTypeFilters = selectedFilterValues(els.eventTypeFilterGroup);
+      const eventStatusFilters = selectedFilterValues(els.eventStatusFilterGroup);
+      const severityFilters = selectedFilterValues(els.severityFilterGroup);
+      const triageFilters = selectedFilterValues(els.triageFilterGroup);
+      const modelNeedle = els.modelFilter.value.trim().toLowerCase();
+      const searchNeedle = els.searchFilter.value.trim().toLowerCase();
+      return items.filter(item => {
+        const payload = item.payload || {};
+        if (eventTypeFilters.length && !eventTypeFilters.includes(String(item.event_type || ""))) {
+          return false;
+        }
+        if (eventStatusFilters.length && !eventStatusFilters.includes(String(item.status || ""))) {
+          return false;
+        }
+        if (severityFilters.length) {
+          const severity = String(payload.severity || "").toUpperCase();
+          if (!severity || !severityFilters.includes(severity)) {
+            return false;
+          }
+        }
+        if (triageFilters.length) {
+          const triage = String(payload.triage_status || "").toUpperCase();
+          if (!triage || !triageFilters.includes(triage)) {
+            return false;
+          }
+        }
+        if (modelNeedle) {
+          const sourceModel = String(payload.source_model || "").toLowerCase();
+          if (!sourceModel.includes(modelNeedle)) {
+            return false;
+          }
+        }
+        if (!searchNeedle) {
+          return true;
+        }
+        const haystack = [
+          item.event_id,
+          item.event_type,
+          item.status,
+          payload.device_id_pseudo,
+          payload.app_id,
+          payload.site_hint,
+          payload.destination_identity,
+          payload.explanation,
+          payload.source_model,
+          ...(Array.isArray(payload.mitre_techniques) ? payload.mitre_techniques : []),
+          ...(Array.isArray(payload.threat_tags) ? payload.threat_tags : []),
+          ...(Array.isArray(payload.top_features) ? payload.top_features : [])
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(searchNeedle);
+      });
+    }
+
+    function applyAlertFilters(items) {
+      const severityFilters = selectedFilterValues(els.severityFilterGroup);
+      const triageFilters = selectedFilterValues(els.triageFilterGroup);
+      const eventTypeFilters = selectedFilterValues(els.eventTypeFilterGroup);
+      const modelNeedle = els.modelFilter.value.trim().toLowerCase();
+      const attackNeedle = els.attackFilter.value.trim().toLowerCase();
+      const searchNeedle = els.searchFilter.value.trim().toLowerCase();
+      return items.filter(alert => {
+        if (eventTypeFilters.length && !eventTypeFilters.includes("mobile_alert")) {
+          return false;
+        }
+        if (severityFilters.length && !severityFilters.includes(String(alert.severity || "").toUpperCase())) {
+          return false;
+        }
+        if (triageFilters.length && !triageFilters.includes(String(alert.triage_status || "").toUpperCase())) {
+          return false;
+        }
+        if (modelNeedle && !String(alert.source_model || "").toLowerCase().includes(modelNeedle)) {
+          return false;
+        }
+        if (attackNeedle) {
+          const techniques = Array.isArray(alert.mitre_techniques) ? alert.mitre_techniques.map(item => String(item).toLowerCase()) : [];
+          if (!techniques.some(item => item.includes(attackNeedle))) {
+            return false;
+          }
+        }
+        if (!searchNeedle) {
+          return true;
+        }
+        const haystack = [
+          alert.device_id_pseudo,
+          alert.app_id,
+          alert.site_hint,
+          alert.destination_identity,
+          alert.explanation,
+          alert.source_model,
+          ...(alert.mitre_techniques || []),
+          ...(alert.threat_tags || []),
+          ...(alert.top_features || [])
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(searchNeedle);
+      });
+    }
+
+    function safeParseJson(label, raw, fallback = {}) {
+      const source = String(raw || "").trim();
+      if (!source) return fallback;
+      try {
+        const parsed = JSON.parse(source);
+        if (parsed && typeof parsed === "object") {
+          return parsed;
+        }
+        throw new Error(`${label} must be a JSON object.`);
+      } catch (error) {
+        throw new Error(`${label}: ${error.message}`);
+      }
+    }
+
+    function showGlobalError(error) {
+      const message = error instanceof Error ? error.message : String(error);
+      els.policyEditorOutput.textContent = `Error: ${message}`;
+      els.remoteModel.textContent = `Error: ${message}`;
+    }
+
+    function formatNumber(value, digits = 3) {
+      return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "-";
+    }
+
+    function summarizeRemoteModelPayload(payload) {
+      const model = payload?.model || {};
+      const report = model?.training_report || payload?.training_report || {};
+      const metrics = report?.metrics || {};
+      const lines = [
+        `family: ${model?.model_family || model?.model_type || payload?.family || "unknown"}`,
+        `version: ${model?.version ?? "-"}`,
+        `recommended_threshold: ${formatNumber(model?.recommended_threshold ?? model?.meta_threshold)}`,
+        `f1: ${formatNumber(metrics?.f1)}`,
+        `pr_auc: ${formatNumber(metrics?.pr_auc)}`,
+        `roc_auc: ${formatNumber(metrics?.roc_auc)}`,
+        `ece: ${formatNumber(metrics?.ece)}`,
+        `brier_score: ${formatNumber(metrics?.brier_score)}`,
+        `split: ${metrics?.split || "-"}`,
+      ];
+      if (metrics?.threshold_stability_std !== undefined) {
+        lines.push(`threshold_stability_std: ${formatNumber(metrics?.threshold_stability_std)}`);
+      }
+      if (metrics?.per_source_metrics) {
+        lines.push(`per_source_groups: ${Object.keys(metrics.per_source_metrics).length}`);
+      }
+      lines.push("");
+      lines.push(JSON.stringify(payload, null, 2));
+      return lines.join("\n");
+    }
+
+    function initializeCollapsiblePanels() {
+      document.querySelectorAll(".panel").forEach((panel, index) => {
+        if (panel.dataset.collapseReady === "true") {
+          return;
+        }
+        const header = Array.from(panel.children).find(child =>
+          child.classList.contains("split") || child.classList.contains("device-toolbar")
+        ) || panel.firstElementChild;
+        if (!header) {
+          return;
+        }
+
+        const storageKey = `manta:panel:${header.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 48) || index}`;
+        const body = document.createElement("div");
+        body.className = "collapsible-content";
+        while (header.nextSibling) {
+          body.appendChild(header.nextSibling);
+        }
+        panel.appendChild(body);
+
+        let actions = header.querySelector(".section-actions, .actions");
+        if (!actions) {
+          actions = document.createElement("div");
+          actions.className = "section-actions";
+          header.appendChild(actions);
+        }
+
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "ghost panel-toggle";
+        actions.prepend(toggle);
+
+        const apply = (collapsed) => {
+          panel.classList.toggle("collapsed", collapsed);
+          toggle.textContent = collapsed ? "Expand" : "Collapse";
+          toggle.setAttribute("aria-expanded", String(!collapsed));
+        };
+
+        const stored = window.localStorage.getItem(storageKey);
+        let collapsed = stored === null ? panel.dataset.defaultCollapsed === "true" : stored === "1";
+        apply(collapsed);
+        toggle.addEventListener("click", () => {
+          collapsed = !collapsed;
+          window.localStorage.setItem(storageKey, collapsed ? "1" : "0");
+          apply(collapsed);
+        });
+
+        panel.dataset.collapseReady = "true";
+      });
+    }
+
+    function renderPolicyForm(policy) {
+      state.currentPolicyVersion = Number(policy.policy_version || 1);
+      els.policyDetectionModel.value = policy.detection_model || "ensemble_fusion";
+      els.policyShadowModel.value = policy.shadow_model || "";
+      els.policyThemeMode.value = policy.theme_mode || "SYSTEM";
+      els.policyCaptureEnabled.value = String(policy.capture_enabled ?? true);
+      els.policyExportEnabled.value = String(policy.export_enabled ?? true);
+      els.policyLow.value = String(policy.default_thresholds?.low ?? 0.30);
+      els.policyMedium.value = String(policy.default_thresholds?.medium ?? 0.60);
+      els.policyHigh.value = String(policy.default_thresholds?.high ?? 0.85);
+      els.policyRetention.value = String(policy.retention_days ?? 30);
+      els.policyBudget.value = String(policy.false_positive_budget_per_app_day ?? 12);
+      els.policyDrift.value = String(policy.drift_high_threshold ?? 0.65);
+      els.policyDebugEnabled.value = String(policy.debug_mode_enabled ?? false);
+      const fusion = policy.fusion_weights || {};
+      els.fusionStat.value = String(fusion.statistical ?? 0.28);
+      els.fusionMultivariate.value = String(fusion.multivariate ?? 0.20);
+      els.fusionSequence.value = String(fusion.sequence ?? 0.12);
+      els.fusionLinear.value = String(fusion.local ?? fusion.linear ?? 0.16);
+      els.fusionTflite.value = String(fusion.tflite ?? 0.12);
+      els.fusionRemote.value = String(fusion.remote ?? 0.12);
+      els.fusionBeacon.value = String(fusion.beacon ?? 0.15);
+      els.fusionDrift.value = String(fusion.drift ?? 0.10);
+      els.fusionReputation.value = String(fusion.reputation ?? 0.18);
+      els.fusionDataQuality.value = String(fusion.data_quality_penalty ?? 0.10);
+      els.fusionResponseAnomaly.value = String(fusion.response_anomaly ?? 0.82);
+      els.fusionResponseContext.value = String(fusion.response_context ?? 0.18);
+      els.policyProtectedBrands.value = policy.protected_brands_csv || "";
+      els.policyThresholdOverrides.value = JSON.stringify(policy.app_threshold_overrides || {}, null, 2);
+      els.policyAppProfiles.value = JSON.stringify(policy.app_profile_overrides || {}, null, 2);
+    }
+
+    function buildPolicyPayload() {
+      const thresholdOverrides = safeParseJson("App threshold overrides", els.policyThresholdOverrides.value, {});
+      const appProfiles = safeParseJson("App profile overrides", els.policyAppProfiles.value, {});
+      return {
+        policy_version: state.currentPolicyVersion + 1,
+        default_thresholds: {
+          low: Number.parseFloat(els.policyLow.value),
+          medium: Number.parseFloat(els.policyMedium.value),
+          high: Number.parseFloat(els.policyHigh.value)
+        },
+        app_threshold_overrides: thresholdOverrides,
+        export_enabled: els.policyExportEnabled.value === "true",
+        retention_days: Number.parseInt(els.policyRetention.value, 10),
+        detection_model: els.policyDetectionModel.value,
+        shadow_model: els.policyShadowModel.value || null,
+        false_positive_budget_per_app_day: Number.parseInt(els.policyBudget.value, 10),
+        drift_high_threshold: Number.parseFloat(els.policyDrift.value),
+        capture_enabled: els.policyCaptureEnabled.value === "true",
+        theme_mode: els.policyThemeMode.value,
+        debug_mode_enabled: els.policyDebugEnabled.value === "true",
+        protected_brands_csv: (els.policyProtectedBrands.value || "").trim() || null,
+        fusion_weights: {
+          statistical: Number.parseFloat(els.fusionStat.value),
+          multivariate: Number.parseFloat(els.fusionMultivariate.value),
+          sequence: Number.parseFloat(els.fusionSequence.value),
+          local: Number.parseFloat(els.fusionLinear.value),
+          tflite: Number.parseFloat(els.fusionTflite.value),
+          remote: Number.parseFloat(els.fusionRemote.value),
+          beacon: Number.parseFloat(els.fusionBeacon.value),
+          drift: Number.parseFloat(els.fusionDrift.value),
+          reputation: Number.parseFloat(els.fusionReputation.value),
+          data_quality_penalty: Number.parseFloat(els.fusionDataQuality.value),
+          response_anomaly: Number.parseFloat(els.fusionResponseAnomaly.value),
+          response_context: Number.parseFloat(els.fusionResponseContext.value)
+        },
+        disable_volume_features: false,
+        disable_timing_features: false,
+        disable_destination_features: false,
+        app_profile_overrides: appProfiles
+      };
+    }
+
+    async function loadDevices() {
+      const payload = await api("/api/v1/devices?limit=300");
+      const devices = Array.isArray(payload.devices) ? payload.devices : [];
+      state.devices = devices;
+      const validIds = new Set(devices.map(device => device.device_id_pseudo));
+      state.selectedIds = new Set(Array.from(state.selectedIds).filter(deviceId => validIds.has(deviceId)));
+      if (state.primaryId && !validIds.has(state.primaryId)) {
+        state.primaryId = null;
+      }
+      if (!state.selectAll && state.selectedIds.size === 0 && devices.length > 0) {
+        const active = devices.filter(device => device.status_label === "online" || device.status_label === "recent");
+        const initial = active[0] || devices[0];
+        if (initial) {
+          state.selectedIds.add(initial.device_id_pseudo);
+          state.primaryId = initial.device_id_pseudo;
+        }
+      }
+      renderDevices();
+    }
+
+    async function refreshData() {
+      if (!state.selectAll && state.selectedIds.size === 0) {
+        const health = await api("/health");
+        renderHealth(health);
+        els.events.innerHTML = `<div class="empty">No devices selected.</div>`;
+        els.alerts.innerHTML = `<div class="empty">No devices selected.</div>`;
+        els.alertsCount.textContent = "0 item(s)";
+        els.alertSummary.innerHTML = "";
+        els.incidents.innerHTML = `<tr><td colspan="6" class="muted">No devices selected.</td></tr>`;
+        els.quality.textContent = "No devices selected.";
+        return;
+      }
+
+      const eventParams = deviceQuery(new URLSearchParams());
+      eventParams.set("limit", "1000");
+      const alertEventParams = deviceQuery(new URLSearchParams());
+      alertEventParams.set("limit", "1000");
+      alertEventParams.set("event_type", "mobile_alert");
+
+      const alertParams = deviceQuery(new URLSearchParams());
+      alertParams.set("limit", "1000");
+
+      const incidentParams = deviceQuery(new URLSearchParams());
+      incidentParams.set("limit", "120");
+
+      const qualityParams = deviceQuery(new URLSearchParams());
+
+      const [health, events, alertEvents, alerts, incidents, quality] = await Promise.all([
+        api("/health"),
+        api(`/api/v1/events/recent?${eventParams.toString()}`),
+        api(`/api/v1/events/recent?${alertEventParams.toString()}`),
+        api(`/api/v1/alerts?${alertParams.toString()}`),
+        api(`/api/v1/incidents?${incidentParams.toString()}`),
+        api(`/api/v1/quality/summary?${qualityParams.toString()}`)
+      ]);
+
+      renderHealth(health);
+      state.allEvents = Array.isArray(events.events) ? events.events : [];
+      const backendAlerts = Array.isArray(alerts.alerts) ? alerts.alerts : [];
+      const fallbackAlertEvents = Array.isArray(alertEvents.events) ? alertEvents.events : [];
+      state.allAlerts = backendAlerts.length ? backendAlerts : alertsFromEvents(fallbackAlertEvents);
+      applyDashboardFiltersAndRender();
+      renderIncidents(incidents.incidents || []);
+      els.quality.textContent = JSON.stringify(quality.quality || {}, null, 2);
+    }
+
+    async function refreshAll() {
+      await loadDevices();
+      await refreshData();
+    }
+
+    async function loadPolicy() {
+      const deviceId = primaryDeviceId();
+      if (!deviceId) {
+        throw new Error("No primary device available. Select at least one device first.");
+      }
+      const payload = await api(`/api/v1/policy/device/${encodeURIComponent(deviceId)}`);
+      renderPolicyForm(payload.policy || {});
+      els.policyEditorOutput.textContent = `Loaded policy from ${deviceId}\n\n${JSON.stringify(payload, null, 2)}`;
+    }
+
+    async function savePolicy() {
+      const selected = selectedDeviceIds();
+      if (!state.selectAll && !selected.length) {
+        throw new Error("No devices selected. Select one or more devices, or enable All devices.");
+      }
+      const scopePayload = policyScopePayload();
+      const payload = {
+        ...scopePayload,
+        policy: buildPolicyPayload()
+      };
+      const result = await api("/api/v1/policy/apply", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      state.currentPolicyVersion = payload.policy.policy_version;
+      els.policyEditorOutput.textContent = JSON.stringify(result, null, 2);
+      await refreshAll();
+      if (primaryDeviceId()) {
+        await loadPolicy();
+      }
+    }
+
+    async function loadRemoteModel(retrain = false) {
+      const deviceId = primaryDeviceId();
+      if (!deviceId) {
+        throw new Error("No primary device available for cloud model actions.");
+      }
+      const family = els.remoteModelFamily?.value || "logistic_regression";
+      if (retrain) {
+        await api(`/api/v1/model/device/${encodeURIComponent(deviceId)}/retrain?family=${encodeURIComponent(family)}`, { method: "POST" });
+      }
+      const [modelPayload, registryPayload, jobsPayload] = await Promise.all([
+        api(`/api/v1/model/device/${encodeURIComponent(deviceId)}`),
+        api(`/api/v1/model/device/${encodeURIComponent(deviceId)}/registry?limit=20`),
+        api(`/api/v1/model/device/${encodeURIComponent(deviceId)}/jobs?limit=20`)
+      ]);
+      els.remoteModel.textContent = summarizeRemoteModelPayload(modelPayload);
+      els.remoteRegistry.textContent = JSON.stringify(registryPayload, null, 2);
+      els.remoteJobs.textContent = JSON.stringify(jobsPayload, null, 2);
+    }
+
+    async function importRemoteModel() {
+      const deviceId = primaryDeviceId();
+      if (!deviceId) {
+        throw new Error("No primary device available for model import.");
+      }
+      const model = safeParseJson("Cloud model JSON", els.remoteModelImport.value, {});
+      const family = els.remoteModelFamily?.value || "logistic_regression";
+      const result = await api(`/api/v1/model/device/${encodeURIComponent(deviceId)}`, {
+        method: "PUT",
+        body: JSON.stringify({ model, activate: true, family })
+      });
+      els.remoteModel.textContent = JSON.stringify(result, null, 2);
+      await loadRemoteModel(false);
+    }
+
+    async function purge(payload, successMessage) {
+      const selected = selectedDeviceIds();
+      if (!state.selectAll && !selected.length && !payload.purge_test_data) {
+        throw new Error("No devices selected for this action.");
+      }
+      const result = await api("/api/v1/admin/purge", {
+        method: "POST",
+        body: JSON.stringify({
+          device_ids: state.selectAll ? [] : selected,
+          all_devices: state.selectAll,
+          clear_events: false,
+          clear_alerts: false,
+          clear_policies: false,
+          clear_models: false,
+          clear_dead_letter: false,
+          purge_test_data: false,
+          ...payload
+        })
+      });
+      els.policyEditorOutput.textContent = `${successMessage}\n\n${JSON.stringify(result, null, 2)}`;
+      await refreshAll();
+    }
+
+    async function removeSelectedDevices() {
+      if (state.selectAll) {
+        throw new Error("Disable All devices and select the devices you want to remove.");
+      }
+      const selected = selectedDeviceIds();
+      if (!selected.length) {
+        throw new Error("Select one or more devices to remove.");
+      }
+      if (!window.confirm(`Remove ${selected.length} selected device(s) and all associated events, alerts, policies, and cloud models?`)) {
+        return;
+      }
+      const previousPrimary = primaryDeviceId();
+      await purge(
+        {
+          clear_events: true,
+          clear_alerts: true,
+          clear_policies: true,
+          clear_models: true,
+          clear_dead_letter: true,
+          all_devices: false
+        },
+        "Removed selected devices and their stored backend state."
+      );
+      selected.forEach(deviceId => state.selectedIds.delete(deviceId));
+      if (previousPrimary && selected.includes(previousPrimary)) {
+        state.primaryId = null;
+      }
+      renderDevices();
+    }
+
+    els.refreshBtn.addEventListener("click", () => refreshAll().catch(showGlobalError));
+    els.applyDashboardFiltersBtn.addEventListener("click", () => {
+      applyDashboardFiltersAndRender({ resetPages: true });
+    });
+    els.clearDashboardFiltersBtn.addEventListener("click", () => {
+      clearFilterValues(els.severityFilterGroup);
+      clearFilterValues(els.triageFilterGroup);
+      clearFilterValues(els.eventTypeFilterGroup);
+      clearFilterValues(els.eventStatusFilterGroup);
+      els.modelFilter.value = "";
+      els.attackFilter.value = "";
+      els.searchFilter.value = "";
+      applyDashboardFiltersAndRender({ resetPages: true });
+    });
+    els.copyEventsBtn.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(JSON.stringify(state.lastEvents, null, 2));
+    });
+    els.copyAlertsBtn.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(JSON.stringify(state.lastAlerts, null, 2));
+    });
+    els.clearSectionEventsBtn.addEventListener("click", () => purge({ clear_events: true }, "Cleared recent exported events.").catch(showGlobalError));
+    els.clearSectionAlertsBtn.addEventListener("click", () => purge({ clear_alerts: true }, "Cleared backend alerts.").catch(showGlobalError));
+    els.eventsPrevBtn.addEventListener("click", () => {
+      state.eventsPage = Math.max(1, state.eventsPage - 1);
+      renderEvents(state.filteredEvents);
+    });
+    els.eventsNextBtn.addEventListener("click", () => {
+      state.eventsPage += 1;
+      renderEvents(state.filteredEvents);
+    });
+    els.alertsPrevBtn.addEventListener("click", () => {
+      state.alertsPage = Math.max(1, state.alertsPage - 1);
+      renderAlerts(state.filteredAlerts);
+    });
+    els.alertsNextBtn.addEventListener("click", () => {
+      state.alertsPage += 1;
+      renderAlerts(state.filteredAlerts);
+    });
+    els.loadPolicyBtn.addEventListener("click", () => loadPolicy().catch(showGlobalError));
+    els.savePolicyBtn.addEventListener("click", () => savePolicy().catch(showGlobalError));
+    els.loadModelBtn.addEventListener("click", () => loadRemoteModel(false).catch(showGlobalError));
+    els.retrainModelBtn.addEventListener("click", () => loadRemoteModel(true).catch(showGlobalError));
+    els.importModelBtn.addEventListener("click", () => importRemoteModel().catch(showGlobalError));
+    els.clearEventsBtn.addEventListener("click", () => purge({ clear_events: true }, "Cleared recent exported events.").catch(showGlobalError));
+    els.clearAlertsBtn.addEventListener("click", () => purge({ clear_alerts: true }, "Cleared backend alerts.").catch(showGlobalError));
+    els.purgeTestBtn.addEventListener("click", () => purge({ purge_test_data: true }, "Purged known test/manual data.").catch(showGlobalError));
+    els.logoutBtn.addEventListener("click", async () => {
+      await fetch("/dashboard/logout", { method: "POST", credentials: "same-origin" });
+      window.location.href = "/dashboard/login";
+    });
+    els.selectAllDevices.addEventListener("change", () => {
+      state.selectAll = els.selectAllDevices.checked;
+      if (state.selectAll && !state.primaryId) {
+        state.primaryId = state.devices[0]?.device_id_pseudo || null;
+      }
+      renderDevices();
+      refreshData().catch(showGlobalError);
+    });
+    els.selectOnlineBtn.addEventListener("click", () => {
+      const onlineIds = state.devices
+        .filter(device => device.status_label === "online" || device.status_label === "recent")
+        .map(device => device.device_id_pseudo);
+      state.selectAll = false;
+      els.selectAllDevices.checked = false;
+      state.selectedIds = new Set(onlineIds);
+      state.primaryId = onlineIds[0] || null;
+      renderDevices();
+      refreshData().catch(showGlobalError);
+    });
+    els.clearDeviceSelectionBtn.addEventListener("click", () => {
+      state.selectAll = false;
+      els.selectAllDevices.checked = false;
+      state.selectedIds.clear();
+      state.primaryId = null;
+      renderDevices();
+      refreshData().catch(showGlobalError);
+    });
+    els.removeSelectedDevicesBtn.addEventListener("click", () => removeSelectedDevices().catch(showGlobalError));
+
+    initializeCollapsiblePanels();
+    if (els.remoteModelFamily) {
+      els.remoteModelFamily.value = "hybrid_dual_channel";
+    }
+    refreshAll().catch(showGlobalError);
+    window.setInterval(() => {
+      if (hasExpandedDetails()) {
+        return;
+      }
+      refreshAll().catch(() => {});
+    }, 30000);
+  </script>
+</body>
+</html>

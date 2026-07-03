@@ -1,0 +1,111 @@
+\section{Motivation}
+Cybersecurity monitoring is useful only when it helps protect systems against threats. In this
+thesis, a threat is behavior, software, or an actor-controlled condition that can compromise a
+security objective such as confidentiality, integrity, or availability \citep{nist_fips_199}.
+Examples in mobile network traffic include data-exfiltration behavior, command-and-control style
+communication, beaconing, unusual destination changes, or traffic patterns associated with
+malware. An intrusion-detection system (IDS) tries to identify such behavior from observable
+evidence rather than from the attacker's intent directly.
+
+Mobile endpoints continuously communicate across Wi-Fi, cellular, enterprise, and home networks,
+yet defenders rarely have visibility into those flows without either rooting the device or
+inspecting sensitive payload content. Android's \texttt{VpnService} provides a practical middle
+ground by enabling user-space packet interception on non-rooted devices
+\citep{android_vpnservice}. This makes endpoint telemetry possible, but the design must satisfy
+two competing requirements: detection quality must be operationally useful, and the evidence
+collected for detection must not expose unnecessary private behavior.
+
+This tension is especially acute for encrypted traffic. Payload encryption removes content from
+inspection, but it does not remove all side channels. Flow timing, volume, burst shape,
+destination characteristics, and session structure can still reveal application identity or user
+behavior \citep{deep_fingerprinting_2018,gat_mobile_app_2023}. Privacy is therefore not a separate
+topic added after detection; it is a constraint on how much telemetry the detector collects,
+stores, exports, and shares while trying to detect threats.
+
+\section{Terminology and Security Framing}
+MANTA uses the following terms throughout the thesis:
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Threat}: behavior or software that can harm confidentiality, integrity,
+  availability, or security accountability. MANTA focuses on network-behavior evidence of such
+  threats, not on payload inspection or legal attribution.
+  \item \textbf{Flow metadata}: packet-derived counters and labels such as timing, direction,
+  byte counts, protocol, port category, app attribution, and destination/context features. This is
+  similar in spirit to flow-monitoring systems such as NetFlow/IPFIX \citep{rfc3954,rfc7011}.
+  \item \textbf{Anomaly detection}: scoring behavior as unusual relative to learned or observed
+  baselines, a common approach when labels are incomplete or adversarial behavior changes over
+  time \citep{chandola_2009,sommer_paxson_2010}.
+  \item \textbf{Release privacy}: what a backend, analyst, researcher, or other recipient can
+  infer from the feature representation that MANTA intentionally exports or shares.
+  \item \textbf{Observer leakage}: what a passive network observer can infer from the original
+  encrypted traffic sequence before MANTA applies hashing, bucketization, deletion, or other
+  export-time reductions.
+  \item \textbf{Normalized leakage}: an empirical attack-success score normalized against the
+  baseline difficulty of the inference task. It is a measurement convenience, not a formal privacy
+  guarantee.
+  \item \textbf{Privacy student}: an experimental model trained to preserve anomaly-detection
+  utility from a reduced feature view while adversary heads test whether sensitive attributes can
+  still be inferred.
+  \item \textbf{Federated simulation}: an experimental collaborative-learning path that trains on
+  reduced or learned representations rather than centralizing raw full-feature tables. The
+  prototype uses a FedProx-style objective for heterogeneous clients
+  \citep{fedprox_2020,federated_privacy_ids_2023,privacy_fl_ids_2024}.
+\end{itemize}
+
+Operationally, MANTA can be described as a pipeline. It consumes Android packet/flow metadata and
+public training traces; it transforms those inputs into per-app feature windows, model scores,
+threshold decisions, and privacy-reduced representations; it outputs local alerts, optional
+backend triage records, trained model artifacts, and evaluation reports. This input-processing-
+output framing is important because each stage has a different privacy and security role.
+
+\section{Problem Statement}
+I study whether a practical, metadata-only IDS can be built and evaluated as an end-to-end artifact
+while keeping the privacy boundary explicit. The project asks whether MANTA can:
+\begin{enumerate}[leftmargin=*]
+  \item capture and aggregate application-attributed flow metadata without payload inspection,
+  \item detect suspicious traffic behavior from Android-computable feature windows,
+  \item compare local, backend-assisted, privacy-reduced, and hybrid deployment paths,
+  \item quantify the utility and privacy cost of reducing exported detection telemetry, and
+  \item distinguish controllable release leakage from passive observer leakage visible in
+  encrypted traffic sequences.
+\end{enumerate}
+The evaluation follows the same artifact through detection, release-view reduction, leakage
+attacks, observer fingerprinting, and reproducibility packaging. That gives one place to compare
+utility, privacy, and operating constraints instead of treating them as separate experiments.
+
+\section{Research Questions}
+\begin{itemize}[leftmargin=*]
+  \item RQ1: To what extent can Android-computable metadata windows support anomaly detection
+  across a heterogeneous public encrypted-traffic corpus under grouped, source-aware evaluation?
+  \item RQ2: Which deployment path gives the best operational trade-off among on-device,
+  backend-assisted, privacy-reduced, and hybrid scoring?
+  \item RQ3: How much anomaly-detection utility remains when exported telemetry is reduced through
+  bucketization, hashing, deletion, or privacy-student representation learning?
+  \item RQ4: What sensitive information remains inferable from released telemetry, and what
+  information remains inferable to a passive observer outside MANTA's feature-level controls?
+\end{itemize}
+
+\section{Contributions}
+\begin{itemize}[leftmargin=*]
+  \item An end-to-end implementation that connects Android metadata capture, backend triage, and a
+  reproducible machine-learning pipeline.
+  \item A public-only training and evaluation corpus assembled from Android malware, enterprise,
+  IoT, campus, and mobile-app traffic datasets with source/session-aware metadata carried through
+  the entire pipeline.
+  \item An evaluation protocol that compares local, backend-assisted, privacy-reduced, and hybrid
+  variants under grouped source-aware holdouts instead of optimistic random splits.
+  \item A telemetry-minimization evaluation that measures both detection utility and release
+  leakage under reduced feature views.
+  \item An observer-leakage benchmark that marks the boundary of feature-level privacy controls by
+  measuring what remains inferable from encrypted-flow sequences.
+  \item An empirical result showing that metadata coarsening can reduce exact app-ID leakage while
+  still leaving substantial app-family, destination-behavior, dataset-source, and observer leakage.
+\end{itemize}
+
+\section{Thesis Structure}
+Chapter 2 summarizes Android networking constraints, flow-based intrusion detection,
+encrypted-traffic analysis, privacy fingerprinting, and privacy-aware learning literature.
+Chapter 3 defines the system architecture, trust boundaries, and the distinction between release
+privacy and observer leakage. Chapter 4 details the implementation of the Android endpoint,
+backend adapter, privacy views, privacy student, and federated simulation. Chapter 5 presents the
+public-corpus evaluation methodology and results. Chapter 6 discusses privacy impact, ethics, and
+limitations. Chapter 7 closes with future work.

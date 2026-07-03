@@ -1,0 +1,35 @@
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+
+This thesis investigates MANTA (Mobile Anomaly and Network Threat Analysis), an anomaly-first
+intrusion-detection artifact for encrypted mobile and endpoint traffic. The security problem is
+that threat detection needs evidence about suspicious behavior, while modern mobile traffic is
+largely encrypted and payload inspection would be both technically difficult and privacy-invasive.
+MANTA therefore studies whether metadata-only flow windows can retain enough signal for
+real-time anomaly detection while reducing the amount of sensitive telemetry that must be
+collected or exported. The implemented artifact spans three modules: an Android endpoint based on
+\texttt{VpnService} \citep{android_vpnservice}, a backend adapter for authenticated ingest and
+analyst feedback, and a reproducible machine-learning pipeline for training, privacy benchmarking,
+and model export.
+
+The evaluation uses a public-only merged corpus of 6,034,487 flows drawn from seven dataset
+sources and 904,371 aggregated 60-second windows. It compares current on-device local detectors,
+backend models, privacy-local scoring, privacy-student/federated prototypes, and privacy-reduced
+feature views under grouped, source-aware splits. Under the shared Android adaptive-window
+comparison, the recall-oriented ``High-recall RF'' random forest reaches F1 \(0.961\), the dedicated
+``Privacy RF'' artifact reaches F1 \(0.924\), the calibrated full-feature backend boosted-tree model
+reaches F1 \(0.890\), and the quieter ``Low-FPR RF'' random forest reduces false positives at F1
+\(0.826\).
+
+The privacy evaluation is framed as a telemetry-minimization problem rather than as a separate
+security goal. \emph{Release leakage} measures what a recipient can infer from the feature
+representation that MANTA intentionally exports or shares. \emph{Observer leakage} measures what a
+passive on-path observer can infer from the encrypted traffic sequence before MANTA applies any
+export-time reduction. The reduced privacy views (\texttt{medium} and \texttt{strict}) trade
+anomaly utility for lower app-identification leakage in the bounded new-dataset privacy reports:
+exact app-identification leakage falls from \(0.282\) normalized leakage in the full view to
+\(0.151\) and \(0.135\), respectively. However, app-family, destination-behavior, and
+dataset-source leakage remain high, and the encrypted-flow sequence audit shows severe observer
+leakage, with normalized leakage \(0.544\) for app identification and \(0.981\) for
+dataset-source inference. I conclude that MANTA improves control over released detection
+telemetry, but does not provide transport-level privacy against passive traffic analysis.

@@ -1,0 +1,91 @@
+\section{Privacy Impact}
+MANTA's privacy role follows from its threat-detection role: the detector needs telemetry to find
+suspicious behavior, but that telemetry can itself reveal user and application behavior. The system
+therefore enforces a metadata-only telemetry boundary: packet payloads are not stored or exported,
+and the released views progressively suppress direct identifiers and strong destination hints. From
+a GDPR-oriented perspective \citep{gdpr_2016_679}, this aligns with data minimization, purpose
+limitation, and storage-limitation principles. The design still processes behaviorally revealing
+metadata, so transparency, consent, and retention control remain necessary rather than optional.
+
+MANTA implements several telemetry-reduction mechanisms:
+\begin{itemize}[leftmargin=*]
+  \item metadata-only capture instead of payload inspection,
+  \item hashed or removed direct identifiers in the reduced views,
+  \item coarse or distribution-aware bucketization of many released features,
+  \item privacy-student learning over a reduced feature view,
+  \item federated-style learning over privacy-student latents instead of raw full-feature tables,
+  \item explicit auditing of both release privacy and observer leakage.
+\end{itemize}
+
+These mechanisms reduce what MANTA releases or shares, but they are not equivalent to a formal
+privacy guarantee.
+
+The evaluation also distinguishes hashing from deletion. Hashing removes direct readability of a
+field, but deterministic salted hashes can still preserve stable equality and fingerprint
+structure. Deleting a suppressed feature removes it from the released information set entirely.
+The hash-versus-delete experiment in \Cref{tab:hash-delete} therefore treats hashing as
+pseudonymization rather than anonymization: it can recover detection utility, but it may preserve
+learnable app-family or app-ID signal for an attacker.
+
+\section{Ethical Considerations}
+Responsible deployment requires:
+\begin{itemize}[leftmargin=*]
+  \item informed consent before monitoring starts,
+  \item understandable disclosure of what is and is not collected,
+  \item bounded retention with user-triggered purge capability,
+  \item strict access controls on backend triage endpoints,
+  \item constraints against repurposing telemetry for non-security surveillance.
+\end{itemize}
+These points are consistent with EDPB guidance on transparency and lawful processing in digital
+services \citep{edpb_guidelines_2020}. Security hardening practices from mobile application
+standards (e.g., OWASP MASVS) further reduce secondary risk \citep{owasp_masvs}.
+
+\section{Release Privacy versus Observer Leakage}
+The release and observer measurements expose different failure modes. In the release view,
+\texttt{medium} and \texttt{strict} substantially reduce exact app-ID leakage. Those same views
+still leak high-level semantics such as app family and destination behavior. The observer benchmark
+then shows that a passive eavesdropper can recover strong information from encrypted-flow
+sequences even when the exported representation is reduced.
+
+In concrete terms, a release-privacy defender controls the representation that is exported or
+shared. A passive observer does not consume that exported representation; they consume the original
+traffic behavior on the network path. This is why export-time coarsening does not neutralize
+traffic-analysis attacks. Works such as Deep Fingerprinting and subsequent evaluations of website
+fingerprinting defenses reinforce this distinction \citep{deep_fingerprinting_2018,wf_sok_2022}.
+
+\section{Interpretation of the Negative Result}
+Feature-level coarsening is not enough to provide strong privacy against passive observers. Many
+metadata-only monitoring designs rely on payload omission as their primary privacy argument; the
+MANTA results show that this is incomplete. The released representation can be made less revealing,
+but encrypted traffic remains fingerprintable at the observer level. This is a limitation result,
+not a claim that MANTA solves passive traffic analysis.
+
+\section{Leakage and Utility Evaluation}
+MANTA benchmarks privacy risk with two complementary views:
+\begin{itemize}[leftmargin=*]
+  \item utility and leakage under feature-reduced release views, and
+  \item observer leakage from encrypted-flow sequence fingerprinting.
+\end{itemize}
+The two measurements keep utility and inference risk visible at the same time: a reduced export
+format has to retain threat-detection signal while reducing what secondary attackers can infer.
+
+\section{Limitations and Threats to Validity}
+\begin{itemize}[leftmargin=*]
+  \item The anomaly models improve substantially in the bounded new-dataset backend rerun, but the
+  result is not a full adaptive-window evaluation of every model family.
+  \item The Android-deployable models use an adaptive-window protocol, while the bounded backend
+  and privacy reports use practical source-balanced caps. These results should be compared within
+  their documented protocols rather than treated as one fully unified full-corpus run.
+  \item Full adaptive backend training was attempted but exceeded practical memory/time on the
+  current 6.0M-flow corpus; the completed backend/privacy reports therefore use documented
+  source-balanced raw-flow caps.
+  \item The Adaptive hybrid RF runtime hybrid and the final alert-evidence policy are implemented, but
+  still need a faster full-corpus offline evaluator and a dedicated on-device alert-quality study.
+  \item The dataset mix is public and heterogeneous but still inherits each source dataset's own
+  collection biases and labeling artifacts.
+  \item The privacy-student and federated paths are measured prototypes, not production defenses.
+  \item No packet padding, dummy traffic, or timing obfuscation is implemented, so passive-observer
+  protection remains out of scope.
+  \item Additional privacy attacks such as membership inference, poisoning, and adaptive
+  counterfactual adversaries remain future work.
+\end{itemize}

@@ -1,27 +1,121 @@
-# Compiled class file
-*.class
+# OS
+.DS_Store
+Thumbs.db
 
-# Log file
+# IDE
+.idea/
+.vscode/
+*.iml
+/.codex
+
+
+# Logs
 *.log
 
-# BlueJ files
-*.ctxt
+# Build artifacts
+build/
+out/
 
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
+# Java/Kotlin
+*.class
+.kotlin/
+hs_err_pid*
+replay_pid*
 
-# Package Files #
-*.jar
-*.war
-*.nar
-*.ear
+# Android/Gradle
+.gradle/
+local.properties
+captures/
+android-app/.gradle/
+android-app/**/build/
+android-app/**/generated/
+android-app/app/schemas/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+backend-adapter/.venv/
+ml-pipeline/.venv/
+
+# Python build/distribution
+*.egg-info/
+dist/
+
+# Adapter runtime state
+backend-adapter/*.db
+backend-adapter/tests/*.db
+backend-adapter/.env
+
+# Data and model artifacts
+ml-pipeline/data/
+ml-pipeline/artifacts/
+ml-pipeline/reports/
+ml-pipeline/experiment-runs/
+*.joblib
+*.tflite
+
+# Archives
 *.zip
 *.tar.gz
 *.rar
 
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
-hs_err_pid*
-replay_pid*
+# Env/Config files
+*.env
+*.env.*
+.env
+.env.*
+config.*
+!.env.example
 
-# Kotlin Gradle plugin data, see https://kotlinlang.org/docs/whatsnew20.html#new-directory-for-kotlin-data-in-gradle-projects
-.kotlin/
+# Local deployment/server-only files
+Dockerfile
+Dockerfile.*
+.dockerignore
+docker-compose.yml
+docker-compose.yaml
+docker-compose.*.yml
+docker-compose.*.yaml
+compose.yml
+compose.yaml
+compose.*.yml
+compose.*.yaml
+.docker/
+deploy/
+Caddyfile
+Caddyfile.*
+
+# notes
+/notes.txt
+/notes/
+
+# cloudflared stuff
+/cloudflared.exe
+
+# executables
+*.exe
+
+# datasets
+/ml-pipeline/downloads/
+
+# reports
+/reports/
+/exports/
+
+# Local assets
+/presentation/
+/media/
+/docs/designs/
+/website/public/manta-thesis.pdf
+
+# Local logos
+/Logo.png
+/Logo.ico
+/logo.png
+/logo.ico
+/android-app/app/src/main/res/drawable/logo.png

@@ -1,0 +1,78 @@
+name: MANTA CI Python
+
+on:
+  push:
+    branches: [ "develop", "main" ]
+  pull_request:
+
+jobs:
+  repo-sanity:
+    name: Repo sanity checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Legacy naming guard
+        run: python tools/check_legacy_naming.py
+
+      - name: Python syntax checks
+        run: |
+          python -m py_compile \
+            backend-adapter/app/main.py \
+            backend-adapter/app/models.py \
+            backend-adapter/app/storage.py \
+            backend-adapter/app/remote_modeling.py \
+            ml-pipeline/src/ml_pipeline/train_remote_backend_model.py \
+            tools/check_legacy_naming.py
+
+  backend-tests:
+    name: Backend adapter tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          cd backend-adapter
+          python -m pip install --upgrade pip
+          pip install -e .[test]
+
+      - name: Run backend tests
+        run: |
+          cd backend-adapter
+          pytest -q tests
+
+  ml-tests:
+    name: MANTA ML pipeline tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ML dependencies
+        run: |
+          cd ml-pipeline
+          python -m pip install --upgrade pip
+          pip install -e .[test]
+
+      - name: Run ML tests
+        run: |
+          cd ml-pipeline
+          pytest -q tests
