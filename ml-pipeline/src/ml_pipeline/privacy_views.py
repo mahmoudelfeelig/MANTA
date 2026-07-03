@@ -140,9 +140,21 @@ def _super_bucket(series: pd.Series, steps: int) -> pd.Series:
 
 def _derive_privacy_window_columns(windows: pd.DataFrame) -> pd.DataFrame:
     derived = windows.copy()
+    def optional_numeric(column: str, default: float = 0.0) -> pd.Series:
+        if column in derived.columns:
+            return pd.to_numeric(derived[column], errors="coerce").fillna(default)
+        return pd.Series(np.full(len(derived), default, dtype=float), index=derived.index)
+
     source_groups = derived["dataset_source"] if "dataset_source" in derived.columns else pd.Series(["global"] * len(derived), index=derived.index)
-    bucket_seconds = pd.to_numeric(derived["window_bucket"], errors="coerce").fillna(0).astype("int64") * 60
-    timestamps = pd.to_datetime(bucket_seconds, unit="s", utc=True)
+    if "window_end_ms" in derived.columns:
+        timestamps = pd.Series(
+            pd.to_datetime(pd.to_numeric(derived["window_end_ms"], errors="coerce").fillna(0), unit="ms", utc=True),
+            index=derived.index,
+        )
+    else:
+        raw_bucket = pd.to_numeric(derived["window_bucket"], errors="coerce").fillna(0).astype("int64")
+        bucket_seconds = np.where(raw_bucket > 100_000_000, raw_bucket, raw_bucket * 60)
+        timestamps = pd.Series(pd.to_datetime(bucket_seconds, unit="s", utc=True), index=derived.index)
     hours = timestamps.dt.hour.fillna(0).astype(int)
     derived["hour_period"] = pd.Series(
         np.select(
@@ -201,9 +213,9 @@ def _derive_privacy_window_columns(windows: pd.DataFrame) -> pd.DataFrame:
     derived["rate_dp_bucket"] = np.round(((byte_rate_dp + packet_rate_dp) * 0.5) * 4.0) / 4.0
     derived["burst_dp_bucket"] = _group_distribution_quantize(derived["burstiness"], source_groups, 4, log_scale=True)
     stability_signal = (
-        pd.to_numeric(derived.get("flow_count_deviation", 0.0), errors="coerce").fillna(0.0) +
-        pd.to_numeric(derived.get("byte_rate_deviation", 0.0), errors="coerce").fillna(0.0) +
-        pd.to_numeric(derived.get("duration_jitter", 0.0), errors="coerce").fillna(0.0).clip(lower=0.0).map(np.log1p)
+        optional_numeric("flow_count_deviation") +
+        optional_numeric("byte_rate_deviation") +
+        optional_numeric("duration_jitter").clip(lower=0.0).map(np.log1p)
     ) / 3.0
     derived["stability_dp_bucket"] = _group_distribution_quantize(stability_signal, source_groups, 4, log_scale=False)
     derived["balance_super_bucket"] = _super_bucket(derived["outbound_ratio"], 2)
@@ -212,7 +224,7 @@ def _derive_privacy_window_columns(windows: pd.DataFrame) -> pd.DataFrame:
     shape_signal = (
         pd.to_numeric(derived["small_flow_ratio"], errors="coerce").fillna(0.0) +
         pd.to_numeric(derived["packet_imbalance"], errors="coerce").fillna(0.0) +
-        pd.to_numeric(derived.get("flow_size_iqr", 0.0), errors="coerce").fillna(0.0).clip(lower=0.0).map(np.log1p)
+        optional_numeric("flow_size_iqr").clip(lower=0.0).map(np.log1p)
     ) / 3.0
     derived["shape_profile_bucket"] = _group_distribution_quantize(shape_signal, source_groups, 4, log_scale=False)
     return derived

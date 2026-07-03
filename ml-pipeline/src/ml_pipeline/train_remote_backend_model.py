@@ -9,8 +9,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .cache_utils import load_remote_windows_cached
-from .features import build_feature_windows, validate_flow_df
+from .cache_utils import _sample_by_source, load_feature_windows_cached, load_remote_windows_cached
+from .features import (
+    build_android_feature_windows,
+    build_android_sliding_feature_windows,
+    build_feature_windows,
+    validate_flow_df,
+)
 from .io_utils import read_csv_resilient
 from .progress import PhaseProgress
 
@@ -21,6 +26,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-model", required=True, help="Output JSON model path")
     parser.add_argument("--output-report", required=True, help="Output JSON report path")
     parser.add_argument("--window-seconds", type=int, default=60, help="Feature window size in seconds")
+    parser.add_argument("--window-mode", choices=["bucket", "sliding", "adaptive"], default="adaptive")
+    parser.add_argument(
+        "--max-adaptive-windows",
+        type=int,
+        default=250000,
+        help="Emit at most a bounded stride of adaptive windows while preserving positive windows.",
+    )
+    parser.add_argument("--label-strategy", choices=["focal", "window"], default="window")
+    parser.add_argument("--multi-horizon-training", action="store_true")
+    parser.add_argument(
+        "--max-flow-rows",
+        type=int,
+        default=0,
+        help="Source-balanced raw-flow cap applied before feature-window construction; positives are preserved where possible.",
+    )
     parser.add_argument(
         "--model-family",
         default="hybrid_dual_channel",
@@ -192,6 +212,109 @@ def build_remote_windows(df: pd.DataFrame, window_seconds: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _sample_flow_rows(frame: pd.DataFrame, max_flow_rows: int, random_seed: int = 42) -> pd.DataFrame:
+    if max_flow_rows <= 0 or len(frame) <= max_flow_rows:
+        return frame.reset_index(drop=True)
+    label_column = "label" if "label" in frame.columns else ("is_anomaly" if "is_anomaly" in frame.columns else None)
+    if label_column is None:
+        return _sample_by_source(frame, max_flow_rows, random_seed=random_seed)
+    labels = pd.to_numeric(frame[label_column], errors="coerce").fillna(0).astype(int)
+    positives = frame[labels > 0]
+    negatives = frame[labels <= 0]
+    positive_limit = min(len(positives), max(1, max_flow_rows // 2)) if not positives.empty and not negatives.empty else min(len(positives), max_flow_rows)
+    sampled_positives = _sample_by_source(positives, positive_limit, random_seed=random_seed) if positive_limit < len(positives) else positives
+    negative_limit = max(0, max_flow_rows - len(sampled_positives))
+    if negative_limit <= 0:
+        return sampled_positives.reset_index(drop=True)
+    sampled_negatives = _sample_by_source(negatives, negative_limit, random_seed=random_seed)
+    return pd.concat([sampled_positives, sampled_negatives], ignore_index=True, sort=False).sort_values(
+        ["app_id", "timestamp_end"] if {"app_id", "timestamp_end"}.issubset(frame.columns) else frame.columns[0],
+        kind="mergesort",
+    ).reset_index(drop=True)
+
+
+def _load_training_windows(args: argparse.Namespace, input_path: Path) -> tuple[pd.DataFrame, str]:
+    if int(args.max_flow_rows) > 0:
+        frame = _sample_flow_rows(read_csv_resilient(input_path), int(args.max_flow_rows))
+        if args.window_mode == "bucket":
+            return build_remote_windows(frame, args.window_seconds), f"direct_sampled_bucket_maxflow{int(args.max_flow_rows)}"
+        builder = (
+            (lambda raw, seconds: build_android_sliding_feature_windows(
+                raw,
+                seconds,
+                adaptive=False,
+                label_strategy=args.label_strategy,
+                emit_all_horizons=args.multi_horizon_training,
+            ))
+            if args.window_mode == "sliding"
+            else (lambda raw, seconds: build_android_sliding_feature_windows(
+                raw,
+                seconds,
+                adaptive=True,
+                max_windows=args.max_adaptive_windows,
+                label_strategy=args.label_strategy,
+                emit_all_horizons=args.multi_horizon_training,
+            ))
+        )
+        return builder(frame, args.window_seconds), f"direct_sampled_{args.window_mode}_maxflow{int(args.max_flow_rows)}"
+    if args.window_mode == "bucket":
+        windows = load_remote_windows_cached(
+            input_path,
+            build_remote_windows_fn=build_remote_windows,
+            read_frame_fn=read_csv_resilient,
+            window_seconds=args.window_seconds,
+        )
+        return windows, "remote_bucket"
+    if args.window_mode == "sliding":
+        build_windows_fn = lambda frame, seconds: build_android_sliding_feature_windows(
+            frame,
+            seconds,
+            adaptive=False,
+            label_strategy=args.label_strategy,
+            emit_all_horizons=args.multi_horizon_training,
+        )
+        cache_name = "android_sliding_feature_windows"
+    else:
+        build_windows_fn = lambda frame, seconds: build_android_sliding_feature_windows(
+            frame,
+            seconds,
+            adaptive=True,
+            max_windows=args.max_adaptive_windows,
+            label_strategy=args.label_strategy,
+                emit_all_horizons=args.multi_horizon_training,
+        )
+        cache_name = "android_adaptive_feature_windows"
+        if args.max_adaptive_windows > 0:
+            cache_name = f"{cache_name}_max{args.max_adaptive_windows}"
+    if args.label_strategy != "window":
+        cache_name = f"{cache_name}_{args.label_strategy}"
+    if args.multi_horizon_training:
+        cache_name = f"{cache_name}_multihorizon"
+    windows = load_feature_windows_cached(
+        input_path,
+        build_windows_fn=build_windows_fn if args.window_mode != "bucket" else build_android_feature_windows,
+        read_frame_fn=read_csv_resilient,
+        window_seconds=args.window_seconds,
+        cache_name=cache_name,
+    )
+    return windows, cache_name
+
+
+def _feature_window_from_row(row: dict[str, object]) -> dict[str, object]:
+    feature_window = dict(row)
+    if "bytes_out" not in feature_window:
+        feature_window["bytes_out"] = feature_window.get("total_bytes_out", 0.0)
+    if "bytes_in" not in feature_window:
+        feature_window["bytes_in"] = feature_window.get("total_bytes_in", 0.0)
+    if "data_quality_score" not in feature_window:
+        feature_window["data_quality_score"] = 1.0
+    if "hour_of_day" in feature_window:
+        feature_window["hour_of_day"] = int(float(feature_window.get("hour_of_day") or 0)) % 24
+    if "is_weekend" in feature_window:
+        feature_window["is_weekend"] = bool(feature_window.get("is_weekend"))
+    return feature_window
+
+
 def main() -> None:
     args = parse_args()
     progress = PhaseProgress("Remote model training")
@@ -201,71 +324,28 @@ def main() -> None:
 
     progress.update(5, "Loading flow CSV")
     progress.update(18, "Building remote feature windows")
-    windows = load_remote_windows_cached(
-        input_path,
-        build_remote_windows_fn=build_remote_windows,
-        read_frame_fn=read_csv_resilient,
-        window_seconds=args.window_seconds,
-    )
+    windows, window_cache_name = _load_training_windows(args, input_path)
     if "label" not in windows.columns or windows["label"].nunique() < 2:
         raise ValueError("Remote backend training requires both benign and anomalous labels in the normalized dataset.")
 
     progress.update(34, f"Loading backend modeling family {args.model_family}")
     module = _load_remote_modeling_module()
-    samples = [
-        {
-            "window_features": {
-                "flow_count": int(row.flow_count),
-                "bytes_out": int(row.bytes_out),
-                "bytes_in": int(row.bytes_in),
-                "mean_packet_size": float(row.mean_packet_size),
-                "outbound_ratio": float(row.outbound_ratio),
-                "burstiness": float(row.burstiness),
-                "novelty_score": float(row.novelty_score),
-                "connection_frequency_delta": float(row.connection_frequency_delta),
-                "bytes_per_flow": float(row.bytes_per_flow),
-                "destination_diversity": float(row.destination_diversity),
-                "activity_ratio": float(row.activity_ratio),
-                "periodic_beacon_score": float(row.periodic_beacon_score),
-                "byte_rate": float(row.byte_rate),
-                "packet_rate": float(row.packet_rate),
-                "mean_duration_ms": float(row.mean_duration_ms),
-                "duration_jitter": float(row.duration_jitter),
-                "port_diversity": float(row.port_diversity),
-                "protocol_diversity": float(row.protocol_diversity),
-                "packet_imbalance": float(row.packet_imbalance),
-                "small_flow_ratio": float(row.small_flow_ratio),
-                "high_port_ratio": float(row.high_port_ratio),
-                "hour_of_day": int(row.hour_of_day),
-                "is_weekend": bool(row.is_weekend),
-                "data_quality_score": float(row.data_quality_score),
-                "ttl_gap": float(row.ttl_gap),
-                "ttl_metrics_present": float(row.ttl_metrics_present),
-                "syn_rate_total": float(row.syn_rate_total),
-                "rst_rate_total": float(row.rst_rate_total),
-                "ack_rate_total": float(row.ack_rate_total),
-                "fin_rate_total": float(row.fin_rate_total),
-                "psh_rate_total": float(row.psh_rate_total),
-                "fragment_rate_total": float(row.fragment_rate_total),
-                "tcp_window_mean": float(row.tcp_window_mean),
-                "ack_delay_mean": float(row.ack_delay_mean),
-                "inter_packet_gap_mean": float(row.inter_packet_gap_mean),
-                "payload_mean": float(row.payload_mean),
-                "load_mean": float(row.load_mean),
-                "transport_metrics_present": float(row.transport_metrics_present),
-            },
-            "site_hint": None,
-            "label": int(row.label),
-            "dataset_source": str(row.dataset_source),
-            "dataset_profile": str(row.dataset_profile),
-            "dataset_variant": str(row.dataset_variant),
-            "environment_id": str(row.environment_id),
-            "session_id": str(row.session_id),
-            "app_family": str(row.app_family),
-            "window_bucket": int(row.window_bucket),
-        }
-        for row in windows.itertuples(index=False)
-    ]
+    samples = []
+    for row in windows.to_dict(orient="records"):
+        samples.append(
+            {
+                "window_features": _feature_window_from_row(row),
+                "site_hint": row.get("site_hint"),
+                "label": int(row.get("label") or 0),
+                "dataset_source": str(row.get("dataset_source") or "unknown_source"),
+                "dataset_profile": str(row.get("dataset_profile") or "unknown_profile"),
+                "dataset_variant": str(row.get("dataset_variant") or "unknown_variant"),
+                "environment_id": str(row.get("environment_id") or "unknown_environment"),
+                "session_id": str(row.get("session_id") or "unknown_session"),
+                "app_family": str(row.get("app_family") or "other_app"),
+                "window_bucket": int(row.get("window_bucket") or 0),
+            }
+        )
     progress.update(56, "Training model")
     fit_start = time.perf_counter()
     model, report = module.train_remote_model(samples=samples, model_type=args.model_family)
@@ -282,6 +362,11 @@ def main() -> None:
                 "rows": int(len(read_csv_resilient(input_path))),
                 "windows": int(len(windows)),
                 "window_seconds": args.window_seconds,
+                "window_mode": args.window_mode,
+                "window_cache_name": window_cache_name,
+                "label_strategy": args.label_strategy,
+                "max_adaptive_windows": int(args.max_adaptive_windows),
+                "multi_horizon_training": bool(args.multi_horizon_training),
                 "training_seconds": training_seconds,
                 "label_counts": windows["label"].value_counts().to_dict(),
                 "training_report": report,

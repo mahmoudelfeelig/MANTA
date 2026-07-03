@@ -39,6 +39,7 @@ _LEGACY_PROFILE_HINTS: tuple[tuple[str, str], ...] = (
 )
 
 HARD_BENIGN_SOURCES = {
+    "parrot2025_mitmproxy",
     "sdncampus_flow_statistics",
     "itc_net_blend60_scenario_e",
 }
@@ -191,10 +192,15 @@ def hard_example_weight(label: int, dataset_source: str, app_family: str) -> flo
     weight = 1.0
     if int(label) == 0:
         if dataset_source in HARD_BENIGN_SOURCES:
-            weight += 0.85
+            weight += 1.25
         if app_family in HARD_BENIGN_FAMILIES:
-            weight += 0.45
+            weight += 0.65
     else:
+        weight += 0.15
+        if dataset_source == "cicandmal2017_android":
+            weight += 0.15
+        if app_family == "service":
+            weight += 0.30
         if app_family == "malware":
             weight += 0.15
     return float(weight)

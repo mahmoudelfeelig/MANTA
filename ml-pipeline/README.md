@@ -111,11 +111,11 @@ python -m ml_pipeline.build_retraining_dataset \
   --report reports/retraining-dataset-report.json
 ```
 
-Train an Android-ready linear model JSON:
+Train an Android-ready local model JSON:
 ```bash
 python -m ml_pipeline.train_android_model \
   --input data/controlled_flows.csv \
-  --output-model artifacts/android/anomaly-linear.json \
+  --output-model artifacts/android/anomaly-local.json \
   --output-report reports/android-model-evaluation.json
 ```
 
@@ -317,12 +317,12 @@ python -m ml_pipeline.evaluation_protocol_report \
   --output reports/evaluation-protocol.json
 ```
 
-6. Train the Android linear model and export the TFLite model:
+6. Train the Android local model and export the TFLite model:
 
 ```bash
 python -m ml_pipeline.train_android_model \
   --input data/real/manta-real-training.csv \
-  --output-model artifacts/android/anomaly-linear.json \
+  --output-model artifacts/android/anomaly-local.json \
   --output-report reports/android-model-evaluation.json
 
 python -m ml_pipeline.export_tflite \
@@ -405,7 +405,7 @@ Those caches live under the run cache directory by default and make reruns much 
 
 10. Deliver the newly trained artifacts:
 
-- Copy `artifacts/android/anomaly-linear.json` to `android-app/app/src/main/assets/models/anomaly-linear.json`
+- Copy `artifacts/android/anomaly-local.json` to `android-app/app/src/main/assets/models/anomaly-local.json`
 - Copy `artifacts/tflite/anomaly.tflite` to `android-app/app/src/main/assets/models/anomaly.tflite`
 - Import `artifacts/backend/remote-assisted-model.json` into the backend dashboard under `Remote model control -> Import trained backend model JSON`
 
@@ -518,7 +518,7 @@ python -m ml_pipeline.evaluation_protocol_report `
 
 python -m ml_pipeline.train_android_model `
   --input ".\data\real\manta-real-training.csv" `
-  --output-model ".\artifacts\android\anomaly-linear.json" `
+  --output-model ".\artifacts\android\anomaly-local.json" `
   --output-report ".\reports\android-model-evaluation.json"
 
 python -m ml_pipeline.export_tflite `
@@ -623,5 +623,5 @@ Generated reports include:
 - `manifest.json` (commands, dependency versions, input hash, platform metadata)
 
 Android model delivery:
-- Copy `artifacts/android/anomaly-linear.json` to `android-app/app/src/main/assets/models/anomaly-linear.json`
+- Copy `artifacts/android/anomaly-local.json` to `android-app/app/src/main/assets/models/anomaly-local.json`
   when updating the bundled on-device model from newly trained data.

@@ -14,7 +14,7 @@ import pandas as pd
 from .dataset_metadata import derive_app_family
 
 
-CACHE_SCHEMA_VERSION = "manta-cache-v3"
+CACHE_SCHEMA_VERSION = "manta-cache-v11"
 
 
 @dataclass(frozen=True)
@@ -219,10 +219,11 @@ def load_feature_windows_cached(
     read_frame_fn: Callable[[str | Path], pd.DataFrame],
     explicit_cache_dir: str | Path | None = None,
     window_seconds: int = 60,
+    cache_name: str = "feature_windows",
     fast_config: FastModeConfig | None = None,
 ) -> pd.DataFrame:
     fast = fast_config or FastModeConfig.from_env()
-    base_name = f"feature_windows_w{window_seconds}"
+    base_name = f"{cache_name}_w{window_seconds}"
     full_cache = _cache_path(input_path, base_name, explicit_cache_dir=explicit_cache_dir)
     full_windows = _load_or_build_joblib(
         full_cache,

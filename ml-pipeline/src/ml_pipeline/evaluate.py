@@ -8,13 +8,8 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
-    average_precision_score,
     confusion_matrix,
-    f1_score,
     precision_recall_curve,
-    precision_score,
-    recall_score,
-    roc_auc_score,
     roc_curve,
 )
 
@@ -23,6 +18,7 @@ from .cache_utils import load_feature_windows_cached
 from .explain import compute_feature_contributions
 from .features import build_feature_windows, feature_matrix
 from .io_utils import read_csv_resilient
+from .metrics import operational_binary_metrics, threshold_sweep_metrics
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,30 +51,9 @@ def normalize_scores(raw_scores: np.ndarray) -> np.ndarray:
 
 
 def _select_best_threshold(y_true: np.ndarray, scores: np.ndarray) -> tuple[float, pd.DataFrame]:
-    thresholds = np.linspace(0.0, 1.0, num=101)
-    rows: list[dict[str, float]] = []
-
-    best_threshold = 0.5
-    best_f1 = -1.0
-    for threshold in thresholds:
-        pred = (scores >= threshold).astype(int)
-        precision = float(precision_score(y_true, pred, zero_division=0))
-        recall = float(recall_score(y_true, pred, zero_division=0))
-        f1 = float(f1_score(y_true, pred, zero_division=0))
-        rows.append(
-            {
-                "threshold": float(threshold),
-                "precision": precision,
-                "recall": recall,
-                "f1": f1,
-                "positive_predictions": int(pred.sum()),
-            }
-        )
-        if f1 > best_f1:
-            best_f1 = f1
-            best_threshold = float(threshold)
-
-    return best_threshold, pd.DataFrame(rows)
+    sweep = threshold_sweep_metrics(y_true, scores, steps=101)
+    best = sweep.sort_values(["f1", "precision", "recall"], ascending=False).iloc[0]
+    return float(best["threshold"]), sweep
 
 
 def main() -> None:
@@ -119,17 +94,8 @@ def main() -> None:
 
         predictions = (scores >= selected_threshold).astype(int)
         tn, fp, fn, tp = confusion_matrix(y_true, predictions, labels=[0, 1]).ravel()
-        report.update(
-            {
-                "positive_predictions": int(predictions.sum()),
-                "precision": float(precision_score(y_true, predictions, zero_division=0)),
-                "recall": float(recall_score(y_true, predictions, zero_division=0)),
-                "f1": float(f1_score(y_true, predictions, zero_division=0)),
-                "roc_auc": float(roc_auc_score(y_true, scores)) if len(np.unique(y_true)) > 1 else None,
-                "pr_auc": float(average_precision_score(y_true, scores)),
-                "confusion_matrix": {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)},
-            }
-        )
+        report.update(operational_binary_metrics(y_true, scores, selected_threshold))
+        report["confusion_matrix"] = {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)}
     else:
         predictions = (scores >= selected_threshold).astype(int)
         report["positive_predictions"] = int(predictions.sum())

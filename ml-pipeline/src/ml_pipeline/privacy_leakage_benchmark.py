@@ -7,9 +7,6 @@ from pathlib import Path
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 
-from .cache_utils import load_privacy_views_cached
-from .features import build_feature_windows
-from .io_utils import read_csv_resilient
 from .privacy_attack_utils import (
     ATTACK_MODEL_CHOICES,
     build_context_bucket,
@@ -23,6 +20,7 @@ from .privacy_attack_utils import (
 from .progress import PhaseProgress
 from .privacy_views import PRIVACY_FEATURE_GROUPS, PRIVACY_FEATURE_SETS, build_window_privacy_views_from_windows
 from .splits import add_split_metadata
+from .window_builders import add_window_protocol_args, adaptive_cache_name, load_android_windows_for_protocol
 
 
 def parse_args() -> argparse.Namespace:
@@ -35,6 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--open-world-ratio", type=float, default=0.25)
     parser.add_argument("--attack-models", default=",".join(ATTACK_MODEL_CHOICES))
     parser.add_argument("--random-seed", type=int, default=42)
+    add_window_protocol_args(parser)
     return parser.parse_args()
 
 
@@ -151,12 +150,8 @@ def main() -> None:
     progress = PhaseProgress("Privacy leakage benchmark")
     progress.update(5, "Loading flow CSV")
     progress.update(15, "Building privacy views")
-    views = load_privacy_views_cached(
-        args.input,
-        build_feature_windows_fn=build_feature_windows,
-        build_privacy_views_from_windows_fn=build_window_privacy_views_from_windows,
-        read_frame_fn=read_csv_resilient,
-    )
+    windows = load_android_windows_for_protocol(args.input, args, cache_prefix="privacy_leakage")
+    views = build_window_privacy_views_from_windows(windows)
     reference = add_split_metadata(views["off"]).reset_index(drop=True)
     context_bucket = build_context_bucket(reference).astype(str)
     destination_behavior = build_destination_behavior_bucket(reference, args.destination_buckets).astype(str)
@@ -257,6 +252,15 @@ def main() -> None:
     payload = {
         "benchmark": "privacy_inference_attack_suite",
         "attack_models": list(attack_models),
+        "window_protocol": {
+            "window_mode": args.window_mode,
+            "window_seconds": int(args.window_seconds),
+            "label_strategy": args.label_strategy,
+            "max_adaptive_windows": int(args.max_adaptive_windows),
+            "max_flow_rows": int(args.max_flow_rows),
+            "multi_horizon_training": bool(args.multi_horizon_training),
+            "cache_name": adaptive_cache_name(args, "privacy_leakage"),
+        },
         "results": results,
     }
     output_path = Path(args.output).expanduser().resolve()

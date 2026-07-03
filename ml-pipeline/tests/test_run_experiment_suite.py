@@ -51,7 +51,7 @@ def test_run_experiment_suite_creates_reports(tmp_path: Path) -> None:
     confusion = output_dir / "reports" / "confusion-matrix.json"
     drift_series = output_dir / "reports" / "drift-series.csv"
     policy_sim_per_app = output_dir / "reports" / "policy-simulation-per-app.csv"
-    android_model = output_dir / "artifacts" / "android" / "anomaly-linear.json"
+    android_model = output_dir / "artifacts" / "android" / "anomaly-local.json"
     remote_report = output_dir / "reports" / "remote-assisted-model.json"
     privacy_student_report = output_dir / "reports" / "privacy-student-report.json"
     federated_report = output_dir / "reports" / "federated-report.json"

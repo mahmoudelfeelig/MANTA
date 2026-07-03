@@ -11,12 +11,11 @@ from sklearn.metrics import f1_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from .cache_utils import _sample_by_source, load_privacy_views_cached
-from .features import build_feature_windows
-from .io_utils import read_csv_resilient
+from .cache_utils import _sample_by_source
 from .metrics import binary_classification_metrics
 from .privacy_views import PRIVACY_FEATURE_SETS, build_window_privacy_views_from_windows
 from .splits import source_aware_train_test_split
+from .window_builders import add_window_protocol_args, adaptive_cache_name, load_android_windows_for_protocol
 
 
 def parse_args() -> argparse.Namespace:
@@ -32,6 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--random-seed", type=int, default=42)
     parser.add_argument("--seeds", type=int, default=3, help="Number of seeded grouped-split evaluations per view")
     parser.add_argument("--max-rows", type=int, default=250000)
+    add_window_protocol_args(parser)
     return parser.parse_args()
 
 
@@ -114,12 +114,8 @@ def _aggregate_runs(runs: list[dict[str, float | int | None]]) -> dict[str, obje
 
 def main() -> None:
     args = parse_args()
-    views = load_privacy_views_cached(
-        args.input,
-        build_feature_windows_fn=build_feature_windows,
-        build_privacy_views_from_windows_fn=build_window_privacy_views_from_windows,
-        read_frame_fn=read_csv_resilient,
-    )
+    windows = load_android_windows_for_protocol(args.input, args, cache_prefix="privacy")
+    views = build_window_privacy_views_from_windows(windows)
 
     results: dict[str, dict[str, float | int | None]] = {}
     for view_name, frame in views.items():
@@ -158,6 +154,15 @@ def main() -> None:
 
     payload = {
         "rows": int(len(next(iter(views.values())))),
+        "window_protocol": {
+            "window_mode": args.window_mode,
+            "window_seconds": int(args.window_seconds),
+            "label_strategy": args.label_strategy,
+            "max_adaptive_windows": int(args.max_adaptive_windows),
+            "max_flow_rows": int(args.max_flow_rows),
+            "multi_horizon_training": bool(args.multi_horizon_training),
+            "cache_name": adaptive_cache_name(args, "privacy"),
+        },
         "compatibility": {
             "ignored_contamination": args.contamination,
         },

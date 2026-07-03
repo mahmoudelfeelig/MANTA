@@ -10,7 +10,7 @@ import pandas as pd
 
 def test_train_android_model_exports_coefficients_and_report(tmp_path: Path) -> None:
     input_csv = tmp_path / "flows.csv"
-    model_json = tmp_path / "artifacts" / "anomaly-linear.json"
+    model_json = tmp_path / "artifacts" / "anomaly-local.json"
     report_json = tmp_path / "reports" / "android-model-eval.json"
 
     rows = []
@@ -48,7 +48,31 @@ def test_train_android_model_exports_coefficients_and_report(tmp_path: Path) -> 
     exported_model = json.loads(model_json.read_text(encoding="utf-8"))
     exported_report = json.loads(report_json.read_text(encoding="utf-8"))
 
-    assert exported_model["model_type"] == "logistic_regression"
-    assert len(exported_model["feature_order"]) == len(exported_model["weights"])
+    assert exported_model["model_type"] in {"logistic_regression", "random_forest_classifier", "boosted_tree_classifier"}
+    assert exported_model["contract"] == "android_64_runtime_features"
+    if exported_model["model_type"] == "logistic_regression":
+        assert len(exported_model["feature_order"]) == len(exported_model["weights"])
+    else:
+        assert exported_model["trees"]
     assert "recommended_threshold" in exported_model
     assert "f1" in exported_report
+    assert exported_report["best_android_deployable_model"] in {
+        "logistic_regression",
+        "random_forest_classifier",
+        "extra_trees_classifier",
+        "teacher_weighted_random_forest",
+        "ambiguity_excluded_random_forest",
+        "boosted_tree_classifier",
+        "random_forest_with_service_specialist",
+        "teacher_weighted_rf_with_family_specialists",
+    }
+    comparison_models = {row["model"] for row in exported_report["comparison"]}
+    assert comparison_models >= {
+        "logistic_regression",
+        "random_forest_classifier",
+        "extra_trees_classifier",
+        "teacher_weighted_random_forest",
+        "ambiguity_excluded_random_forest",
+        "random_forest_with_service_specialist",
+        "teacher_weighted_rf_with_family_specialists",
+    }
