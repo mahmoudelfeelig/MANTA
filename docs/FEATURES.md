@@ -4,7 +4,7 @@ This is the single feature checklist for MANTA. Unchecked items are still in sco
 
 ## System identity and paper framing
 - [x] Rename project/system-facing docs to `MANTA`
-- [x] Paper title set to `MANTA: Can We Detect Threats Without Seeing the Payload?`
+- [x] Paper title set to `MANTA: Measuring the Detection-Privacy Trade-off in Metadata-Only Mobile Traffic Monitoring`
 - [x] Remove remaining live legacy project identifiers from code, package names, assets, and manuscript text
 - [x] Align dashboard, backend, Android, pipeline, and thesis wording to anomaly-first hybrid IDS framing
 

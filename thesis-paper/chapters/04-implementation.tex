@@ -11,21 +11,64 @@ Room-backed storage \citep{android_room}. Background workers handle retention cl
 retries using WorkManager scheduling \citep{android_workmanager}.
 
 \subsection{Feature Windows and On-Device Detection}
-The feature window builder aggregates 60-second windows and computes a richer metadata-only feature
-set than the first prototype. In addition to core counters and ratios, the implemented pipeline derives
-timing, novelty, balance, diversity, burstiness, and graph-inspired contextual signals such as
-destination concentration, transition entropy, flow-count deviation, and byte-rate deviation. These
-features are used internally for anomaly scoring, but only a reduced subset is exposed in the
-privacy-reduced views.
+The feature window builder aggregates per-app behavior windows and computes a richer metadata-only
+feature set than the first prototype. The default conceptual window is 60 seconds, but the runtime
+now selects 30-second windows for very dense traffic and 300-second windows for sparse, service,
+system, or background traffic. This adaptive choice reduces the instability of low-volume service
+windows while keeping high-volume interactive traffic responsive.
 
-On-device inference supports linear and TFLite-compatible paths. The Android-ready linear
-model is exported as a JSON artifact, while the one-class path exports a TFLite autoencoder
-\citep{tensorflow_lite_guide}. These models are intentionally lightweight, but they serve mainly as
-feasibility baselines relative to the stronger remote models rather than as the final thesis
-headline.
+In addition to core counters and ratios, the implemented pipeline derives timing, novelty,
+directional balance, destination diversity, port/protocol diversity, burstiness, transport-summary
+features, destination-role ratios, and graph-inspired contextual signals such as destination
+concentration and transition rate. A second pass compares the current window with recent windows
+from the same app to produce baseline-deviation features such as flow-count deviation,
+byte-rate deviation, novelty shift, destination-diversity shift, trend values, and consecutive
+burst-window count. These features are used internally for anomaly scoring, but only privacy-tier
+appropriate fields are exported in reduced views.
 
-Alert generation includes severity stabilization and false-positive budget enforcement, then stores
-triage-ready records with explanation text and feature contributors.
+On-device inference supports several runtime modes:
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Statistical}: an online per-app multi-scale z-score baseline with warmup and
+  feedback-aware adaptation.
+  \item \textbf{Multivariate}: a shrinkage-covariance Mahalanobis-distance detector for correlated
+  feature shifts.
+  \item \textbf{Sequence}: a lightweight transition-rarity detector over bucketed behavior states.
+  \item \textbf{Exported tree}: JSON random-forest/boosted-tree artifacts with fixed feature order,
+  app-family thresholds, and optional specialists.
+  \item \textbf{TFLite-compatible}: a TensorFlow Lite inference path for a scalar anomaly-score
+  model deployed as \texttt{models/anomaly.tflite} \citep{tensorflow_lite_guide}.
+  \item \textbf{Backend}: an optional backend inference call over a privacy-filtered
+  feature window.
+  \item \textbf{Fusion}: a weighted and smoothed combination of available scorers.
+\end{itemize}
+
+The TFLite path is intentionally treated as a deployable inference interface rather than as a
+specific algorithmic claim. The Android scorer memory-maps \texttt{models/anomaly.tflite}, builds a
+float tensor in \texttt{FeatureWindow.portableFeatureOrder}, and expects one scalar score in
+\([0,1]\). If a reconstruction-style or one-class neural model is used, the export must expose the
+reconstruction error or anomaly score as that scalar output; the Android scorer does not itself
+compare an input vector with a reconstructed vector. If TFLite loading or inference is unavailable,
+the selected TFLite mode falls back to the exported local model and then to the statistical
+detector.
+
+Later Android experiments ship separate recall-oriented and precision-oriented tree artifacts and
+expose them with user-facing names. ``High-recall RF'' maps to the v13 recall-oriented random
+forest, ``Low-FPR RF'' maps to the v14 precision-oriented random forest, and ``Adaptive hybrid RF''
+maps to a runtime hybrid of both. The hybrid mode scores both artifacts: malware-like and
+remote-access traffic keeps the larger score, service/system/other-app traffic is damped toward
+the quieter score, and other families use a moderate blend. This keeps the runtime deployable
+because it reuses the same metadata feature window and JSON tree evaluator rather than requiring a
+server model.
+
+Alert generation is a separate stage after model scoring. The response score is adjusted by
+periodic-beacon evidence, concept drift, destination reputation/context, and data-quality
+penalties. Severity then passes through threshold profiles, app-profile adjustments, high-severity
+stability, false-positive budget enforcement, and an alert-evidence policy. The evidence policy can
+store weak pending candidates and promote them only when evidence persists, when a correlated alert
+already exists, when known-danger destination evidence is present, or when an explicit
+single-window validation mode is selected. This separation prevents high-recall model windows from
+automatically becoming user-visible alerts while still allowing known-danger or validation traffic
+to surface promptly.
 
 \subsection{UI and Triage Workflow}
 The Compose UI exposes:
@@ -59,7 +102,11 @@ public corpus rather than only over a controlled synthetic trace:
 \begin{itemize}[leftmargin=*]
   \item public-dataset normalization and merged-corpus manifest generation,
   \item grouped split audits and evaluation-protocol reports,
-  \item on-device linear and TFLite export,
+  \item Android feature-contract audits and Android-style window generation,
+  \item on-device exported-tree and TFLite-compatible export,
+  \item hard-example mining, label-conflict auditing, source/family balancing, and threshold
+  policy sweeps,
+  \item episode-level alert evaluation in addition to per-window classification,
   \item remote backend training across multiple model families,
   \item privacy ablation and metadata leakage attack benchmarking,
   \item encrypted-flow sequence fingerprint benchmarking,
@@ -85,12 +132,14 @@ family, dataset source, context bucket, and destination behavior from the learne
 representation. The objective is to preserve anomaly utility while reducing leakage of sensitive
 traffic attributes.
 
-The federated simulator then trains over the privacy-student latent representation using a FedProx
-style algorithm rather than over raw full-feature windows. This does not prove secure deployment by
-itself, but it makes the collaborative-learning design concrete and measurable.
+The federated simulator then trains over the privacy-student latent representation using a
+FedProx-style objective \citep{fedprox_2020} rather than over raw full-feature windows. FedProx is
+a federated optimization method that adds a proximal term to reduce client-drift problems under
+heterogeneous local data. In MANTA, this is used only as a measurable collaborative-learning
+prototype; it does not prove secure deployment by itself.
 
 \subsection{Reproducibility Support}
 The \texttt{run\_experiment\_suite} path, cached privacy-view derivation, manifest reports, and
-full comparison matrix are all designed to support reproducibility. The archived report
-set used in this manuscript was produced from the March 20--21, 2026 public-corpus run and is
-archived in the evidence bundle described in the appendix.
+comparison reports are all designed to support reproducibility. The current manuscript uses the
+bounded backend/privacy reruns and Android adaptive-window reports documented in the evidence bundle
+described in the appendix.

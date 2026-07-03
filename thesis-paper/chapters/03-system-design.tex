@@ -46,9 +46,12 @@ The runtime data path is:
   \item Packet capture via \texttt{VpnService} TUN interface.
   \item Userspace forwarding to preserve normal network connectivity.
   \item Packet parsing and app attribution to flow records.
-  \item Per-app rolling window aggregation (60 s default).
-  \item Local anomaly scoring (ensemble/statistical/linear/TFLite mode).
-  \item Severity resolution + stability guards + false-positive budget checks.
+  \item Per-app rolling window aggregation (60 s default, with adaptive 30 s and 300 s modes for
+  dense or sparse/service traffic).
+  \item Local anomaly scoring (statistical, multivariate, sequence, exported-tree, hybrid,
+  TFLite-compatible, remote-assisted, and fusion modes).
+  \item Response-score adjustment, severity resolution, stability guards, false-positive budget
+  checks, and alert-evidence policy.
   \item Local persistence of flows/windows/alerts in Room.
   \item Optional export of selected flow and alert events to backend APIs.
 \end{enumerate}
@@ -58,8 +61,11 @@ retention/export changes without requiring a new app build.
 
 \section{Threat Model and Assumptions}
 The primary defensive goal is detection of suspicious encrypted traffic behavior such as beaconing,
-unusual destination changes, remote-control style communication, and malware-associated anomalies.
-The design assumes that payloads remain encrypted and unavailable for inspection.
+unusual destination changes, remote-control style communication, data-exfiltration-like volume
+shifts, and malware-associated anomalies. In the security framing from Chapter 1, these behaviors
+matter because they may indicate compromise of confidentiality, integrity, availability, or
+security accountability. The design assumes that payloads remain encrypted and unavailable for
+inspection.
 
 The thesis considers three privacy-relevant adversaries:
 \begin{itemize}[leftmargin=*]
@@ -82,11 +88,11 @@ Trust boundaries:
 \end{itemize}
 
 \section{Privacy Model}
-MANTA separates two privacy surfaces:
+MANTA separates two privacy and leakage surfaces:
 \begin{itemize}[leftmargin=*]
   \item \textbf{Release privacy}: what can be inferred from the feature representation that is
   intentionally exported, shared, stored, or used as the privacy-reduced model input.
-  \item \textbf{Observer privacy}: what can still be inferred by a passive eavesdropper from the raw
+  \item \textbf{Observer leakage}: what can still be inferred by a passive eavesdropper from the raw
   encrypted traffic sequence itself.
 \end{itemize}
 
@@ -103,7 +109,7 @@ passive observer sees the original encrypted sequence before those transformatio
       bucketization, and privacy-student learning.
 
       \vspace{0.7em}
-      \textbf{Observer privacy:} concerns an on-path observer who sees encrypted-flow timing,
+      \textbf{Observer leakage:} concerns an on-path observer who sees encrypted-flow timing,
       volume, direction, and sequence patterns before MANTA applies export-time reductions.
 
       \vspace{0.7em}
@@ -111,11 +117,11 @@ passive observer sees the original encrypted sequence before those transformatio
       original traffic pattern from an observer on the network path.
     \end{minipage}%
   }
-  \caption{Difference between release privacy and observer privacy in MANTA.}
+  \caption{Difference between release privacy and observer leakage in MANTA.}
   \label{fig:privacy-surfaces}
 \end{figure}
 
-\section{Privacy-Preserving Design Decisions}
+\section{Telemetry-Reduction Design Decisions}
 The system applies data minimization and disclosure control at multiple points:
 \begin{itemize}[leftmargin=*]
   \item metadata-only flow capture with no payload retention,
@@ -125,11 +131,12 @@ The system applies data minimization and disclosure control at multiple points:
   \item federated-style training over privacy-student latents rather than raw full-feature tables.
 \end{itemize}
 
-These mechanisms provide measurable privacy-preserving properties, not formal guarantees. The
-evaluation measures how much leakage remains after each transformation.
+These mechanisms reduce the representation that MANTA releases, but they are not formal privacy
+guarantees. The evaluation measures how much leakage remains after each transformation.
 
 \section{Deployment and Evaluation Boundaries}
 The design remains anomaly-first rather than anonymity-first. MANTA does not implement
 traffic-shaping defenses such as padding, dummy traffic, or timing obfuscation. Its privacy
 mechanisms operate on the representation released by the endpoint or backend pipeline, while the
-observer benchmark measures what remains visible on the network path.
+observer benchmark measures what remains visible on the network path. In other words, MANTA
+controls exported telemetry; it does not implement transport-level anonymity defenses.

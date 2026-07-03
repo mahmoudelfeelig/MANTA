@@ -1,10 +1,10 @@
 \section{Experimental Setup}
-Primary quantitative results in this chapter are taken from the March 20--21, 2026 public-corpus
-report bundle generated under \texttt{ml-pipeline/reports/}. The submission snapshot mirrors the
-same report files under \texttt{exports/thesis-final-2026-03-22/reports/}. The evidence package
-includes dataset and protocol manifests, model reports, privacy ablation, metadata leakage,
-encrypted-flow fingerprinting, privacy-student and federated reports, performance gates, and the
-full comparison matrix.
+Primary quantitative results in this chapter are taken from the current bounded public-corpus rerun
+and the same-methodology Android adaptive-window comparison generated under
+\texttt{ml-pipeline/reports/}. The evidence package includes dataset and protocol manifests,
+current model reports, privacy ablation, metadata leakage, encrypted-flow fingerprinting,
+privacy-student and federated prototype reports, performance gates, and the app-selectable model
+comparison.
 
 The core principle of the evaluation is to avoid optimistic random-row validation. Model and
 privacy reports instead use grouped splits keyed by dataset source, environment, session, app
@@ -61,43 +61,180 @@ baseline or chance level for that task, while a value close to \(1\) means that 
 is highly identifying for the target attribute. The metric is therefore used as an empirical
 privacy-risk score rather than as a formal privacy guarantee.
 
+\section{Android-Deployable Experiment Methodology}
+The Android-deployable experiments ask how far the local Android path can improve while using only
+features that the endpoint can compute at runtime. They reuse the public corpus, but generate
+Android-style adaptive windows, enforce an explicit Android feature contract, and evaluate
+deployable random-forest artifacts that can be interpreted by the Android JSON tree scorer.
+
+The methodology added five safeguards after the early local results proved too weak:
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Feature-contract audit:} every added feature must come from Android packet/flow
+  metadata, destination insight, or recent local windows. Server-only or label-only fields are
+  excluded to avoid train/deploy skew.
+  \item \textbf{Window-construction alignment:} training windows are generated to match the
+  runtime app-window builder more closely, including adaptive windows for sparse/service traffic.
+  \item \textbf{Split and balance audits:} reports track source, family, and label imbalance so
+  global metrics cannot hide a single dominant dataset or app family.
+  \item \textbf{Label-conflict handling:} rounded near-duplicate windows with both benign and
+  malicious labels are downweighted or excluded rather than treated as clean contradictory
+  supervision.
+  \item \textbf{Window and episode metrics:} per-window precision/recall/F1 are paired with
+  episode-level alert metrics, because the Android app surfaces correlated alert episodes rather
+  than isolated CSV rows.
+\end{itemize}
+
+The Android UI uses descriptive names for the deployable artifacts. ``High-recall RF'' refers to
+the v13 recall-oriented random forest, ``Low-FPR RF'' refers to the v14 sequence/intelligence
+random forest, and ``Adaptive hybrid RF'' refers to the v15 runtime hybrid that combines both. These
+names are used in the app to describe operating behavior rather than temporary experiment numbers.
+
 \section{Anomaly-Detection Results}
-\Cref{tab:model-matrix} summarizes the main anomaly-detection variants from the full comparison
-matrix. The best overall detection result in the March 2026 matrix is the remote
-gradient-boosted-tree family benchmark, with F1 \(0.449\), PR-AUC \(0.482\), and ROC-AUC
-\(0.765\). The on-device models are materially weaker, and none of the evaluated models clear the
-project's high deployment gates.
+\Cref{tab:model-matrix} summarizes the current headline anomaly-detection variants under one shared
+Android adaptive-window comparison. The backend was retrained on the same Android-style adaptive
+feature cache and updated to consume the full portable Android feature vector rather than the older
+partial remote feature payload. The backend threshold is calibrated on the Android validation holdout
+with an explicit false-positive budget instead of the earlier max-F1/recall-heavy threshold. The
+calibrated boosted-tree backend reaches precision \(0.948\), recall \(0.838\), F1 \(0.890\), PR-AUC
+\(0.976\), and ROC-AUC \(0.950\) on the balanced holdout, with false-positive rate reduced to
+\(0.110\).
 
 \begin{table}[htbp]
   \centering
-  \caption{Representative model results from the March 2026 report set.}
+  \caption{Representative current model results under the shared Android adaptive-window holdout.}
   \label{tab:model-matrix}
   \small
   \begin{tabular}{>{\raggedright\arraybackslash}p{4.0cm}cccc}
     \toprule
     Model & Precision & Recall & F1 & PR-AUC / ROC-AUC \\
     \midrule
-    Android linear & 0.201 & 0.415 & 0.271 & 0.199 / 0.659 \\
-    TFLite one-class & 0.304 & 0.070 & 0.114 & 0.180 / 0.612 \\
-    Remote hybrid primary & 0.352 & 0.271 & 0.306 & 0.375 / 0.690 \\
-    Remote family: logistic regression & 0.455 & 0.292 & 0.356 & 0.301 / 0.691 \\
-    Remote family: gradient-boosted tree & 0.620 & 0.352 & 0.449 & 0.482 / 0.765 \\
-    Privacy student (\texttt{medium}) & 0.156 & 0.383 & 0.222 & 0.139 / 0.589 \\
-    Federated (\texttt{medium}) & 0.114 & 0.919 & 0.203 & 0.125 / 0.548 \\
+    High-recall RF & 0.940 & 0.983 & 0.961 & 0.985 / 0.970 \\
+    Privacy RF & 0.922 & 0.927 & 0.924 & 0.917 / 0.909 \\
+    Backend boosted tree, calibrated & 0.948 & 0.838 & 0.890 & 0.976 / 0.950 \\
+    Adaptive hybrid RF & 0.981 & 0.713 & 0.826 & 0.984 / 0.968 \\
+    Low-FPR RF & 0.981 & 0.713 & 0.826 & 0.984 / 0.968 \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-The results show usable signal in metadata-only windows, especially for the remote tree model, but
-the measured operating points remain below the project gates. The privacy-oriented variants also
-lose substantial detection quality relative to the best remote benchmark.
+The results show usable signal in metadata-only windows, especially for the Android high-recall
+random forest and backend-side tree model. The backend parity rerun is no longer penalized by a
+partial remote feature payload, and the calibrated backend threshold removes the previous pathological
+\(1.000\)-recall operating point. It still remains noisier than the Low-FPR RF path, but is no longer
+the worst false-positive option.
+
+\section{Experiment Progression and Negative Results}
+The experimental sequence was intentionally iterative. The first Android-local experiments used a
+small endpoint-safe feature set and simple deployable models. They were valuable because they
+proved that the app could score traffic locally, but their recall and F1 were too weak for an
+interactive security tool. The TFLite-compatible one-class path was also retained as a deployable
+interface experiment, but its early result was low-recall. This showed that having a mobile
+inference format is not enough; the feature contract, objective, and score calibration also have to
+match the operational detection problem.
+
+Several later attempts were documented but not selected:
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Larger expanded-window caches:} 500,000-window and early 250,000-window adaptive
+  cache runs failed with exit code 137 because the builder materialized too many derived columns
+  across the raw flow table. The memory-safe row builder completed, but took about 20 minutes for
+  the expanded experiment cache.
+  \item \textbf{Boosted-tree export:} the deployable boosted-tree candidate completed, but did not
+  beat the random-forest variants on the selected split. It was therefore documented as a useful
+  comparison rather than shipped as the default local model.
+  \item \textbf{HistGradientBoosting benchmark:} the non-deployable histogram gradient boosting
+  model estimated the value of a stronger tree learner, but it was slightly worse than the selected
+  teacher-weighted random forest and lacked an implemented Android export path.
+  \item \textbf{Pure service specialist:} a service-only specialist improved precision but lost too
+  much recall. The result suggested that service behavior was internally broad and label-noisy; a
+  specialist without better labels or alert-episode logic becomes overly conservative.
+  \item \textbf{Full hybrid backend and v15 hybrid sweeps:} the Android runtime hybrid was implemented, but the Python
+  exported-tree evaluator timed out while repeatedly scoring both 90-tree forests and sweeping
+  episode policies. Full backend adaptive-window retraining with the heavier hybrid dual-channel
+  family exceeded practical runtime in this environment; the lighter boosted-tree backend completed
+  on the same Android adaptive-window cache. Both failures are evaluation/training-path bottlenecks
+  rather than mobile-runtime blockers.
+\end{itemize}
+
+These negative results shaped the final thesis interpretation. The largest gains came from fixing
+train/deploy mismatch, adding Android-computable temporal and destination context, auditing noisy
+labels, and evaluating alert episodes. Changing the classifier family alone was less important
+than aligning the data representation with the Android runtime and the user-visible alert policy.
+
+\section{Android-Deployable Model Development}
+The Android deployable path was iterated because early on-device models were not acceptable for an
+interactive app. The final reported app comparison therefore focuses on the current app-selectable
+artifacts in \Cref{tab:current-app-comparison}, while this section records the development logic
+qualitatively.
+
+High-recall RF expanded the Android feature contract from the original compact set to local
+transport, destination-role, destination-transition, and per-app baseline-deviation features. It
+also added source/family balancing, hard-example mining, teacher-weighted random forests, and
+label-conflict downweighting. Conceptually, this helped because the main failure mode was not a
+single missing classifier family; it was that service windows with similar volume and diversity
+statistics were being treated as indistinguishable. Adding local context gave the model more axes on
+which to separate repeated service behavior from anomalous shifts.
+
+Low-FPR RF then added short temporal memory, destination-intelligence features, a malware
+specialist, stricter service threshold policy, and stronger ambiguous-label handling. This was not
+intended to maximize global F1; it was intended to reduce the user-visible false alerts that a
+purely recall-oriented model could create.
+
+Adaptive hybrid RF was added as a runtime hybrid rather than as a new trained model. It ships both the
+recall-oriented and quiet artifacts. Malware-like and remote-access traffic keeps the more sensitive
+score, while service/system/other-app traffic is damped toward the quieter score. This is
+conceptually attractive because it uses the sensitive path for recall and the quiet path for
+false-positive control.
+
+Episode-level analysis motivated the Android runtime policy that stores weak pending evidence and
+requires persistence, evidence diversity, or a high-confidence bypass before surfacing an alert.
+This matters because user-visible alerts are correlated episodes over time, not isolated CSV rows.
+
+The Android runtime was also changed after the offline model iterations. Explicit local model modes
+can surface single-window validation candidates instead of waiting for repeated evidence, known
+danger destination evidence can bypass the normal model threshold, and the statistical detector has
+a cold-start risk floor for unusually suspicious first observations. These changes address a
+separate problem from model F1: user-visible alerts can be suppressed by stability gates even when
+the model score is nonzero. They are implementation safeguards and require a dedicated on-device
+alert study before being treated as offline detection-quality results.
+
+\subsection{Same-Methodology Current App Comparison}
+Because the later Android artifacts were trained and calibrated at different times, a separate
+comparison table was generated over one shared Android adaptive-window cache, one source-aware
+holdout split, and each model's exported threshold. \Cref{tab:current-app-comparison} reports the
+balanced-holdout view, which is more informative for comparing precision and false-positive rate
+than the natural holdout because the natural sampled holdout is anomaly-heavy.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Current app-selectable models under the same Android adaptive-window methodology.}
+  \label{tab:current-app-comparison}
+  \small
+  \begin{tabular}{lccccc}
+    \toprule
+    Model & Precision & Recall & F1 & FPR & Threshold \\
+    \midrule
+    High-recall RF & 0.940 & 0.983 & 0.961 & 0.148 & 0.825 \\
+    Privacy RF & 0.922 & 0.927 & 0.924 & 0.187 & 0.995 \\
+    Backend boosted tree & 0.948 & 0.838 & 0.890 & 0.110 & 0.999 \\
+    Adaptive hybrid RF & 0.981 & 0.713 & 0.826 & 0.033 & 0.790 \\
+    Low-FPR RF & 0.981 & 0.713 & 0.826 & 0.033 & 0.790 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+This comparison clarifies the operating trade-offs. High-recall RF is the strongest current
+single-artifact detector by balanced F1. Privacy RF now clears the target precision/recall gate
+under the same methodology, but it is not better than every normal model; it trades higher
+false-positive rate for stronger recall than the balanced/quiet path. Adaptive hybrid RF and Low-FPR RF
+local are conservative: they produce fewer false positives but miss more positive windows.
 
 \section{Release-Privacy Utility Trade-off}
-The release-privacy ablation results are shown in \Cref{tab:ablation}. Contrary to the initial
-expectation that privacy-reduced views would necessarily hurt detection, the \texttt{medium} and
-\texttt{strict} views slightly \emph{improve} F1 on this benchmark while keeping ROC-AUC and
-PR-AUC close to the \texttt{off} view. This suggests that reduced views can remove some
-source-specific noise or over-specificity while still preserving anomaly-relevant structure.
+The release-privacy ablation results are shown in \Cref{tab:ablation}. In the new bounded
+merged-corpus report, \texttt{off} and \texttt{low} retain the full Android feature contract and
+therefore have identical utility. \texttt{medium} and \texttt{strict} reduce exact destination and
+fine-grained feature information, lowering app-identification leakage but also reducing detection
+utility. This is the expected privacy-utility trade-off once the report is aligned with the current
+feature set.
 
 \begin{table}[htbp]
   \centering
@@ -107,10 +244,42 @@ source-specific noise or over-specificity while still preserving anomaly-relevan
     \toprule
     View & Precision & Recall & F1 & PR-AUC / ROC-AUC \\
     \midrule
-    \texttt{off} & 0.413 & 0.899 & 0.565 & 0.506 / 0.624 \\
-    \texttt{low} & 0.413 & 0.899 & 0.565 & 0.506 / 0.624 \\
-    \texttt{medium} & 0.425 & 0.923 & 0.581 & 0.531 / 0.652 \\
-    \texttt{strict} & 0.425 & 0.930 & 0.582 & 0.495 / 0.631 \\
+    \texttt{off} & 0.651 & 0.962 & 0.776 & 0.759 / 0.857 \\
+    \texttt{low} & 0.651 & 0.962 & 0.776 & 0.759 / 0.857 \\
+    \texttt{medium} & 0.565 & 0.871 & 0.685 & 0.661 / 0.756 \\
+    \texttt{strict} & 0.515 & 0.893 & 0.653 & 0.582 / 0.703 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Hashing Versus Deleting Reduced Features}
+An additional bounded experiment compared three privacy-reduction strategies under the same
+Android adaptive-window cache and the same source-aware holdout split. The goal was to distinguish
+semantic deletion from pseudonymization. In the \emph{deleted} representation, the medium retained
+features are bucketed and every suppressed Android feature is set to zero. In the \emph{hashed}
+representation, those same suppressed features are kept only as deterministic salted hash buckets.
+The current \texttt{medium-plus} representation instead uses broad bucketization over many Android
+features while zeroing direct identity/threat-tag ratio fields.
+
+\Cref{tab:hash-delete} shows the balanced-holdout result. Hashing suppressed features recovers
+substantial utility compared with deletion, but it also increases semantic leakage. This supports a
+key privacy interpretation: hashing is pseudonymization, not removal. It can preserve stable
+fingerprints that help detection, but those same fingerprints can help an attacker infer app family
+or app identity.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Balanced-holdout comparison of reduced-feature deletion and hashing.}
+  \label{tab:hash-delete}
+  \small
+  \begin{tabular}{lccccc}
+    \toprule
+    Representation & Precision & Recall & F1 & App-family acc. & App-ID acc. \\
+    \midrule
+    Full reference & 0.974 & 0.954 & 0.964 & 0.557 & 0.344 \\
+    Medium-plus bucketed & 0.978 & 0.937 & 0.957 & 0.585 & 0.280 \\
+    Hashed suppressed features & 0.971 & 0.868 & 0.917 & 0.590 & 0.239 \\
+    Deleted suppressed features & 0.934 & 0.707 & 0.805 & 0.471 & 0.208 \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -131,10 +300,10 @@ gate for \texttt{medium} and \texttt{strict} still fails.
     \toprule
     View & App ID & App family & Dataset source & Destination behavior \\
     \midrule
-    \texttt{off} & 0.235 & 0.689 & 0.935 & 0.989 \\
-    \texttt{low} & 0.233 & 0.659 & 0.825 & 0.976 \\
-    \texttt{medium} & 0.113 & 0.611 & 0.702 & 0.688 \\
-    \texttt{strict} & 0.099 & 0.616 & 0.702 & 0.685 \\
+    \texttt{off} & 0.282 & 0.722 & 0.927 & 0.999 \\
+    \texttt{low} & 0.272 & 0.799 & 0.902 & 0.988 \\
+    \texttt{medium} & 0.151 & 0.678 & 0.871 & 0.450 \\
+    \texttt{strict} & 0.135 & 0.603 & 0.646 & 0.580 \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -142,6 +311,22 @@ gate for \texttt{medium} and \texttt{strict} still fails.
 In both \texttt{medium} and \texttt{strict}, exact app re-identification falls below the configured
 threshold, but the app-family and destination-behavior checks remain false. The reduced views
 therefore improve release privacy for one target while leaving broader semantic leakage unresolved.
+
+\section{Local and Remote Models Under Privacy Views}
+The local/remote privacy utility report now separates two different questions. The first is the
+real Android runtime path: the local privacy artifact receives the normal Android feature window and
+applies its own internal \texttt{medium-plus} input transform before scoring. The second is a
+release-view path: a remote consumer receives an already reduced \texttt{medium} or \texttt{strict}
+export view and tries to reuse a full-feature scorer. These are not equivalent.
+
+On a balanced 5,000-window utility sample, the app-facing local privacy runtime path reaches
+precision \(0.904\), recall \(0.956\), and F1 \(0.930\). The backend scorer reaches
+precision \(0.724\), recall \(0.987\), and F1 \(0.835\) on the same balanced sample, but with a much
+higher false-positive rate. Under already reduced \texttt{medium}/\texttt{strict} release views,
+the direct full-feature local and remote scorers still have no useful operating mode because most
+expected raw inputs have been removed. This is why reduced export views require either a dedicated
+student/reduced-view model, an internally transformed local scorer, or explicit threshold/policy
+calibration rather than naive reuse of the full-feature production scorer.
 
 \section{Observer Leakage from Encrypted Traffic}
 The observer benchmark directly evaluates what a passive on-path observer could infer from the
@@ -171,11 +356,10 @@ path. The experiment marks the boundary between feature-level privacy controls a
 traffic-analysis defenses.
 
 \section{Privacy Student, Federated Path, and Performance}
-The privacy-student model improves representation privacy only partially. In the archived
-\texttt{medium}-view report, anomaly quality remains low (F1 \(0.222\), PR-AUC \(0.139\),
-ROC-AUC \(0.589\)), while adversary accuracy is reduced strongly for app ID but remains notable for
-app family, dataset source, and destination behavior. The federated path is even weaker as a
-detector in the present configuration (F1 \(0.203\), PR-AUC \(0.125\), ROC-AUC \(0.548\)).
+The privacy-student model improves representation privacy only partially. In the prototype
+\texttt{medium}-view report, adversary accuracy is reduced strongly for app ID but remains notable
+for app family, dataset source, and destination behavior. The federated path remains a measured
+collaboration prototype rather than the main detector in the present configuration.
 
 Performance gating is also incomplete. \Cref{tab:gates} summarizes the thesis-relevant gate
 outcomes. Single-window extraction meets the p95 target (\(22.5\) ms) but misses the p99 target
@@ -193,10 +377,10 @@ end-to-end single-window build time is not yet at the intended deployment thresh
     \midrule
     Latency p95 & \(\leq 40\) ms & \(22.5\) ms & Pass \\
     Latency p99 & \(\leq 40\) ms & \(87.9\) ms & Fail \\
-    Exact app-ID release leakage & below threshold & \texttt{medium}: \(0.113\), \texttt{strict}: \(0.099\) & Pass \\
+    Exact app-ID release leakage & below threshold & \texttt{medium}: \(0.151\), \texttt{strict}: \(0.135\) & Pass \\
     Semantic release leakage & below threshold & app-family and destination leakage remain high & Fail \\
     Observer-leakage audit & low fingerprint leakage & app ID \(0.544\), dataset source \(0.981\) & Fail \\
-    Detector quality & deployment-grade gates & best F1 \(0.449\) & Fail \\
+    Detector quality & deployment-grade gates & same-methodology F1 \(0.961\)/\(0.924\)/\(0.890\)/\(0.826\) for High-recall RF/Privacy RF/Backend/Low-FPR RF; backend FPR reduced to \(0.110\) after calibration & Mixed \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -205,11 +389,18 @@ end-to-end single-window build time is not yet at the intended deployment thresh
 The report set supports four findings and rejects one stronger interpretation.
 \begin{itemize}[leftmargin=*]
   \item Metadata-only anomaly detection is technically feasible on a large public corpus.
-  \item Remote models outperform the on-device, privacy-student, and federated variants in the
-  March 2026 report matrix.
+  \item The bounded backend rerun shows that a backend hybrid model remains a strong centralized
+  option when backend inference is acceptable.
+  \item The Android-deployable comparison shows that the local path improves substantially
+  when training windows, runtime windows, feature contracts, and label-conflict handling are aligned.
+  The engineering conclusion is therefore ``local detection is sensitive to deployability
+  alignment'', not simply ``local detection is too weak.''
   \item Release-privacy transformations can reduce exact app re-identification while preserving
   reasonable utility.
   \item Observer leakage remains severe without transport-level defenses.
+  \item Runtime alert quality is not identical to per-window model quality: episode grouping,
+  evidence persistence, known-danger bypasses, and false-positive budgets change what the user
+  actually sees.
   \item MANTA should be treated as an evaluation framework and research artifact rather
   than as a product-ready privacy-preserving IDS.
 \end{itemize}

@@ -1,23 +1,45 @@
 \section{Artifact Package}
-The main experiment artifacts used in this manuscript are the March 20--21, 2026 public-corpus
-report bundle. During the experiment run these reports were written to \texttt{ml-pipeline/reports/};
-the submission snapshot mirrors the selected thesis reports under
-\texttt{exports/thesis-final-2026-03-22/reports/}:
+The main experiment artifacts used in this manuscript are the current public-corpus reports,
+bounded backend/privacy reruns, and Android adaptive-window model reports. During the experiment
+runs these reports were written to \texttt{ml-pipeline/reports/}; the submission snapshot mirrors
+the selected thesis reports under \texttt{exports/thesis-final-2026-03-22/reports/}:
+{\footnotesize
 \begin{itemize}[leftmargin=*]
   \item \texttt{ml-pipeline/reports/dataset-manifest.json}
   \item \texttt{ml-pipeline/reports/evaluation-protocol.json}
   \item \texttt{ml-pipeline/reports/android-model-evaluation.json}
   \item \texttt{ml-pipeline/reports/tflite-autoencoder-evaluation.json}
   \item \texttt{ml-pipeline/reports/remote-assisted-model.json}
+  \item \texttt{ml-pipeline/reports/remote-assisted-model-new-dataset.json}
   \item \texttt{ml-pipeline/reports/privacy-ablation.json}
+  \item \texttt{ml-pipeline/reports/privacy-ablation-new-dataset.json}
   \item \texttt{ml-pipeline/reports/privacy-leakage.json}
+  \item \texttt{ml-pipeline/reports/privacy-leakage-new-dataset.json}
+  \item \texttt{ml-pipeline/reports/model-privacy-utility-local-remote-new-dataset.json}
   \item \texttt{ml-pipeline/reports/traffic-fingerprint.json}
   \item \texttt{ml-pipeline/reports/privacy-student-report.json}
   \item \texttt{ml-pipeline/reports/federated-report.json}
   \item \texttt{ml-pipeline/reports/performance-gates.json}
   \item \texttt{ml-pipeline/reports/privacy-gate.json}
   \item \texttt{ml-pipeline/reports/full-model-matrix.json}
+  \item \texttt{ml-pipeline/reports/android-model-v13-expanded-report.json}
+  \item \texttt{ml-pipeline/reports/android-model-v13-expanded-comparison.json}
+  \item \texttt{ml-pipeline/reports/android-model-v13-expanded-error-report.json}
+  \item \texttt{ml-pipeline/reports/android-model-v13-expanded-episode-report.json}
+  \item \texttt{ml-pipeline/reports/android-model-v13-expanded-alert-policy-report.json}
+  \item \texttt{ml-pipeline/reports/android-model-v13-expanded-label-audit.json}
+  \item \texttt{ml-pipeline/reports/android-model-v13-expanded-split-balance-audit.json}
+  \item \texttt{ml-pipeline/reports/android-model-v13-expanded-experiment-notes.md}
+  \item \texttt{ml-pipeline/reports/android-model-v14-sequence-intel-report.json}
+  \item \texttt{ml-pipeline/reports/android-model-v14-sequence-intel-comparison.json}
+  \item \texttt{ml-pipeline/reports/android-model-v14-sequence-intel-error-report.json}
+  \item \texttt{ml-pipeline/reports/android-model-v14-sequence-intel-episode-report.json}
+  \item \texttt{ml-pipeline/reports/android-model-v14-sequence-intel-alert-policy-report.json}
+  \item \texttt{ml-pipeline/reports/android-model-v14-sequence-intel-experiment-notes.md}
+  \item \texttt{ml-pipeline/reports/android-model-v15-hybrid-report.json}
+  \item \texttt{ml-pipeline/reports/android-model-v15-hybrid-experiment-notes.md}
 \end{itemize}
+}
 
 \section{Core Reproduction Commands}
 The full public-corpus workflow is documented in \texttt{ml-pipeline/README.md}. The compact
@@ -43,6 +65,93 @@ python -m ml_pipeline.run_experiment_suite \
   --output-dir experiment-runs/real-run-001 \
   --model-threshold 0.5 \
   --ids-threshold 0.55
+\end{verbatim}
+
+The later Android-deployable iterations can be reproduced with the dedicated Android training and
+evaluation commands recorded in the corresponding report notes. High-recall RF (v13) trains the
+expanded-feature deployable random-forest family, while Low-FPR RF (v14) extends that path with
+sequence and destination-intelligence features. Adaptive hybrid RF (v15) is not a new training command;
+it evaluates the exported v13 and v14 artifacts together:
+\begin{verbatim}
+python -m ml_pipeline.hybrid_model_evaluation \
+  --input data/real/manta-real-training.csv \
+  --model-v13 \
+  artifacts/android/anomaly-deployable-v13-expanded.json \
+  --model-v14 \
+  artifacts/android/anomaly-deployable-v14-sequence-intel.json \
+  --output reports/android-model-v15-hybrid-report.json \
+  --window-mode adaptive \
+  --max-adaptive-windows 250000 \
+  --label-strategy window \
+  --max-fpr 0.05
+\end{verbatim}
+In the current artifact set, the v15 command records an incomplete full-corpus evaluation because
+the Python exported-tree report path timed out. The runtime implementation is present in Android,
+but thesis-quality v15 metrics require a faster offline scorer or persisted v13/v14 score vectors.
+The Android alert-evidence policy changes are validated by the Android implementation and unit-test
+suite, but they are not yet represented by a complete public-corpus alert-quality report.
+
+The backend was then rerun against the same Android adaptive-window cache used by the app-model
+comparison. The heavier hybrid dual-channel backend family exceeded practical runtime in this
+environment, so the completed parity backend artifact uses the boosted-tree backend family over the
+full portable Android feature contract:
+\begin{verbatim}
+python -m ml_pipeline.train_remote_backend_model \
+  --input data/real/manta-real-training.csv \
+  --output-model artifacts/backend/remote-assisted-model.json \
+  --output-report reports/remote-assisted-model-parity-same-methodology.json \
+  --window-mode adaptive \
+  --max-adaptive-windows 5000 \
+  --label-strategy window \
+  --model-family gradient_boosted_tree
+
+python -m ml_pipeline.calibrate_backend_threshold \
+  --input data/real/manta-real-training.csv \
+  --remote-model artifacts/backend/remote-assisted-model.json \
+  --output-model artifacts/backend/remote-assisted-model.json \
+  --output-report reports/remote-assisted-threshold-calibration-same-methodology.json \
+  --window-mode adaptive \
+  --max-adaptive-windows 5000 \
+  --label-strategy window \
+  --max-eval-rows 5000 \
+  --target-precision 0.85 \
+  --target-recall 0.90 \
+  --target-max-fpr 0.18
+
+python -m ml_pipeline.compare_android_deployable_models \
+  --input data/real/manta-real-training.csv \
+  --output-json reports/android-backend-parity-comparison-same-methodology.json \
+  --output-csv reports/android-backend-parity-comparison-same-methodology.csv \
+  --output-md reports/android-backend-parity-comparison-same-methodology.md \
+  --remote-model artifacts/backend/remote-assisted-model.json \
+  --window-mode adaptive \
+  --max-adaptive-windows 5000 \
+  --label-strategy window \
+  --max-eval-rows 5000
+
+python -m ml_pipeline.privacy_ablation \
+  --input data/real/manta-real-training.csv \
+  --output reports/privacy-ablation-new-dataset.json \
+  --window-mode bucket \
+  --label-strategy window \
+  --max-flow-rows 100000
+
+python -m ml_pipeline.privacy_leakage_benchmark \
+  --input data/real/manta-real-training.csv \
+  --output reports/privacy-leakage-new-dataset.json \
+  --window-mode bucket \
+  --label-strategy window \
+  --max-flow-rows 100000 \
+  --max-class-rows 300
+
+python -m ml_pipeline.model_privacy_utility \
+  --input data/real/manta-real-training.csv \
+  --local-model ../android-app/app/src/main/assets/models/anomaly-local.json \
+  --remote-model artifacts/backend/remote-assisted-model.json \
+  --output reports/model-privacy-utility-local-remote-new-dataset.json \
+  --window-mode bucket \
+  --label-strategy window \
+  --max-flow-rows 25000
 \end{verbatim}
 
 The normalized input CSV is derived from the public datasets listed in
