@@ -1,34 +1,23 @@
-import type { Metadata, Viewport } from "next";
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "MANTA Thesis",
+  title: "MANTA — Metadata-only mobile threat detection",
   description:
-    "Bachelor thesis website for MANTA, a metadata-only mobile traffic monitoring and anomaly detection project.",
-  icons: {
-    icon: "/favicon.ico",
-    shortcut: "/favicon.ico",
-    apple: "/elephant-logo.png",
-  },
-};
-
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  colorScheme: "dark",
+    "Bachelor thesis and working prototype for privacy-aware anomaly detection on encrypted Android traffic.",
 };
 
 const repoUrl = "https://github.com/Resistine/feel-bachelor";
 
 function GitHubIcon() {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
       <path
         fill="currentColor"
-        d="M12 2C6.48 2 2 6.59 2 12.25c0 4.52 2.87 8.35 6.84 9.7.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.5-1.11-1.5-.91-.63.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.9 1.56 2.35 1.11 2.92.85.09-.67.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.7 0 0 .84-.28 2.75 1.05A9.36 9.36 0 0 1 12 6.98c.85 0 1.7.12 2.5.34 1.9-1.33 2.74-1.05 2.74-1.05.55 1.4.2 2.44.1 2.7.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.8-4.57 5.05.36.32.68.95.68 1.92 0 1.38-.01 2.5-.01 2.84 0 .27.18.59.69.49A10.15 10.15 0 0 0 22 12.25C22 6.59 17.52 2 12 2Z"
+        d="M12 .7a11.5 11.5 0 0 0-3.64 22.4c.58.1.79-.25.79-.56v-2.23c-3.22.7-3.9-1.37-3.9-1.37-.52-1.34-1.28-1.7-1.28-1.7-1.05-.72.08-.71.08-.71 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.28-5.27-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.16 1.18A10.9 10.9 0 0 1 12 6.12c.98 0 1.95.13 2.86.38 2.2-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.71 5.38-5.29 5.67.42.36.79 1.06.79 2.14v3.27c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z"
       />
     </svg>
   );
@@ -41,17 +30,20 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
         <header className="site-header">
           <div className="container nav-track">
             <Link href="/" className="brand" aria-label="MANTA home">
-              <Image src="/elephant-logo.png" alt="" width={38} height={38} priority />
-              <span>MANTA</span>
+              <Image src="/elephant-logo.png" alt="" width={40} height={40} priority />
+              <span>
+                <strong>MANTA</strong>
+                <small>Bachelor thesis · 2026</small>
+              </span>
             </Link>
             <nav className="nav-links" aria-label="Primary navigation">
-              <Link href="/#thesis">Thesis</Link>
-              <Link href="/#architecture">Architecture</Link>
-              <Link href="/#results">Results</Link>
-              <Link href="/demo">Demo</Link>
+              <Link href="/#question">Question</Link>
+              <Link href="/#system">System</Link>
+              <Link href="/#evidence">Evidence</Link>
+              <Link href="/demo">Interactive demo</Link>
             </nav>
-            <a className="button button-compact" href="/manta-thesis.pdf" download>
-              Download PDF
+            <a className="button button-compact button-dark" href="/manta-thesis.pdf" download>
+              Thesis PDF
             </a>
           </div>
         </header>
@@ -61,13 +53,14 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
         <footer>
           <div className="container footer-bar">
             <div className="footer-mark">
-              <Image src="/elephant-logo.png" alt="" width={28} height={28} />
+              <Image src="/elephant-logo.png" alt="" width={30} height={30} />
               <small>© mahmoud elfeel 2026</small>
             </div>
+            <p>Encrypted traffic. Observable behaviour. Explicit privacy trade-offs.</p>
             <a
               className="footer-github"
               href={repoUrl}
-              aria-label="GitHub repository"
+              aria-label="GitHub thesis repository"
               target="_blank"
               rel="noreferrer"
             >

@@ -33,10 +33,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -49,6 +51,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -654,20 +659,18 @@ fun MainScreen(
 
     Scaffold(
         topBar = {
-            val screenTitle = if (selectedTab == MainTab.HOME) "Resistine" else selectedTab.label
+            val screenTitle = if (selectedTab == MainTab.HOME) "MANTA" else selectedTab.label
             val screenSubtitle = when (selectedTab) {
-                MainTab.HOME -> if (config.captureEnabled) "Protection active" else "Protection paused"
+                MainTab.HOME -> "Metadata-only endpoint monitor"
                 MainTab.APPS -> if (scannedInstalledApps == null) "Scan when you need the installed app list" else "${appInventory.size} apps in view"
                 MainTab.ALERTS -> "${filteredAlerts.size} matching alerts"
                 MainTab.SETTINGS -> modelDisplayName(config.detectionModel)
             }
             TopAppBar(
                 navigationIcon = {
-                    if (selectedTab != MainTab.HOME) {
+                    if (selectedAppId != null) {
                         IconButton(
-                            onClick = {
-                                if (selectedAppId != null) selectedAppId = null else selectedTab = MainTab.HOME
-                            }
+                            onClick = { selectedAppId = null }
                         ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
@@ -697,6 +700,29 @@ fun MainScreen(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
+        },
+        bottomBar = {
+            if (selectedAppId == null) {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                    MainTab.entries.forEach { tab ->
+                        val icon = when (tab) {
+                            MainTab.HOME -> Icons.Filled.Home
+                            MainTab.APPS -> Icons.Filled.Apps
+                            MainTab.ALERTS -> Icons.Filled.Notifications
+                            MainTab.SETTINGS -> Icons.Filled.Settings
+                        }
+                        NavigationBarItem(
+                            selected = selectedTab == tab,
+                            onClick = { selectedTab = tab },
+                            icon = { Icon(icon, contentDescription = null) },
+                            label = { Text(tab.label) },
+                            colors = NavigationBarItemDefaults.colors(
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer
+                            )
+                        )
+                    }
+                }
+            }
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { contentPadding ->
@@ -952,35 +978,68 @@ private fun HomeView(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            shape = RoundedCornerShape(30.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF071B18))
         ) {
             Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier.padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                Text("Protection", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    if (config.captureEnabled) "Network protection is active."
-                    else "Network protection is paused.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        color = if (config.captureEnabled) Color(0xFF153B34) else Color(0xFF3E331D),
+                        shape = RoundedCornerShape(999.dp)
+                    ) {
+                        Text(
+                            text = if (config.captureEnabled) "●  PROTECTION ACTIVE" else "●  PROTECTION PAUSED",
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                            color = if (config.captureEnabled) Color(0xFFB7ED67) else Color(0xFFFFC45E),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Filled.Security,
+                        contentDescription = null,
+                        tint = Color(0xFF58DEC9),
+                        modifier = Modifier.size(30.dp)
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text(
+                        if (config.captureEnabled) "Monitoring network behaviour" else "Capture is currently paused",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Encrypted traffic is scored from timing, volume and destination metadata. Packet payloads are never inspected.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFFB9CCC7)
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
                         onClick = onStartCapture,
-                        enabled = config.consentAccepted && !config.captureEnabled
+                        enabled = config.consentAccepted && !config.captureEnabled,
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Text("Start capture")
+                        Text("Start protection")
                     }
                     OutlinedButton(
                         onClick = onStopCapture,
-                        enabled = config.captureEnabled
+                        enabled = config.captureEnabled,
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Text("Stop capture")
+                        Text("Pause")
                     }
                 }
             }
@@ -989,11 +1048,12 @@ private fun HomeView(
         if (!config.consentAccepted) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
             ) {
                 Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text("Consent required", style = MaterialTheme.typography.titleMedium)
                     Text(
@@ -1007,64 +1067,104 @@ private fun HomeView(
             }
         }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text("Today", style = MaterialTheme.typography.titleMedium)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    InventoryChip("${alerts.size} alerts")
-                    InventoryChip("$openCount open")
-                    InventoryChip("$highCount high")
-                    InventoryChip("$mediumCount medium")
-                    InventoryChip(if (config.isEffectiveExportEnabled()) "Cloud sync on" else "Cloud sync off")
-                }
-            }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HomeMetricCard(
+                value = "${alerts.size}",
+                label = "alerts today",
+                modifier = Modifier.weight(1f)
+            )
+            HomeMetricCard(
+                value = "$openCount",
+                label = "open",
+                modifier = Modifier.weight(1f)
+            )
+            HomeMetricCard(
+                value = "0",
+                label = "payloads read",
+                modifier = Modifier.weight(1f)
+            )
         }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
+        ) {
+            Column {
+                Text("Needs attention", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    if (openCount == 0) "No unresolved detections" else "$openCount unresolved detections",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                "$highCount high · $mediumCount medium",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = if (openCount > 0) {
+                    MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.62f)
+                } else {
+                    MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.62f)
+                }
+            )
+        ) {
+            HomeDestinationRow(
+                title = if (openCount > 0) "Review open alerts" else "No alerts need review",
+                subtitle = if (openCount > 0) {
+                    "Inspect evidence and label detections for retraining."
+                } else {
+                    "MANTA will surface unusual app behaviour here."
+                },
+                icon = Icons.Filled.Notifications,
+                onClick = { onNavigate(MainTab.ALERTS) }
+            )
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp)
+        ) {
             Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("Open", style = MaterialTheme.typography.titleMedium)
+                Text("Explore", style = MaterialTheme.typography.titleMedium)
                 HomeDestinationRow(
                     title = "Apps",
-                    subtitle = "Review app activity, alerts, and per-app tuning.",
-                    icon = Icons.Filled.Palette,
+                    subtitle = "Per-app baselines, activity and tuning profiles.",
+                    icon = Icons.Filled.Apps,
                     onClick = { onNavigate(MainTab.APPS) }
                 )
                 HomeDestinationRow(
-                    title = "Alerts",
-                    subtitle = "Triage detections and inspect evidence.",
-                    icon = Icons.Filled.Notifications,
-                    onClick = { onNavigate(MainTab.ALERTS) }
-                )
-                HomeDestinationRow(
-                    title = "Settings",
-                    subtitle = "Detection, privacy, cloud, and appearance.",
-                    icon = Icons.Filled.Settings,
+                    title = "Privacy and models",
+                    subtitle = "Export policy, active detector and server connection.",
+                    icon = Icons.Filled.Security,
                     onClick = { onNavigate(MainTab.SETTINGS) }
                 )
             }
         }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
+        Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp)) {
             Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text("Health", style = MaterialTheme.typography.titleMedium)
+                Text("Runtime status", style = MaterialTheme.typography.titleMedium)
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     RuntimeHealthChip("On-device", runtimeHealth.localModelAvailable)
-                    RuntimeHealthChip("Cloud", runtimeHealth.remoteConfigured)
+                    RuntimeHealthChip("Server", runtimeHealth.remoteConfigured)
+                    InventoryChip(if (config.isEffectiveExportEnabled()) "Privacy export on" else "Local only")
                 }
                 Text(
                     "Active ${modelDisplayName(runtimeHealth.activeDetectionModel)}" +
@@ -1090,6 +1190,7 @@ private fun HomeView(
         if (!statusMessage.isNullOrBlank()) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Text(
@@ -1098,6 +1199,24 @@ private fun HomeView(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun HomeMetricCard(
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    Card(modifier = modifier, shape = RoundedCornerShape(20.dp)) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(
+                label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

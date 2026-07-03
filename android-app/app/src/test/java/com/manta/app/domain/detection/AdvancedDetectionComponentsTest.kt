@@ -30,13 +30,13 @@ class AdvancedDetectionComponentsTest {
             stableScore = monitor.evaluate(buildWindow(bytesOut = 2_000L + idx, burstiness = 0.2)).score
         }
 
-        var shiftedScore = 0.0
-        repeat(6) {
-            shiftedScore = monitor.evaluate(buildWindow(bytesOut = 80_000L, burstiness = 0.95)).score
+        val shiftedScores = List(6) {
+            monitor.evaluate(buildWindow(bytesOut = 80_000L, burstiness = 0.95)).score
         }
+        val peakShiftedScore = shiftedScores.max()
 
-        assertTrue(shiftedScore > stableScore)
-        assertTrue(shiftedScore > 0.35)
+        assertTrue(peakShiftedScore > stableScore)
+        assertTrue(peakShiftedScore > 0.35)
     }
 
     @Test

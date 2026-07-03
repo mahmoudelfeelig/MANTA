@@ -18,6 +18,7 @@ import com.manta.app.ui.MainViewModel
 import com.manta.app.ui.MainViewModelFactory
 import com.manta.app.ui.PublicDemoScreen
 import com.manta.app.ui.theme.MantaTheme
+import com.manta.app.core.settings.ThemeMode
 
 class MainActivity : ComponentActivity() {
     private val app by lazy { application as MantaApplication }
@@ -45,7 +46,7 @@ class MainActivity : ComponentActivity() {
             }
             val autoAdvance = intent.getBooleanExtra(EXTRA_DEMO_AUTO_ADVANCE, false)
             setContent {
-                MantaTheme {
+                MantaTheme(themeMode = ThemeMode.DARK) {
                     PublicDemoScreen(initialPage = page, autoAdvance = autoAdvance)
                 }
             }
