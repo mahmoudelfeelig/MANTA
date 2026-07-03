@@ -489,32 +489,40 @@
           </div>
         </div>
         <div class="hint-box" style="margin-bottom:12px;">
-          Policy covers the remotely managed app settings: capture, export, thresholds, detection and shadow model, theme, debug mode, retention, false-positive budget, drift threshold, fusion weights, protected-brand watchlist, and app profile overrides. Privacy mode remains local-only by design.
+          Policy covers the remotely managed app settings: capture, cloud sync, thresholds, detection and shadow model, theme, diagnostics, local data window, alert budget, drift threshold, tuning weights, protected-brand watchlist, and app profile overrides. Privacy mode remains local-only by design.
         </div>
         <div class="form-grid">
           <label class="span-3">
             <span class="label">Detection model</span>
             <select id="policyDetectionModel">
-              <option value="ensemble_fusion">Fusion ensemble</option>
+              <option value="ensemble_fusion">Fusion</option>
               <option value="statistical">Statistical</option>
-              <option value="multivariate">Multivariate</option>
-              <option value="sequence">Sequence</option>
-              <option value="linear">Linear</option>
+              <option value="multivariate">Correlation</option>
+              <option value="sequence">Temporal transition</option>
+              <option value="local">Standard RF</option>
+              <option value="local_sensitive">High-recall RF</option>
+              <option value="local_quiet">Low-FPR RF</option>
+              <option value="local_balanced">Adaptive hybrid RF</option>
+              <option value="local_privacy">Privacy RF</option>
               <option value="tflite">TFLite</option>
-              <option value="remote_assisted">Remote assisted</option>
+              <option value="remote_assisted">Backend</option>
             </select>
           </label>
           <label class="span-3">
             <span class="label">Shadow model</span>
             <select id="policyShadowModel">
               <option value="">Disabled</option>
-              <option value="ensemble_fusion">Fusion ensemble</option>
+              <option value="ensemble_fusion">Fusion</option>
               <option value="statistical">Statistical</option>
-              <option value="multivariate">Multivariate</option>
-              <option value="sequence">Sequence</option>
-              <option value="linear">Linear</option>
+              <option value="multivariate">Correlation</option>
+              <option value="sequence">Temporal transition</option>
+              <option value="local">Standard RF</option>
+              <option value="local_sensitive">High-recall RF</option>
+              <option value="local_quiet">Low-FPR RF</option>
+              <option value="local_balanced">Adaptive hybrid RF</option>
+              <option value="local_privacy">Privacy RF</option>
               <option value="tflite">TFLite</option>
-              <option value="remote_assisted">Remote assisted</option>
+              <option value="remote_assisted">Backend</option>
             </select>
           </label>
           <label class="span-2">
@@ -543,8 +551,8 @@
           <label class="span-2"><span class="label">Low threshold</span><input id="policyLow" value="0.30" /></label>
           <label class="span-2"><span class="label">Medium threshold</span><input id="policyMedium" value="0.60" /></label>
           <label class="span-2"><span class="label">High threshold</span><input id="policyHigh" value="0.85" /></label>
-          <label class="span-2"><span class="label">Retention days</span><input id="policyRetention" value="90" /></label>
-          <label class="span-2"><span class="label">FP budget/app/day</span><input id="policyBudget" value="12" /></label>
+          <label class="span-2"><span class="label">Local data window</span><input id="policyRetention" value="30" /></label>
+          <label class="span-2"><span class="label">Alert budget</span><input id="policyBudget" value="12" /></label>
           <label class="span-2"><span class="label">Drift threshold</span><input id="policyDrift" value="0.65" /></label>
           <label class="span-2">
             <span class="label">Debug mode</span>
@@ -558,18 +566,18 @@
         <details style="margin-top:14px;">
           <summary>Fusion weights</summary>
           <div class="form-grid">
-            <label class="span-3"><span class="label">Statistical</span><input id="fusionStat" value="0.28" /></label>
-            <label class="span-3"><span class="label">Multivariate</span><input id="fusionMultivariate" value="0.20" /></label>
-            <label class="span-3"><span class="label">Sequence</span><input id="fusionSequence" value="0.12" /></label>
-            <label class="span-3"><span class="label">Linear</span><input id="fusionLinear" value="0.16" /></label>
-            <label class="span-3"><span class="label">TFLite</span><input id="fusionTflite" value="0.12" /></label>
-            <label class="span-3"><span class="label">Remote</span><input id="fusionRemote" value="0.12" /></label>
+            <label class="span-3"><span class="label">Baseline</span><input id="fusionStat" value="0.28" /></label>
+            <label class="span-3"><span class="label">Correlation</span><input id="fusionMultivariate" value="0.20" /></label>
+            <label class="span-3"><span class="label">Timing</span><input id="fusionSequence" value="0.12" /></label>
+            <label class="span-3"><span class="label">On-device</span><input id="fusionLinear" value="0.16" /></label>
+            <label class="span-3"><span class="label">Experimental</span><input id="fusionTflite" value="0.12" /></label>
+            <label class="span-3"><span class="label">Cloud</span><input id="fusionRemote" value="0.12" /></label>
             <label class="span-3"><span class="label">Beacon</span><input id="fusionBeacon" value="0.15" /></label>
             <label class="span-3"><span class="label">Drift</span><input id="fusionDrift" value="0.10" /></label>
             <label class="span-3"><span class="label">Reputation</span><input id="fusionReputation" value="0.18" /></label>
-            <label class="span-3"><span class="label">DQ penalty</span><input id="fusionDataQuality" value="0.10" /></label>
-            <label class="span-3"><span class="label">Resp anomaly</span><input id="fusionResponseAnomaly" value="0.82" /></label>
-            <label class="span-3"><span class="label">Resp context</span><input id="fusionResponseContext" value="0.18" /></label>
+            <label class="span-3"><span class="label">Quality</span><input id="fusionDataQuality" value="0.10" /></label>
+            <label class="span-3"><span class="label">Anomaly</span><input id="fusionResponseAnomaly" value="0.82" /></label>
+            <label class="span-3"><span class="label">Context</span><input id="fusionResponseContext" value="0.18" /></label>
           </div>
         </details>
 
@@ -599,7 +607,7 @@
       <section class="panel span-12">
         <div class="split" style="margin-bottom:12px;">
           <div>
-            <h2>Remote model control</h2>
+            <h2>Cloud model control</h2>
             <div class="muted small" id="remoteModelDeviceHint">Uses the primary selected device.</div>
           </div>
           <div class="section-actions">
@@ -608,7 +616,7 @@
           </div>
         </div>
         <div class="hint-box" style="margin-bottom:12px;">
-          Retraining updates the backend remote-assisted model for the primary selected device. Multiple remote model families can coexist in the registry, and activating a different version changes the current remote scorer for that device. This affects <span class="mono">remote_assisted</span> directly and the remote contribution inside <span class="mono">ensemble_fusion</span>, while the local <span class="mono">multivariate</span> mode remains the covariance-aware on-device baseline. Live Android remote inference now includes the portable window features plus transport/header-side metadata such as TTL gap, TCP flag rates, TCP window mean, ACK timing, payload mean, load mean, and transport-metric availability.
+          Retraining updates the backend remote-assisted model for the primary selected device. Multiple cloud model families can coexist in the registry, and activating a different version changes the current remote scorer for that device. This affects <span class="mono">remote_assisted</span> directly and the remote contribution inside <span class="mono">ensemble_fusion</span>, while the local <span class="mono">multivariate</span> mode remains the covariance-aware on-device baseline. Live Android remote inference now includes the portable window features plus transport/header-side metadata such as TTL gap, TCP flag rates, TCP window mean, ACK timing, payload mean, load mean, and transport-metric availability.
         </div>
         <label style="display:grid; gap:6px; margin-bottom:12px; max-width:320px;">
           <span class="label">Retrain / import family</span>
@@ -1450,7 +1458,7 @@
       els.policyLow.value = String(policy.default_thresholds?.low ?? 0.30);
       els.policyMedium.value = String(policy.default_thresholds?.medium ?? 0.60);
       els.policyHigh.value = String(policy.default_thresholds?.high ?? 0.85);
-      els.policyRetention.value = String(policy.retention_days ?? 90);
+      els.policyRetention.value = String(policy.retention_days ?? 30);
       els.policyBudget.value = String(policy.false_positive_budget_per_app_day ?? 12);
       els.policyDrift.value = String(policy.drift_high_threshold ?? 0.65);
       els.policyDebugEnabled.value = String(policy.debug_mode_enabled ?? false);
@@ -1458,7 +1466,7 @@
       els.fusionStat.value = String(fusion.statistical ?? 0.28);
       els.fusionMultivariate.value = String(fusion.multivariate ?? 0.20);
       els.fusionSequence.value = String(fusion.sequence ?? 0.12);
-      els.fusionLinear.value = String(fusion.linear ?? 0.16);
+      els.fusionLinear.value = String(fusion.local ?? fusion.linear ?? 0.16);
       els.fusionTflite.value = String(fusion.tflite ?? 0.12);
       els.fusionRemote.value = String(fusion.remote ?? 0.12);
       els.fusionBeacon.value = String(fusion.beacon ?? 0.15);
@@ -1497,7 +1505,7 @@
           statistical: Number.parseFloat(els.fusionStat.value),
           multivariate: Number.parseFloat(els.fusionMultivariate.value),
           sequence: Number.parseFloat(els.fusionSequence.value),
-          linear: Number.parseFloat(els.fusionLinear.value),
+          local: Number.parseFloat(els.fusionLinear.value),
           tflite: Number.parseFloat(els.fusionTflite.value),
           remote: Number.parseFloat(els.fusionRemote.value),
           beacon: Number.parseFloat(els.fusionBeacon.value),
@@ -1620,7 +1628,7 @@
     async function loadRemoteModel(retrain = false) {
       const deviceId = primaryDeviceId();
       if (!deviceId) {
-        throw new Error("No primary device available for remote model actions.");
+        throw new Error("No primary device available for cloud model actions.");
       }
       const family = els.remoteModelFamily?.value || "logistic_regression";
       if (retrain) {
@@ -1641,7 +1649,7 @@
       if (!deviceId) {
         throw new Error("No primary device available for model import.");
       }
-      const model = safeParseJson("Remote model JSON", els.remoteModelImport.value, {});
+      const model = safeParseJson("Cloud model JSON", els.remoteModelImport.value, {});
       const family = els.remoteModelFamily?.value || "logistic_regression";
       const result = await api(`/api/v1/model/device/${encodeURIComponent(deviceId)}`, {
         method: "PUT",
@@ -1682,7 +1690,7 @@
       if (!selected.length) {
         throw new Error("Select one or more devices to remove.");
       }
-      if (!window.confirm(`Remove ${selected.length} selected device(s) and all associated events, alerts, policies, and remote models?`)) {
+      if (!window.confirm(`Remove ${selected.length} selected device(s) and all associated events, alerts, policies, and cloud models?`)) {
         return;
       }
       const previousPrimary = primaryDeviceId();

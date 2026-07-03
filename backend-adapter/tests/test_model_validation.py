@@ -75,6 +75,42 @@ def test_policy_rejects_unsupported_detection_model() -> None:
         )
 
 
+def test_policy_accepts_local_tree_model_modes() -> None:
+    for model in ("local", "local_sensitive", "local_quiet", "local_balanced", "local_privacy"):
+        payload = DevicePolicyPayload(
+            policy_version=1,
+            default_thresholds=ThresholdProfile(low=0.3, medium=0.6, high=0.85),
+            app_threshold_overrides={},
+            export_enabled=True,
+            retention_days=90,
+            detection_model=model,
+            shadow_model=model,
+        )
+        assert payload.detection_model == model
+        assert payload.shadow_model == model
+
+
+def test_policy_normalizes_legacy_local_model_modes() -> None:
+    aliases = {
+        "linear": "local",
+        "linear_v13_recall": "local_sensitive",
+        "linear_v14_quiet": "local_quiet",
+        "hybrid_v15": "local_balanced",
+    }
+    for legacy, canonical in aliases.items():
+        payload = DevicePolicyPayload(
+            policy_version=1,
+            default_thresholds=ThresholdProfile(low=0.3, medium=0.6, high=0.85),
+            app_threshold_overrides={},
+            export_enabled=True,
+            retention_days=90,
+            detection_model=legacy,
+            shadow_model=legacy,
+        )
+        assert payload.detection_model == canonical
+        assert payload.shadow_model == canonical
+
+
 def test_policy_rejects_unsupported_shadow_model() -> None:
     with pytest.raises(ValidationError):
         DevicePolicyPayload(

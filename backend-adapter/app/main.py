@@ -51,10 +51,43 @@ def _severity_label(rank: int) -> str:
 
 
 _DASHBOARD_TEMPLATE_PATH = Path(__file__).resolve().parents[1] / "dashboards" / "dashboard.html"
+_REMOTE_MODEL_CACHE: tuple[Path, float, dict] | None = None
 
 
 def _load_dashboard_html() -> str:
     return _DASHBOARD_TEMPLATE_PATH.read_text(encoding="utf-8")
+
+
+def _resolve_remote_model_path(raw_path: str) -> Path:
+    model_path = Path(raw_path)
+    if model_path.is_absolute():
+        return model_path
+    repo_root = Path(__file__).resolve().parents[2]
+    return repo_root / model_path
+
+
+def _latest_remote_model() -> dict:
+    global _REMOTE_MODEL_CACHE
+    configured_path = settings.remote_model_path.strip()
+    if configured_path:
+        model_path = _resolve_remote_model_path(configured_path)
+        try:
+            mtime = model_path.stat().st_mtime
+            if _REMOTE_MODEL_CACHE is not None:
+                cached_path, cached_mtime, cached_model = _REMOTE_MODEL_CACHE
+                if cached_path == model_path and cached_mtime == mtime:
+                    return cached_model
+            loaded = json.loads(model_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                _REMOTE_MODEL_CACHE = (model_path, mtime, loaded)
+                return loaded
+        except Exception:  # noqa: BLE001
+            _REMOTE_MODEL_CACHE = None
+    return default_remote_model(model_type="hybrid_dual_channel")
+
+
+def _active_remote_model(device_id_pseudo: str) -> dict:
+    return storage.get_remote_model(device_id_pseudo) or _latest_remote_model()
 
 
 def _parse_device_filters(
@@ -147,14 +180,15 @@ def _alert_payload(alert) -> dict:
 
 
 def _destination_cache_key(payload: dict) -> str:
+    window_features = payload.get("window_features") if isinstance(payload.get("window_features"), dict) else {}
     components = [
         str(payload.get("destination_identity") or "").strip().lower(),
         str(payload.get("site_hint") or "").strip().lower(),
-        str(payload.get("window_features", {}).get("dns_query_name") or "").strip().lower(),
-        str(payload.get("window_features", {}).get("tls_sni") or "").strip().lower(),
-        str(payload.get("window_features", {}).get("http_host") or "").strip().lower(),
-        str(payload.get("window_features", {}).get("dst_ip") or payload.get("window_features", {}).get("destination_ip") or "").strip().lower(),
-        str(payload.get("window_features", {}).get("dst_port") or payload.get("window_features", {}).get("destination_port") or payload.get("destination_port") or 443),
+        str(window_features.get("dns_query_name") or "").strip().lower(),
+        str(window_features.get("tls_sni") or "").strip().lower(),
+        str(window_features.get("http_host") or "").strip().lower(),
+        str(window_features.get("dst_ip") or window_features.get("destination_ip") or "").strip().lower(),
+        str(window_features.get("dst_port") or window_features.get("destination_port") or payload.get("destination_port") or 443),
     ]
     return "|".join(components)
 
@@ -169,6 +203,7 @@ def _policy_protected_brands(device_id_pseudo: str | None) -> tuple[str, ...]:
 def _auto_enrich_alert_payload(payload: dict) -> dict:
     enriched = dict(payload)
     window_features = dict(enriched.get("window_features") or {})
+    enriched["window_features"] = window_features
     lookalike_score = float(enriched.get("lookalike_score") or 0.0)
     severity = str(enriched.get("severity") or "LOW").upper()
     protected_brands = _policy_protected_brands(str(enriched.get("device_id_pseudo") or "").strip() or None)
@@ -276,7 +311,7 @@ def _incident_payload(incident) -> dict:
 
 
 def _remote_inference(payload: RemoteInferenceRequest) -> dict:
-    model = storage.get_remote_model(payload.device_id_pseudo) or default_remote_model()
+    model = _active_remote_model(payload.device_id_pseudo)
     scored = score_remote_model(
         model=model,
         feature_window=payload.feature_window.model_dump(mode="json"),
@@ -319,7 +354,9 @@ def _model_families_from_versions(versions: list) -> list[str]:
 def _train_remote_model_payload(device_id_pseudo: str, family: str = "hybrid_dual_channel") -> tuple[dict, int]:
     existing = storage.get_remote_model(device_id_pseudo)
     if existing is None or str(existing.get("model_family") or existing.get("model_type") or "") != family:
-        existing = default_remote_model(model_type=family)
+        latest = _latest_remote_model()
+        latest_family = str(latest.get("model_family") or latest.get("model_type") or "")
+        existing = latest if latest_family == family else default_remote_model(model_type=family)
     samples = storage.export_retraining_samples(device_id_pseudo=device_id_pseudo, limit=5000)
     trained, report = train_remote_model(samples=samples, previous_model=existing, model_type=family)
     trained["training_report"] = report
@@ -726,8 +763,8 @@ _DASHBOARD_HTML = """
           </div>
         </div>
         <p class="muted small">
-          Policy controls the remotely managed detection subset: thresholds, export flag, detection/shadow model,
-          false-positive budget, retention, and drift threshold. Theme, debug mode, privacy variant, evidence capture,
+          Policy controls the remotely managed detection subset: thresholds, cloud sync, detection/shadow model,
+          alert budget, local data window, and drift threshold. Theme, diagnostics, privacy variant, evidence capture,
           app profiles, and local ablation remain phone-local settings.
         </p>
         <div class="toolbar" style="grid-template-columns: 1fr 1fr 1fr auto; margin-bottom: 12px;">
@@ -742,26 +779,34 @@ _DASHBOARD_HTML = """
           <label>
             <div class="muted small">Detection model</div>
             <select id="policyDetectionModel">
-              <option value="ensemble_fusion">ensemble_fusion</option>
-              <option value="statistical">statistical</option>
-              <option value="multivariate">multivariate</option>
-              <option value="sequence">sequence</option>
-              <option value="linear">linear</option>
-              <option value="tflite">tflite</option>
-              <option value="remote_assisted">remote_assisted</option>
+              <option value="ensemble_fusion">Fusion</option>
+              <option value="statistical">Statistical</option>
+              <option value="multivariate">Correlation</option>
+              <option value="sequence">Temporal transition</option>
+              <option value="local">Standard RF</option>
+              <option value="local_sensitive">High-recall RF</option>
+              <option value="local_quiet">Low-FPR RF</option>
+              <option value="local_balanced">Adaptive hybrid RF</option>
+              <option value="local_privacy">Privacy RF</option>
+              <option value="tflite">TFLite</option>
+              <option value="remote_assisted">Backend</option>
             </select>
           </label>
           <label>
             <div class="muted small">Shadow model</div>
             <select id="policyShadowModel">
-              <option value="">disabled</option>
-              <option value="ensemble_fusion">ensemble_fusion</option>
-              <option value="statistical">statistical</option>
-              <option value="multivariate">multivariate</option>
-              <option value="sequence">sequence</option>
-              <option value="linear">linear</option>
-              <option value="tflite">tflite</option>
-              <option value="remote_assisted">remote_assisted</option>
+              <option value="">Disabled</option>
+              <option value="ensemble_fusion">Fusion</option>
+              <option value="statistical">Statistical</option>
+              <option value="multivariate">Correlation</option>
+              <option value="sequence">Temporal transition</option>
+              <option value="local">Standard RF</option>
+              <option value="local_sensitive">High-recall RF</option>
+              <option value="local_quiet">Low-FPR RF</option>
+              <option value="local_balanced">Adaptive hybrid RF</option>
+              <option value="local_privacy">Privacy RF</option>
+              <option value="tflite">TFLite</option>
+              <option value="remote_assisted">Backend</option>
             </select>
           </label>
           <button id="loadPolicyBtn" class="secondary">Load policy</button>
@@ -774,10 +819,10 @@ _DASHBOARD_HTML = """
             <label><div class="muted small">High threshold</div><input id="policyHigh" value="0.85" /></label>
           </div>
           <div class="span-3">
-            <label><div class="muted small">Retention days</div><input id="policyRetention" value="90" /></label>
+            <label><div class="muted small">Local data window</div><input id="policyRetention" value="30" /></label>
           </div>
           <div class="span-3">
-            <label><div class="muted small">FP budget/app/day</div><input id="policyBudget" value="12" /></label>
+            <label><div class="muted small">Alert budget</div><input id="policyBudget" value="12" /></label>
           </div>
           <div class="span-3">
             <label><div class="muted small">Drift high threshold</div><input id="policyDrift" value="0.65" /></label>
@@ -800,7 +845,7 @@ _DASHBOARD_HTML = """
           </div>
         </div>
         <p class="muted small">
-          Retraining updates the backend remote-assisted model for the selected device. Multiple remote model
+          Retraining updates the backend remote-assisted model for the selected device. Multiple cloud model
           families can coexist in the registry, and activating a different version changes the current remote
           scorer for that device. This affects <code>remote_assisted</code> directly and the
           <code>remote</code> contribution inside <code>ensemble_fusion</code>. Live Android remote inference now
@@ -1094,7 +1139,7 @@ _DASHBOARD_HTML = """
       const policy = payload.policy || {};
       els.policyMedium.value = policy.default_thresholds?.medium ?? 0.6;
       els.policyHigh.value = policy.default_thresholds?.high ?? 0.85;
-      els.policyRetention.value = policy.retention_days ?? 90;
+      els.policyRetention.value = policy.retention_days ?? 30;
       els.policyBudget.value = policy.false_positive_budget_per_app_day ?? 12;
       els.policyDrift.value = policy.drift_high_threshold ?? 0.65;
       els.policyExportEnabled.value = String(policy.export_enabled ?? true);
@@ -1105,7 +1150,7 @@ _DASHBOARD_HTML = """
         els.fusionStat.value = fusion.statistical ?? 0.28;
         els.fusionMultivariate.value = fusion.multivariate ?? 0.20;
         els.fusionSequence.value = fusion.sequence ?? 0.12;
-        els.fusionLinear.value = fusion.linear ?? 0.16;
+        els.fusionLinear.value = fusion.local ?? fusion.linear ?? 0.16;
         els.fusionTflite.value = fusion.tflite ?? 0.12;
         els.fusionRemote.value = fusion.remote ?? 0.12;
         els.fusionBeacon.value = fusion.beacon ?? 0.15;
@@ -1144,7 +1189,7 @@ _DASHBOARD_HTML = """
           statistical: parseFloat(els.fusionStat.value),
           multivariate: parseFloat(els.fusionMultivariate.value),
           sequence: parseFloat(els.fusionSequence.value),
-          linear: parseFloat(els.fusionLinear.value),
+          local: parseFloat(els.fusionLinear.value),
           tflite: parseFloat(els.fusionTflite.value),
           remote: parseFloat(els.fusionRemote.value),
           beacon: parseFloat(els.fusionBeacon.value),
@@ -1391,7 +1436,7 @@ def get_remote_model(
     device_id_pseudo: str,
     _: None = Depends(auth_dependency),
 ):
-    model = storage.get_remote_model(device_id_pseudo) or default_remote_model()
+    model = _active_remote_model(device_id_pseudo)
     versions = storage.list_remote_model_versions(device_id_pseudo=device_id_pseudo, limit=20)
     return {
         "status": "ok",
@@ -1477,7 +1522,7 @@ def activate_remote_model_version(
 ):
     model = storage.activate_remote_model_version(device_id_pseudo=device_id_pseudo, version=version)
     if model is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Remote model version not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cloud model version not found")
     return {
         "status": "ok",
         "device_id_pseudo": device_id_pseudo,
@@ -1880,7 +1925,7 @@ _DEFAULT_POLICY = {
         "statistical": 0.28,
         "multivariate": 0.20,
         "sequence": 0.12,
-        "linear": 0.16,
+        "local": 0.16,
         "tflite": 0.12,
         "remote": 0.12,
         "beacon": 0.15,

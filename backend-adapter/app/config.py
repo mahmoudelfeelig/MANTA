@@ -24,6 +24,7 @@ class Settings:
     max_retries: int
     retry_base_seconds: int
     sqlite_path: str
+    remote_model_path: str
 
 
 
@@ -33,6 +34,10 @@ def load_settings() -> Settings:
     max_retries = max(1, min(20, int(os.getenv("MAX_RETRIES", "5"))))
     retry_base_seconds = max(1, min(60, int(os.getenv("RETRY_BASE_SECONDS", "5"))))
     sqlite_path = os.getenv("SQLITE_PATH", "adapter_state.db").strip() or "adapter_state.db"
+    remote_model_path = os.getenv(
+        "REMOTE_MODEL_PATH",
+        "ml-pipeline/artifacts/backend/remote-assisted-model.json",
+    ).strip()
 
     return Settings(
         shared_token=shared_token,
@@ -46,4 +51,5 @@ def load_settings() -> Settings:
         max_retries=max_retries,
         retry_base_seconds=retry_base_seconds,
         sqlite_path=sqlite_path,
+        remote_model_path=remote_model_path,
     )

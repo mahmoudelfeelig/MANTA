@@ -348,7 +348,7 @@ def test_policy_auto_tune_simulation_and_retraining_samples() -> None:
             "anomaly_score": 0.92,
             "triage_status": "RESOLVED",
             "triage_note": "confirmed",
-            "source_model": "linear",
+            "source_model": "local",
             "timestamp": 2_000_002,
         }
     )

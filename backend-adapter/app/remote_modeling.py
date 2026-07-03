@@ -29,6 +29,8 @@ REMOTE_MODEL_FEATURES = [
     "high_port_ratio",
     "hour_of_day_sin",
     "hour_of_day_cos",
+    "day_of_week_sin",
+    "day_of_week_cos",
     "is_weekend",
     "data_quality_penalty",
     "ttl_gap_norm",
@@ -45,6 +47,31 @@ REMOTE_MODEL_FEATURES = [
     "payload_mean_log",
     "load_mean_log",
     "transport_metrics_present",
+    "destination_concentration",
+    "destination_transition_rate",
+    "dns_flow_ratio",
+    "web_flow_ratio",
+    "private_destination_ratio",
+    "multicast_destination_ratio",
+    "flow_count_deviation",
+    "byte_rate_deviation",
+    "destination_diversity_shift",
+    "novelty_shift",
+    "recent_flow_count_mean_log",
+    "recent_byte_rate_mean_log",
+    "recent_novelty_mean",
+    "flow_count_trend",
+    "byte_rate_trend",
+    "novelty_trend",
+    "destination_diversity_trend",
+    "consecutive_burst_windows",
+    "low_volume_periodic_score",
+    "destination_risk_score",
+    "lookalike_score",
+    "suspicious_destination_ratio",
+    "known_identity_ratio",
+    "mitre_technique_ratio",
+    "threat_tag_ratio",
     "phishing_domain_pattern",
     "credential_lure_pattern",
     "tracking_destination",
@@ -84,12 +111,13 @@ def _site_risk_flags(site_hint: str | None) -> dict[str, float]:
 
 def build_remote_feature_map(feature_window: Mapping[str, Any], site_hint: str | None) -> dict[str, float]:
     hour_of_day = int(_safe_float(feature_window.get("hour_of_day"), 0.0)) % 24
+    day_of_week = int(_safe_float(feature_window.get("day_of_week"), 0.0)) % 7
     data_quality_score = _safe_float(feature_window.get("data_quality_score"), 1.0)
     risk_flags = _site_risk_flags(site_hint)
     return {
         "flow_count_log": math.log1p(max(0.0, _safe_float(feature_window.get("flow_count")))),
-        "bytes_out_log": math.log1p(max(0.0, _safe_float(feature_window.get("bytes_out")))),
-        "bytes_in_log": math.log1p(max(0.0, _safe_float(feature_window.get("bytes_in")))),
+        "bytes_out_log": math.log1p(max(0.0, _safe_float(feature_window.get("bytes_out", feature_window.get("total_bytes_out"))))),
+        "bytes_in_log": math.log1p(max(0.0, _safe_float(feature_window.get("bytes_in", feature_window.get("total_bytes_in"))))),
         "mean_packet_size_log": math.log1p(max(0.0, _safe_float(feature_window.get("mean_packet_size")))),
         "outbound_ratio": _safe_float(feature_window.get("outbound_ratio")),
         "burstiness": _safe_float(feature_window.get("burstiness")),
@@ -110,6 +138,8 @@ def build_remote_feature_map(feature_window: Mapping[str, Any], site_hint: str |
         "high_port_ratio": _safe_float(feature_window.get("high_port_ratio")),
         "hour_of_day_sin": math.sin((2.0 * math.pi * hour_of_day) / 24.0),
         "hour_of_day_cos": math.cos((2.0 * math.pi * hour_of_day) / 24.0),
+        "day_of_week_sin": math.sin((2.0 * math.pi * day_of_week) / 7.0),
+        "day_of_week_cos": math.cos((2.0 * math.pi * day_of_week) / 7.0),
         "is_weekend": 1.0 if bool(feature_window.get("is_weekend")) else 0.0,
         "data_quality_penalty": (1.0 - data_quality_score),
         "ttl_gap_norm": _safe_float(feature_window.get("ttl_gap")),
@@ -126,6 +156,31 @@ def build_remote_feature_map(feature_window: Mapping[str, Any], site_hint: str |
         "payload_mean_log": math.log1p(max(0.0, _safe_float(feature_window.get("payload_mean")))),
         "load_mean_log": math.log1p(max(0.0, _safe_float(feature_window.get("load_mean")))),
         "transport_metrics_present": _safe_float(feature_window.get("transport_metrics_present")),
+        "destination_concentration": _safe_float(feature_window.get("destination_concentration")),
+        "destination_transition_rate": _safe_float(feature_window.get("destination_transition_rate")),
+        "dns_flow_ratio": _safe_float(feature_window.get("dns_flow_ratio")),
+        "web_flow_ratio": _safe_float(feature_window.get("web_flow_ratio")),
+        "private_destination_ratio": _safe_float(feature_window.get("private_destination_ratio")),
+        "multicast_destination_ratio": _safe_float(feature_window.get("multicast_destination_ratio")),
+        "flow_count_deviation": _safe_float(feature_window.get("flow_count_deviation")),
+        "byte_rate_deviation": _safe_float(feature_window.get("byte_rate_deviation")),
+        "destination_diversity_shift": _safe_float(feature_window.get("destination_diversity_shift")),
+        "novelty_shift": _safe_float(feature_window.get("novelty_shift")),
+        "recent_flow_count_mean_log": math.log1p(max(0.0, _safe_float(feature_window.get("recent_flow_count_mean")))),
+        "recent_byte_rate_mean_log": math.log1p(max(0.0, _safe_float(feature_window.get("recent_byte_rate_mean")))),
+        "recent_novelty_mean": _safe_float(feature_window.get("recent_novelty_mean")),
+        "flow_count_trend": _safe_float(feature_window.get("flow_count_trend")),
+        "byte_rate_trend": _safe_float(feature_window.get("byte_rate_trend")),
+        "novelty_trend": _safe_float(feature_window.get("novelty_trend")),
+        "destination_diversity_trend": _safe_float(feature_window.get("destination_diversity_trend")),
+        "consecutive_burst_windows": _safe_float(feature_window.get("consecutive_burst_windows")),
+        "low_volume_periodic_score": _safe_float(feature_window.get("low_volume_periodic_score")),
+        "destination_risk_score": _safe_float(feature_window.get("destination_risk_score")),
+        "lookalike_score": _safe_float(feature_window.get("lookalike_score")),
+        "suspicious_destination_ratio": _safe_float(feature_window.get("suspicious_destination_ratio")),
+        "known_identity_ratio": _safe_float(feature_window.get("known_identity_ratio")),
+        "mitre_technique_ratio": _safe_float(feature_window.get("mitre_technique_ratio")),
+        "threat_tag_ratio": _safe_float(feature_window.get("threat_tag_ratio")),
         **risk_flags,
     }
 
@@ -212,10 +267,14 @@ def _binary_metrics(y_true: "np.ndarray", scores: "np.ndarray", threshold: float
     import numpy as np
 
     pred = (scores >= threshold).astype(int)
+    fp = int(((pred == 1) & (y_true == 0)).sum())
+    tn = int(((pred == 0) & (y_true == 0)).sum())
     return {
+        "positive_predictions": int(pred.sum()),
         "precision": float(precision_score(y_true, pred, zero_division=0)),
         "recall": float(recall_score(y_true, pred, zero_division=0)),
         "f1": float(f1_score(y_true, pred, zero_division=0)),
+        "false_positive_rate": float(fp / max(1, fp + tn)),
         "pr_auc": float(average_precision_score(y_true, scores)),
         "roc_auc": float(roc_auc_score(y_true, scores)) if len(set(y_true.tolist())) > 1 else None,
         "brier_score": float(brier_score_loss(y_true, np.clip(scores, 0.0, 1.0))),
@@ -257,13 +316,97 @@ def _best_threshold_for_scores(y_true: "np.ndarray", scores: "np.ndarray") -> fl
 
     best_threshold = 0.5
     best_f1 = -1.0
-    for threshold in np.linspace(0.05, 0.95, 181):
+    for threshold in np.linspace(0.0, 1.0, 401):
         metrics = _binary_metrics(y_true, scores, float(threshold))
         current = float(metrics["f1"] or 0.0)
         if current > best_f1:
             best_f1 = current
             best_threshold = float(threshold)
     return best_threshold
+
+
+def _remote_threshold_candidates(scores: "np.ndarray") -> "np.ndarray":
+    import numpy as np
+
+    base = np.linspace(0.0, 1.0, 401)
+    if len(scores) == 0:
+        return base
+    quantiles = np.quantile(np.asarray(scores, dtype=float), np.linspace(0.0, 1.0, 201))
+    return np.unique(np.clip(np.concatenate((base, quantiles)), 0.0, 1.0))
+
+
+def _select_remote_operating_threshold(
+    y_true: "np.ndarray",
+    scores: "np.ndarray",
+    *,
+    min_precision: float = 0.85,
+    min_recall: float = 0.90,
+    max_fpr: float = 0.18,
+) -> tuple[float, dict[str, Any]]:
+    import numpy as np
+
+    rows: list[dict[str, float | None]] = []
+    for threshold in _remote_threshold_candidates(scores):
+        metrics = _binary_metrics(y_true, scores, float(threshold))
+        rows.append(
+            {
+                "threshold": float(threshold),
+                "precision": float(metrics["precision"] or 0.0),
+                "recall": float(metrics["recall"] or 0.0),
+                "f1": float(metrics["f1"] or 0.0),
+                "false_positive_rate": float(metrics.get("false_positive_rate") or 0.0),
+            }
+        )
+    if not rows:
+        return 0.5, {
+            "policy": "precision_recall_fpr_budget",
+            "target_precision": min_precision,
+            "target_recall": min_recall,
+            "target_max_fpr": max_fpr,
+            "selected_reason": "empty_scores",
+        }
+
+    def sort_key(row: Mapping[str, float | None]) -> tuple[float, float, float, float]:
+        return (
+            float(row.get("f1") or 0.0),
+            float(row.get("recall") or 0.0),
+            float(row.get("precision") or 0.0),
+            -float(row.get("false_positive_rate") or 0.0),
+        )
+
+    candidates = [
+        row for row in rows
+        if float(row["precision"] or 0.0) >= min_precision
+        and float(row["recall"] or 0.0) >= min_recall
+        and float(row["false_positive_rate"] or 0.0) <= max_fpr
+    ]
+    selected_reason = "met_precision_recall_fpr_targets"
+    if not candidates:
+        candidates = [
+            row for row in rows
+            if float(row["recall"] or 0.0) >= min_recall
+            and float(row["false_positive_rate"] or 0.0) <= max_fpr
+        ]
+        selected_reason = "met_recall_fpr_targets"
+    if not candidates:
+        candidates = [row for row in rows if float(row["false_positive_rate"] or 0.0) <= max_fpr]
+        selected_reason = "met_fpr_target_only"
+    if not candidates:
+        best_f1 = max(rows, key=sort_key)
+        selected_reason = "fallback_max_f1"
+        candidates = [best_f1]
+
+    selected = max(candidates, key=sort_key)
+    best_f1_row = max(rows, key=sort_key)
+    return float(selected["threshold"] or 0.5), {
+        "policy": "precision_recall_fpr_budget",
+        "target_precision": min_precision,
+        "target_recall": min_recall,
+        "target_max_fpr": max_fpr,
+        "selected_reason": selected_reason,
+        "selected": selected,
+        "best_f1": best_f1_row,
+    }
 
 
 def _hard_example_weights(samples: list[dict[str, Any]], labels: list[int] | "np.ndarray") -> list[float]:
@@ -388,7 +531,7 @@ def default_remote_model(model_type: str = "logistic_regression") -> dict[str, A
         "feature_order": list(REMOTE_MODEL_FEATURES),
         "means": [0.0] * len(REMOTE_MODEL_FEATURES),
         "scales": [1.0] * len(REMOTE_MODEL_FEATURES),
-        "weights": [weights[name] for name in REMOTE_MODEL_FEATURES],
+        "weights": [weights.get(name, 0.0) for name in REMOTE_MODEL_FEATURES],
         "bias": -1.35,
         "recommended_threshold": 0.62,
         "trained_from_samples": 0,
@@ -677,7 +820,6 @@ def score_remote_model(model: Mapping[str, Any], feature_window: Mapping[str, An
 def _train_logistic_model(samples: list[dict[str, Any]], previous_model: Mapping[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     import numpy as np
     from sklearn.linear_model import LogisticRegression
-    from sklearn.metrics import f1_score
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import StandardScaler
 
@@ -685,7 +827,9 @@ def _train_logistic_model(samples: list[dict[str, Any]], previous_model: Mapping
     X = np.asarray(rows, dtype=float)
     y = np.asarray(labels, dtype=int)
     class_counts = {0: labels.count(0), 1: labels.count(1)}
-    if min(class_counts.values()) < 8:
+    supervised_dataset = any("label" in sample for sample in filtered_samples)
+    min_required = 2 if supervised_dataset else 8
+    if min(class_counts.values()) < min_required:
         raise ValueError("Need at least 8 FALSE_POSITIVE and 8 RESOLVED samples with window features to retrain the remote model.")
 
     split_ready = len(rows) >= 32 and min(class_counts.values()) >= 12
@@ -708,14 +852,7 @@ def _train_logistic_model(samples: list[dict[str, Any]], previous_model: Mapping
     )
     pipeline.fit(X_train, y_train, clf__sample_weight=np.asarray(_hard_example_weights(train_samples, y_train), dtype=float))
     scores = pipeline.predict_proba(X_test)[:, 1]
-    best_threshold = 0.5
-    best_f1 = -1.0
-    for threshold in np.linspace(0.1, 0.9, 81):
-        pred = (scores >= threshold).astype(int)
-        current = float(f1_score(y_test, pred, zero_division=0))
-        if current > best_f1:
-            best_f1 = current
-            best_threshold = float(threshold)
+    best_threshold, threshold_policy = _select_remote_operating_threshold(y_test, scores)
 
     scaler: StandardScaler = pipeline.named_steps["scaler"]
     clf: LogisticRegression = pipeline.named_steps["clf"]
@@ -729,6 +866,7 @@ def _train_logistic_model(samples: list[dict[str, Any]], previous_model: Mapping
         "weights": clf.coef_[0].astype(float).tolist(),
         "bias": float(clf.intercept_[0]),
         "recommended_threshold": best_threshold,
+        "threshold_policy": threshold_policy,
         "trained_from_samples": int(len(rows)),
         "class_counts": {"0": int(class_counts[0]), "1": int(class_counts[1])},
         "metrics": {
@@ -736,6 +874,7 @@ def _train_logistic_model(samples: list[dict[str, Any]], previous_model: Mapping
             "rows_train": int(len(X_train)),
             "rows_eval": int(len(X_test)),
             "threshold": best_threshold,
+            "threshold_policy": threshold_policy,
             **metrics,
             "per_source_metrics": _per_source_metrics(
                 [filtered_samples[int(index)] for index in test_idx] if split_ready else filtered_samples,
@@ -766,7 +905,9 @@ def _train_mahalanobis_model(samples: list[dict[str, Any]], previous_model: Mapp
     X = np.asarray(rows, dtype=float)
     y = np.asarray(labels, dtype=int)
     benign_mask = y == 0
-    if int(benign_mask.sum()) < 12:
+    supervised_dataset = any("label" in sample for sample in filtered_samples)
+    min_benign_required = 2 if supervised_dataset else 12
+    if int(benign_mask.sum()) < min_benign_required:
         raise ValueError("Mahalanobis training needs at least 12 FALSE_POSITIVE/benign samples with window features.")
 
     split_ready = len(rows) >= 32 and len(set(y.tolist())) > 1 and min(np.bincount(y)) >= 8
@@ -796,7 +937,8 @@ def _train_mahalanobis_model(samples: list[dict[str, Any]], previous_model: Mapp
     threshold_distance = float(np.percentile(train_distances, 95))
     scale = max(threshold_distance, float(len(REMOTE_MODEL_FEATURES)), 1.0)
     scores = 1.0 - np.exp(-(np.einsum("ij,jk,ik->i", X_test - mean, precision, X_test - mean) / scale))
-    recommended_threshold = 1.0 - math.exp(-(threshold_distance / scale))
+    raw_distance_score_threshold = 1.0 - math.exp(-(threshold_distance / scale))
+    recommended_threshold, threshold_policy = _select_remote_operating_threshold(y_test, scores)
     metrics = _binary_metrics(y_test, scores, recommended_threshold)
 
     metrics = {
@@ -804,6 +946,7 @@ def _train_mahalanobis_model(samples: list[dict[str, Any]], previous_model: Mapp
         "rows_train": int(len(X_train)),
         "rows_eval": int(len(X_test)),
         "threshold": float(recommended_threshold),
+        "threshold_policy": threshold_policy,
         **metrics,
         "per_source_metrics": _per_source_metrics(
             [filtered_samples[int(index)] for index in test_idx] if filtered_samples else [],
@@ -820,7 +963,9 @@ def _train_mahalanobis_model(samples: list[dict[str, Any]], previous_model: Mapp
         "mean": mean.astype(float).tolist(),
         "precision_matrix": precision.astype(float).tolist(),
         "threshold_distance": threshold_distance,
+        "raw_distance_score_threshold": float(raw_distance_score_threshold),
         "recommended_threshold": float(recommended_threshold),
+        "threshold_policy": threshold_policy,
         "trained_from_samples": int(len(rows)),
         "class_counts": class_counts,
         "metrics": metrics,
@@ -853,13 +998,14 @@ def _train_gradient_boosted_tree_model(samples: list[dict[str, Any]], previous_m
     import numpy as np
     from sklearn.ensemble import GradientBoostingClassifier
     from sklearn.linear_model import LogisticRegression
-    from sklearn.metrics import f1_score
 
     rows, labels, filtered_samples = _extract_training_rows(samples)
     X = np.asarray(rows, dtype=float)
     y = np.asarray(labels, dtype=int)
     class_counts = {0: labels.count(0), 1: labels.count(1)}
-    if min(class_counts.values()) < 12:
+    supervised_dataset = any("label" in sample for sample in filtered_samples)
+    min_required = 2 if supervised_dataset else 12
+    if min(class_counts.values()) < min_required:
         raise ValueError("Gradient-boosted tree training needs at least 12 benign and 12 anomalous samples with window features.")
 
     if len(rows) >= 48 and min(class_counts.values()) >= 16:
@@ -902,14 +1048,7 @@ def _train_gradient_boosted_tree_model(samples: list[dict[str, Any]], previous_m
 
     test_logits = model.decision_function(X_test)
     scores = np.asarray([_sigmoid((cal_slope * float(logit)) + cal_bias) for logit in test_logits], dtype=float)
-    best_threshold = 0.5
-    best_f1 = -1.0
-    for threshold in np.linspace(0.1, 0.9, 81):
-        pred = (scores >= threshold).astype(int)
-        current = float(f1_score(y_test, pred, zero_division=0))
-        if current > best_f1:
-            best_f1 = current
-            best_threshold = float(threshold)
+    best_threshold, threshold_policy = _select_remote_operating_threshold(y_test, scores)
     prior = float(np.clip(np.mean(y_train), 1e-4, 1.0 - 1e-4))
     init_bias = math.log(prior / (1.0 - prior))
     exported_trees = [_export_gradient_tree(tree_wrapper[0]) for tree_wrapper in model.estimators_]
@@ -924,6 +1063,7 @@ def _train_gradient_boosted_tree_model(samples: list[dict[str, Any]], previous_m
         "calibration_slope": cal_slope,
         "calibration_bias": cal_bias,
         "recommended_threshold": best_threshold,
+        "threshold_policy": threshold_policy,
         "trained_from_samples": int(len(rows)),
         "class_counts": {"0": int(class_counts[0]), "1": int(class_counts[1])},
         "metrics": {
@@ -931,6 +1071,7 @@ def _train_gradient_boosted_tree_model(samples: list[dict[str, Any]], previous_m
             "rows_train": int(len(X_train)),
             "rows_eval": int(len(X_test)),
             "threshold": best_threshold,
+            "threshold_policy": threshold_policy,
             **metrics,
             "per_source_metrics": _per_source_metrics(
                 [filtered_samples[int(index)] for index in test_idx] if len(rows) >= 48 and min(class_counts.values()) >= 16 else filtered_samples,
@@ -1055,7 +1196,7 @@ def _train_hybrid_model(samples: list[dict[str, Any]], previous_model: Mapping[s
         val_scores = tmp_meta.predict_proba(meta_features[fold_val_idx])[:, 1]
         threshold_candidates.append(_best_threshold_for_scores(meta_labels[fold_val_idx], val_scores))
     meta_train_scores = meta_clf.predict_proba(meta_features)[:, 1]
-    best_threshold = _best_threshold_for_scores(meta_labels, meta_train_scores)
+    best_threshold, threshold_policy = _select_remote_operating_threshold(meta_labels, meta_train_scores)
     stacked_features = _meta_features_from_rows(anomaly_model, context_model, tree_model, test_rows)
     combined_scores = meta_clf.predict_proba(stacked_features)[:, 1]
     anomaly_scores = stacked_features[:, 0]
@@ -1067,6 +1208,7 @@ def _train_hybrid_model(samples: list[dict[str, Any]], previous_model: Mapping[s
         "rows_train": int(len(final_train_samples)),
         "rows_eval": int(len(test_rows)),
         "threshold": best_threshold,
+        "threshold_policy": threshold_policy,
         "threshold_stability_std": float(np.std(np.asarray(threshold_candidates, dtype=float), ddof=0)) if threshold_candidates else 0.0,
         **metrics,
         "per_source_metrics": _per_source_metrics(
@@ -1086,6 +1228,7 @@ def _train_hybrid_model(samples: list[dict[str, Any]], previous_model: Mapping[s
         "meta_weights": meta_clf.coef_[0].astype(float).tolist(),
         "meta_bias": float(meta_clf.intercept_[0]),
         "meta_threshold": best_threshold,
+        "threshold_policy": threshold_policy,
         "anomaly_model": anomaly_model,
         "context_model": context_model,
         "tree_model": tree_model,

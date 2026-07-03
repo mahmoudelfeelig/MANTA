@@ -31,7 +31,7 @@ class FusionWeightsPayload(BaseModel):
     statistical: float = Field(default=0.28, ge=0.0, le=1.0)
     multivariate: float = Field(default=0.20, ge=0.0, le=1.0)
     sequence: float = Field(default=0.12, ge=0.0, le=1.0)
-    linear: float = Field(default=0.16, ge=0.0, le=1.0)
+    local: float = Field(default=0.16, ge=0.0, le=1.0)
     tflite: float = Field(default=0.12, ge=0.0, le=1.0)
     remote: float = Field(default=0.12, ge=0.0, le=1.0)
     beacon: float = Field(default=0.15, ge=0.0, le=1.0)
@@ -40,6 +40,13 @@ class FusionWeightsPayload(BaseModel):
     data_quality_penalty: float = Field(default=0.10, ge=0.0, le=1.0)
     response_anomaly: float = Field(default=0.82, ge=0.0, le=1.0)
     response_context: float = Field(default=0.18, ge=0.0, le=1.0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_legacy_linear_weight(cls, data):
+        if isinstance(data, dict) and "local" not in data and "linear" in data:
+            data = {**data, "local": data["linear"]}
+        return data
 
 
 class DevicePolicyPayload(BaseModel):
@@ -62,13 +69,38 @@ class DevicePolicyPayload(BaseModel):
     app_profile_overrides: dict[str, Literal["DEFAULT", "TRUSTED", "HIGH_CHURN", "BROWSER", "SYSTEM"]] = Field(default_factory=dict)
     protected_brands_csv: str | None = Field(default=None, max_length=8192)
 
+    @field_validator("detection_model", "shadow_model", mode="before")
+    @classmethod
+    def normalize_legacy_model_names(cls, value):
+        aliases = {
+            "linear": "local",
+            "linear_v13_recall": "local_sensitive",
+            "linear_v14_quiet": "local_quiet",
+            "hybrid_v15": "local_balanced",
+        }
+        if value is None:
+            return value
+        return aliases.get(value, value)
+
     @model_validator(mode="after")
     def validate_override_count(self):
         if len(self.app_threshold_overrides) > 1000:
             raise ValueError("Too many app threshold overrides")
         if len(self.app_profile_overrides) > 1000:
             raise ValueError("Too many app profile overrides")
-        supported = {"ensemble_fusion", "statistical", "multivariate", "sequence", "linear", "tflite", "remote_assisted"}
+        supported = {
+            "ensemble_fusion",
+            "statistical",
+            "multivariate",
+            "sequence",
+            "local",
+            "local_sensitive",
+            "local_quiet",
+            "local_balanced",
+            "local_privacy",
+            "tflite",
+            "remote_assisted",
+        }
         if self.detection_model not in supported:
             raise ValueError("Unsupported detection_model")
         if self.shadow_model is not None and self.shadow_model not in supported:
@@ -250,6 +282,8 @@ class PolicySimulationRequest(BaseModel):
 
 class RemoteFeatureWindowPayload(BaseModel):
     flow_count: int = Field(ge=0)
+    total_bytes_out: int = Field(default=0, ge=0)
+    total_bytes_in: int = Field(default=0, ge=0)
     bytes_out: int = Field(ge=0)
     bytes_in: int = Field(ge=0)
     mean_packet_size: float = Field(ge=0.0)
@@ -271,6 +305,7 @@ class RemoteFeatureWindowPayload(BaseModel):
     small_flow_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
     high_port_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
     hour_of_day: int = Field(ge=0, le=23)
+    day_of_week: int = Field(default=0, ge=0, le=7)
     is_weekend: bool = False
     data_quality_score: float = Field(ge=0.0, le=1.0)
     ttl_gap: float = Field(default=0.0, ge=0.0)
@@ -287,6 +322,31 @@ class RemoteFeatureWindowPayload(BaseModel):
     payload_mean: float = Field(default=0.0, ge=0.0)
     load_mean: float = Field(default=0.0, ge=0.0)
     transport_metrics_present: float = Field(default=0.0, ge=0.0, le=1.0)
+    destination_concentration: float = Field(default=0.0, ge=0.0, le=1.0)
+    destination_transition_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    dns_flow_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    web_flow_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    private_destination_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    multicast_destination_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    flow_count_deviation: float = 0.0
+    byte_rate_deviation: float = 0.0
+    destination_diversity_shift: float = 0.0
+    novelty_shift: float = 0.0
+    recent_flow_count_mean: float = Field(default=0.0, ge=0.0)
+    recent_byte_rate_mean: float = Field(default=0.0, ge=0.0)
+    recent_novelty_mean: float = Field(default=0.0, ge=0.0, le=1.0)
+    flow_count_trend: float = 0.0
+    byte_rate_trend: float = 0.0
+    novelty_trend: float = 0.0
+    destination_diversity_trend: float = 0.0
+    consecutive_burst_windows: float = Field(default=0.0, ge=0.0)
+    low_volume_periodic_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    destination_risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    lookalike_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    suspicious_destination_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    known_identity_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    mitre_technique_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    threat_tag_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class DestinationEnrichmentRequest(BaseModel):
