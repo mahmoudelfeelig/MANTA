@@ -14,7 +14,7 @@ data class PacketPipelineHealth(
 )
 
 data class RuntimeHealth(
-    val linearAvailable: Boolean,
+    val localModelAvailable: Boolean,
     val tfliteAvailable: Boolean,
     val remoteConfigured: Boolean,
     val activeDetectionModel: String,

@@ -61,45 +61,7 @@ class RemoteAssistedAnomalyScorer(
             )
             .put(
                 "feature_window",
-                JSONObject()
-                    .put("flow_count", window.flowCount)
-                    .put("bytes_out", window.totalBytesOut)
-                    .put("bytes_in", window.totalBytesIn)
-                    .put("mean_packet_size", window.meanPacketSize)
-                    .put("outbound_ratio", window.outboundRatio)
-                    .put("burstiness", window.burstiness)
-                    .put("novelty_score", window.noveltyScore)
-                    .put("connection_frequency_delta", window.connectionFrequencyDelta)
-                    .put("bytes_per_flow", window.bytesPerFlow)
-                    .put("destination_diversity", window.destinationDiversity)
-                    .put("activity_ratio", window.activityRatio)
-                    .put("periodic_beacon_score", window.periodicBeaconScore)
-                    .put("byte_rate", window.byteRate)
-                    .put("packet_rate", window.packetRate)
-                    .put("mean_duration_ms", window.meanDurationMillis)
-                    .put("duration_jitter", window.durationJitter)
-                    .put("port_diversity", window.portDiversity)
-                    .put("protocol_diversity", window.protocolDiversity)
-                    .put("packet_imbalance", window.packetImbalance)
-                    .put("small_flow_ratio", window.smallFlowRatio)
-                    .put("high_port_ratio", window.highPortRatio)
-                    .put("hour_of_day", window.hourOfDay)
-                    .put("is_weekend", window.isWeekend)
-                    .put("data_quality_score", window.dataQualityScore)
-                    .put("ttl_gap", window.ttlGap)
-                    .put("ttl_metrics_present", window.ttlMetricsPresent)
-                    .put("syn_rate_total", window.synRateTotal)
-                    .put("rst_rate_total", window.rstRateTotal)
-                    .put("ack_rate_total", window.ackRateTotal)
-                    .put("fin_rate_total", window.finRateTotal)
-                    .put("psh_rate_total", window.pshRateTotal)
-                    .put("fragment_rate_total", window.fragmentRateTotal)
-                    .put("tcp_window_mean", window.tcpWindowMean)
-                    .put("ack_delay_mean", window.ackDelayMean)
-                    .put("inter_packet_gap_mean", window.interPacketGapMean)
-                    .put("payload_mean", window.payloadMean)
-                    .put("load_mean", window.loadMean)
-                    .put("transport_metrics_present", window.transportMetricsPresent)
+                featureWindowPayload(window)
             )
             .toString()
 
@@ -118,6 +80,18 @@ class RemoteAssistedAnomalyScorer(
                 parseResponse(response.body?.string().orEmpty())
             }
         }.getOrElse { unavailable("remote_inference_failed") }
+    }
+
+    private fun featureWindowPayload(window: FeatureWindow): JSONObject {
+        val features = window.portableFeatureMap()
+        return JSONObject().apply {
+            FeatureWindow.portableFeatureOrder.forEach { key ->
+                put(key, features[key] ?: 0.0)
+            }
+            put("bytes_out", window.totalBytesOut)
+            put("bytes_in", window.totalBytesIn)
+            put("is_weekend", window.isWeekend)
+        }
     }
 
     private fun parseResponse(rawJson: String): AnomalyScoreResult {

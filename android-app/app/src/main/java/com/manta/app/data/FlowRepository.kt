@@ -21,8 +21,10 @@ import com.manta.app.data.db.AnomalyScoreEntity
 import com.manta.app.data.db.AppDatabase
 import com.manta.app.data.db.ExportQueueEntity
 import com.manta.app.data.db.FeatureWindowEntity
+import com.manta.app.data.db.PendingAlertEntity
 import com.manta.app.data.db.RawFlowEntity
 import com.manta.app.domain.detection.AnomalyEngine
+import com.manta.app.domain.detection.AlertEvidencePolicy
 import com.manta.app.domain.detection.ConceptDriftMonitor
 import com.manta.app.domain.detection.DataQualityMonitor
 import com.manta.app.domain.detection.ExplanationFormatter
@@ -47,7 +49,9 @@ import java.util.zip.ZipOutputStream
 import kotlin.math.min
 import kotlin.system.measureNanoTime
 
+private const val SHORT_WINDOW_MILLIS = 30_000L
 private const val WINDOW_MILLIS = 60_000L
+private const val LONG_WINDOW_MILLIS = 300_000L
 private const val ALERT_CORRELATION_WINDOW_MILLIS = 10 * 60_000L
 private const val FEEDBACK_ADJUST_STEP_FP = 0.02
 private const val FEEDBACK_ADJUST_STEP_TRUE_POSITIVE = 0.01
@@ -77,6 +81,7 @@ class FlowRepository(
     private val featureWindowBuilder: FeatureWindowBuilder,
     private val anomalyEngine: AnomalyEngine,
     private val severityStabilityGate: SeverityStabilityGate,
+    private val alertEvidencePolicy: AlertEvidencePolicy,
     private val conceptDriftMonitor: ConceptDriftMonitor,
     private val periodicBeaconDetector: PeriodicBeaconDetector,
     private val dataQualityMonitor: DataQualityMonitor,
@@ -159,8 +164,8 @@ class FlowRepository(
         )
         val beaconScore = periodicBeaconDetector.observe(enrichedFlow)
 
-        val windowStart = enrichedFlow.timestampEndMillis - WINDOW_MILLIS
-        val recent = dao.getRecentFlowsByApp(enrichedFlow.appId, windowStart, RECENT_FLOW_WINDOW_LIMIT).map { entity ->
+        val maxWindowStart = enrichedFlow.timestampEndMillis - LONG_WINDOW_MILLIS
+        val recentCandidates = dao.getRecentFlowsByApp(enrichedFlow.appId, maxWindowStart, RECENT_FLOW_WINDOW_LIMIT).map { entity ->
             FlowRecord(
                 id = entity.id,
                 timestampStartMillis = entity.timestampStartMillis,
@@ -198,6 +203,13 @@ class FlowRepository(
                 destinationInsight = DestinationInsight.fromJsonString(entity.destinationInsightJson)
             )
         }
+        val recent60Count = recentCandidates.count { it.timestampEndMillis >= enrichedFlow.timestampEndMillis - WINDOW_MILLIS }
+        val activeWindowMillis = adaptiveWindowMillis(
+            appId = enrichedFlow.appId,
+            recent60Count = recent60Count
+        )
+        val windowStart = enrichedFlow.timestampEndMillis - activeWindowMillis
+        val recent = recentCandidates.filter { it.timestampEndMillis >= windowStart }
 
         val siteHint = enrichedFlow.siteHint
         enqueueFlowForExport(flow = enrichedFlow, siteHint = siteHint)
@@ -219,7 +231,15 @@ class FlowRepository(
             sampledByGuardrail = guardrail.sampled,
             processingCostMillis = 0.0
         )
-        val scoringWindow = applyAblations(window = builtWindow, config = config)
+        val baselineWindow = applyBaselineDeviationFeatures(
+            window = builtWindow,
+            recentWindows = dao.getRecentFeatureWindowsByApp(
+                appId = enrichedFlow.appId,
+                beforeMillis = enrichedFlow.timestampEndMillis,
+                limit = 5
+            )
+        )
+        val scoringWindow = applyAblations(window = baselineWindow, config = config)
         var anomaly = anomalyEngine.score(
             window = scoringWindow,
             configuredMode = activeModel,
@@ -326,7 +346,7 @@ class FlowRepository(
         }
         processingCostMillis = processingNanos / 1_000_000.0
         runtimeGuardrailManager.recordProcessingCost(processingCostMillis)
-        val window = builtWindow.copy(processingCostMillis = processingCostMillis)
+        val window = baselineWindow.copy(processingCostMillis = processingCostMillis)
         saveFeatureWindow(window)
         val thresholdProfile = adjustedThresholdProfile(
             base = settingsStore.getThresholdForApp(enrichedFlow.appId),
@@ -370,7 +390,10 @@ class FlowRepository(
             siteHint = siteHint,
             reputationScore = reputationScore
         )
+        val singleWindowLocalMode = activeModel != AnomalyEngine.MODE_ENSEMBLE ||
+            config.testModeEnabled
         val minimumPersistScore = when {
+            activeModel == AnomalyEngine.MODE_LOCAL_SENSITIVE -> thresholdProfile.low * 0.20
             config.testModeEnabled && activeModel != AnomalyEngine.MODE_ENSEMBLE -> thresholdProfile.low * 0.20
             config.debugModeEnabled && activeModel != AnomalyEngine.MODE_ENSEMBLE -> thresholdProfile.low * 0.35
             activeModel != AnomalyEngine.MODE_ENSEMBLE -> thresholdProfile.low * 0.55
@@ -383,13 +406,6 @@ class FlowRepository(
         dangerFloor?.let { floor ->
             severity = maxSeverity(severity, floor)
         }
-        val explanation = (dangerSummary?.let { "Potential risk: $it. " } ?: "") + ExplanationFormatter.summarize(
-            topFeatures = anomaly.topFeatures,
-            contributions = anomaly.featureContributions
-        ) + enrichedFlow.destinationInsight.mitreTechniques.takeIf { it.isNotEmpty() }?.let {
-            " MITRE: ${it.joinToString(",")}."
-        }.orEmpty() + if (suppressionReason != null) " Suppression: $suppressionReason." else ""
-
         val correlationKey = computeCorrelationKey(
             appId = enrichedFlow.appId,
             sourceModel = anomaly.source,
@@ -400,6 +416,43 @@ class FlowRepository(
             correlationKey = correlationKey,
             sinceMillis = enrichedFlow.timestampEndMillis - ALERT_CORRELATION_WINDOW_MILLIS
         )
+        val policyDecision = alertEvidencePolicy.evaluate(
+            flow = enrichedFlow,
+            window = window,
+            score = anomaly.responseScore,
+            severity = severity,
+            topFeatures = anomaly.topFeatures,
+            hasCorrelatedAlert = correlated != null,
+            hasDangerFloor = dangerFloor != null,
+            candidateThreshold = minimumPersistScore,
+            singleWindowMode = singleWindowLocalMode
+        )
+        severity = policyDecision.severity
+        if (!policyDecision.emit) {
+            upsertPendingAlertCandidate(
+                window = window,
+                flow = enrichedFlow,
+                anomaly = anomaly,
+                severity = severity,
+                correlationKey = correlationKey,
+                suppressionReason = policyDecision.reason?.let { appendSuppressionReason(suppressionReason, it) } ?: suppressionReason,
+                policyDiagnostics = policyDecision.diagnostics,
+                siteHint = siteHint
+            )
+            return@withContext null
+        }
+        val pendingCandidate = dao.findPendingAlert(appId = enrichedFlow.appId, correlationKey = correlationKey)
+        dao.deletePendingAlert(appId = enrichedFlow.appId, correlationKey = correlationKey)
+        suppressionReason = policyDecision.reason?.let { appendSuppressionReason(suppressionReason, it) } ?: suppressionReason
+        if (policyDecision.diagnostics.isNotEmpty()) {
+            anomaly = anomaly.copy(diagnostics = anomaly.diagnostics + policyDecision.diagnostics)
+        }
+        val explanation = (dangerSummary?.let { "Potential risk: $it. " } ?: "") + ExplanationFormatter.summarize(
+            topFeatures = anomaly.topFeatures,
+            contributions = anomaly.featureContributions
+        ) + enrichedFlow.destinationInsight.mitreTechniques.takeIf { it.isNotEmpty() }?.let {
+            " MITRE: ${it.joinToString(",")}."
+        }.orEmpty() + if (suppressionReason != null) " Suppression: $suppressionReason." else ""
 
         val alert = if (correlated != null) {
             val mergedSeverity = maxSeverity(
@@ -491,8 +544,8 @@ class FlowRepository(
                 contextScore = anomaly.contextScore,
                 responseScore = anomaly.responseScore,
                 driftScore = driftScore,
-                occurrenceCount = 1,
-                firstSeenMillis = enrichedFlow.timestampEndMillis,
+                occurrenceCount = (pendingCandidate?.occurrenceCount ?: 0) + 1,
+                firstSeenMillis = pendingCandidate?.firstSeenMillis ?: enrichedFlow.timestampEndMillis,
                 lastSeenMillis = enrichedFlow.timestampEndMillis,
                 correlationKey = correlationKey,
                 shadowModel = shadowModel,
@@ -701,6 +754,7 @@ class FlowRepository(
 
     suspend fun clearAllAlerts() = withContext(Dispatchers.IO) {
         dao.purgeScores()
+        dao.purgePendingAlerts()
     }
 
     suspend fun backfillRecentExports(maxFlows: Int = 300, maxAlerts: Int = 200): Int = withContext(Dispatchers.IO) {
@@ -842,14 +896,16 @@ class FlowRepository(
         val deletedFlows = dao.deleteOldFlows(cutoff)
         val deletedWindows = dao.deleteOldFeatureWindows(cutoff)
         val deletedScores = dao.deleteOldScores(cutoff)
+        val deletedPending = dao.deleteOldPendingAlerts(cutoff)
         val deletedExported = dao.deleteOldExported(cutoff)
-        deletedFlows + deletedWindows + deletedScores + deletedExported
+        deletedFlows + deletedWindows + deletedScores + deletedPending + deletedExported
     }
 
     suspend fun purgeAllLocalData() = withContext(Dispatchers.IO) {
         dao.purgeRawFlows()
         dao.purgeFeatureWindows()
         dao.purgeScores()
+        dao.purgePendingAlerts()
         dao.purgeExportQueue()
     }
 
@@ -1059,7 +1115,7 @@ class FlowRepository(
                     .put("statistical", config.fusionWeights.statistical)
                     .put("multivariate", config.fusionWeights.multivariate)
                     .put("sequence", config.fusionWeights.sequence)
-                    .put("linear", config.fusionWeights.linear)
+                    .put("local", config.fusionWeights.local)
                     .put("tflite", config.fusionWeights.tflite)
                     .put("remote", config.fusionWeights.remote)
                     .put("beacon", config.fusionWeights.beacon)
@@ -1210,10 +1266,102 @@ class FlowRepository(
                 payloadMean = window.payloadMean,
                 loadMean = window.loadMean,
                 transportMetricsPresent = window.transportMetricsPresent,
+                destinationConcentration = window.destinationConcentration,
+                destinationTransitionRate = window.destinationTransitionRate,
+                dnsFlowRatio = window.dnsFlowRatio,
+                webFlowRatio = window.webFlowRatio,
+                privateDestinationRatio = window.privateDestinationRatio,
+                multicastDestinationRatio = window.multicastDestinationRatio,
+                flowCountDeviation = window.flowCountDeviation,
+                byteRateDeviation = window.byteRateDeviation,
+                destinationDiversityShift = window.destinationDiversityShift,
+                noveltyShift = window.noveltyShift,
+                recentFlowCountMean = window.recentFlowCountMean,
+                recentByteRateMean = window.recentByteRateMean,
+                recentNoveltyMean = window.recentNoveltyMean,
+                flowCountTrend = window.flowCountTrend,
+                byteRateTrend = window.byteRateTrend,
+                noveltyTrend = window.noveltyTrend,
+                destinationDiversityTrend = window.destinationDiversityTrend,
+                consecutiveBurstWindows = window.consecutiveBurstWindows,
+                lowVolumePeriodicScore = window.lowVolumePeriodicScore,
+                destinationRiskScore = window.destinationRiskScore,
+                lookalikeScore = window.lookalikeScore,
+                suspiciousDestinationRatio = window.suspiciousDestinationRatio,
+                knownIdentityRatio = window.knownIdentityRatio,
+                mitreTechniqueRatio = window.mitreTechniqueRatio,
+                threatTagRatio = window.threatTagRatio,
                 sampledByGuardrail = window.sampledByGuardrail,
                 processingCostMillis = window.processingCostMillis
             )
         )
+    }
+
+    private suspend fun upsertPendingAlertCandidate(
+        window: FeatureWindow,
+        flow: FlowRecord,
+        anomaly: com.manta.app.domain.detection.AnomalyScoreResult,
+        severity: AlertSeverity,
+        correlationKey: String,
+        suppressionReason: String?,
+        policyDiagnostics: Map<String, Double>,
+        siteHint: String?
+    ) {
+        val existing = dao.findPendingAlert(appId = flow.appId, correlationKey = correlationKey)
+        val evidenceStrength = policyDiagnostics["alert_policy_evidence_strength"] ?: 0.0
+        val maxEvidenceStrength = policyDiagnostics["alert_policy_max_evidence_strength"] ?: evidenceStrength
+        val scoreTrend = policyDiagnostics["alert_policy_score_trend"] ?: 0.0
+        val destinationIdentity = flow.destinationInsight.registrableDomain ?: flow.destinationInsight.normalizedHost
+        if (existing == null) {
+            dao.insertPendingAlert(
+                PendingAlertEntity(
+                    id = UUID.randomUUID().toString(),
+                    featureWindowId = window.id,
+                    appId = flow.appId,
+                    correlationKey = correlationKey,
+                    score = anomaly.responseScore,
+                    severity = severity.name,
+                    topFeaturesCsv = anomaly.topFeatures.joinToString(","),
+                    featureContributionsJson = serializeFeatureContributions(anomaly.featureContributions),
+                    sourceModel = anomaly.source,
+                    firstSeenMillis = flow.timestampEndMillis,
+                    lastSeenMillis = flow.timestampEndMillis,
+                    occurrenceCount = 1,
+                    evidenceStrength = evidenceStrength,
+                    maxEvidenceStrength = maxEvidenceStrength,
+                    scoreTrend = scoreTrend,
+                    suppressionReason = suppressionReason,
+                    destinationIp = flow.dstIp,
+                    destinationPort = flow.dstPort,
+                    destinationHash = flow.destinationHash,
+                    siteHint = siteHint,
+                    destinationIdentity = destinationIdentity,
+                    lookalikeScore = flow.destinationInsight.lookalikeScore
+                )
+            )
+        } else {
+            dao.updatePendingAlert(
+                candidateId = existing.id,
+                featureWindowId = window.id,
+                score = maxOf(existing.score, anomaly.responseScore),
+                severity = maxSeverity(AlertSeverity.valueOf(existing.severity), severity).name,
+                topFeaturesCsv = anomaly.topFeatures.joinToString(","),
+                featureContributionsJson = serializeFeatureContributions(anomaly.featureContributions),
+                sourceModel = anomaly.source,
+                lastSeenMillis = flow.timestampEndMillis,
+                occurrenceCount = existing.occurrenceCount + 1,
+                evidenceStrength = evidenceStrength,
+                maxEvidenceStrength = maxOf(existing.maxEvidenceStrength, maxEvidenceStrength),
+                scoreTrend = scoreTrend,
+                suppressionReason = suppressionReason,
+                destinationIp = flow.dstIp,
+                destinationPort = flow.dstPort,
+                destinationHash = flow.destinationHash,
+                siteHint = siteHint,
+                destinationIdentity = destinationIdentity,
+                lookalikeScore = flow.destinationInsight.lookalikeScore
+            )
+        }
     }
 
     private fun mapFeatureWindowEntity(entity: FeatureWindowEntity): FeatureWindow {
@@ -1261,6 +1409,31 @@ class FlowRepository(
             payloadMean = entity.payloadMean,
             loadMean = entity.loadMean,
             transportMetricsPresent = entity.transportMetricsPresent,
+            destinationConcentration = entity.destinationConcentration,
+            destinationTransitionRate = entity.destinationTransitionRate,
+            dnsFlowRatio = entity.dnsFlowRatio,
+            webFlowRatio = entity.webFlowRatio,
+            privateDestinationRatio = entity.privateDestinationRatio,
+            multicastDestinationRatio = entity.multicastDestinationRatio,
+            flowCountDeviation = entity.flowCountDeviation,
+            byteRateDeviation = entity.byteRateDeviation,
+            destinationDiversityShift = entity.destinationDiversityShift,
+            noveltyShift = entity.noveltyShift,
+            recentFlowCountMean = entity.recentFlowCountMean,
+            recentByteRateMean = entity.recentByteRateMean,
+            recentNoveltyMean = entity.recentNoveltyMean,
+            flowCountTrend = entity.flowCountTrend,
+            byteRateTrend = entity.byteRateTrend,
+            noveltyTrend = entity.noveltyTrend,
+            destinationDiversityTrend = entity.destinationDiversityTrend,
+            consecutiveBurstWindows = entity.consecutiveBurstWindows,
+            lowVolumePeriodicScore = entity.lowVolumePeriodicScore,
+            destinationRiskScore = entity.destinationRiskScore,
+            lookalikeScore = entity.lookalikeScore,
+            suspiciousDestinationRatio = entity.suspiciousDestinationRatio,
+            knownIdentityRatio = entity.knownIdentityRatio,
+            mitreTechniqueRatio = entity.mitreTechniqueRatio,
+            threatTagRatio = entity.threatTagRatio,
             sampledByGuardrail = entity.sampledByGuardrail,
             processingCostMillis = entity.processingCostMillis
         )
@@ -1881,12 +2054,107 @@ class FlowRepository(
             periodicBeaconScore = if (config.ablateTimingFeatures) 0.0 else window.periodicBeaconScore,
             noveltyScore = if (config.ablateDestinationFeatures) 0.0 else window.noveltyScore,
             destinationDiversity = if (config.ablateDestinationFeatures) 0.0 else window.destinationDiversity,
+            destinationConcentration = if (config.ablateDestinationFeatures) 0.0 else window.destinationConcentration,
+            destinationTransitionRate = if (config.ablateDestinationFeatures) 0.0 else window.destinationTransitionRate,
+            dnsFlowRatio = if (config.ablateDestinationFeatures) 0.0 else window.dnsFlowRatio,
+            webFlowRatio = if (config.ablateDestinationFeatures) 0.0 else window.webFlowRatio,
+            privateDestinationRatio = if (config.ablateDestinationFeatures) 0.0 else window.privateDestinationRatio,
+            multicastDestinationRatio = if (config.ablateDestinationFeatures) 0.0 else window.multicastDestinationRatio,
+            destinationDiversityShift = if (config.ablateDestinationFeatures) 0.0 else window.destinationDiversityShift,
+            noveltyShift = if (config.ablateDestinationFeatures) 0.0 else window.noveltyShift,
+            destinationDiversityTrend = if (config.ablateDestinationFeatures) 0.0 else window.destinationDiversityTrend,
+            destinationRiskScore = if (config.ablateDestinationFeatures) 0.0 else window.destinationRiskScore,
+            lookalikeScore = if (config.ablateDestinationFeatures) 0.0 else window.lookalikeScore,
+            suspiciousDestinationRatio = if (config.ablateDestinationFeatures) 0.0 else window.suspiciousDestinationRatio,
+            knownIdentityRatio = if (config.ablateDestinationFeatures) 0.0 else window.knownIdentityRatio,
+            mitreTechniqueRatio = if (config.ablateDestinationFeatures) 0.0 else window.mitreTechniqueRatio,
+            threatTagRatio = if (config.ablateDestinationFeatures) 0.0 else window.threatTagRatio,
             portDiversity = if (config.ablateDestinationFeatures) 0.0 else window.portDiversity,
             protocolDiversity = if (config.ablateDestinationFeatures) 0.0 else window.protocolDiversity,
             packetImbalance = if (config.ablateDestinationFeatures) 0.0 else window.packetImbalance,
             smallFlowRatio = if (config.ablateDestinationFeatures) 0.0 else window.smallFlowRatio,
-            highPortRatio = if (config.ablateDestinationFeatures) 0.0 else window.highPortRatio
+            highPortRatio = if (config.ablateDestinationFeatures) 0.0 else window.highPortRatio,
+            flowCountDeviation = if (config.ablateVolumeFeatures) 0.0 else window.flowCountDeviation,
+            byteRateDeviation = if (config.ablateVolumeFeatures) 0.0 else window.byteRateDeviation,
+            recentFlowCountMean = if (config.ablateVolumeFeatures) 0.0 else window.recentFlowCountMean,
+            recentByteRateMean = if (config.ablateVolumeFeatures) 0.0 else window.recentByteRateMean,
+            flowCountTrend = if (config.ablateVolumeFeatures) 0.0 else window.flowCountTrend,
+            byteRateTrend = if (config.ablateVolumeFeatures) 0.0 else window.byteRateTrend,
+            consecutiveBurstWindows = if (config.ablateVolumeFeatures) 0.0 else window.consecutiveBurstWindows,
+            ttlGap = if (config.ablateDestinationFeatures) 0.0 else window.ttlGap,
+            ttlMetricsPresent = if (config.ablateDestinationFeatures) 0.0 else window.ttlMetricsPresent,
+            synRateTotal = if (config.ablateDestinationFeatures) 0.0 else window.synRateTotal,
+            rstRateTotal = if (config.ablateDestinationFeatures) 0.0 else window.rstRateTotal,
+            ackRateTotal = if (config.ablateDestinationFeatures) 0.0 else window.ackRateTotal,
+            finRateTotal = if (config.ablateDestinationFeatures) 0.0 else window.finRateTotal,
+            pshRateTotal = if (config.ablateDestinationFeatures) 0.0 else window.pshRateTotal,
+            fragmentRateTotal = if (config.ablateDestinationFeatures) 0.0 else window.fragmentRateTotal,
+            tcpWindowMean = if (config.ablateDestinationFeatures) 0.0 else window.tcpWindowMean,
+            ackDelayMean = if (config.ablateTimingFeatures) 0.0 else window.ackDelayMean,
+            interPacketGapMean = if (config.ablateTimingFeatures) 0.0 else window.interPacketGapMean,
+            payloadMean = if (config.ablateVolumeFeatures) 0.0 else window.payloadMean,
+            loadMean = if (config.ablateVolumeFeatures) 0.0 else window.loadMean,
+            recentNoveltyMean = if (config.ablateDestinationFeatures) 0.0 else window.recentNoveltyMean,
+            noveltyTrend = if (config.ablateDestinationFeatures) 0.0 else window.noveltyTrend,
+            lowVolumePeriodicScore = if (config.ablateTimingFeatures) 0.0 else window.lowVolumePeriodicScore,
+            transportMetricsPresent = if (config.ablateDestinationFeatures) 0.0 else window.transportMetricsPresent
         )
+    }
+
+    private fun applyBaselineDeviationFeatures(
+        window: FeatureWindow,
+        recentWindows: List<FeatureWindowEntity>
+    ): FeatureWindow {
+        if (recentWindows.isEmpty()) {
+            return window
+        }
+        val flowBaseline = recentWindows.map { it.flowCount.toDouble() }.average().coerceAtLeast(0.0)
+        val byteRateBaseline = recentWindows.map { it.byteRate }.average().coerceAtLeast(0.0)
+        val destinationDiversityBaseline = recentWindows.map { it.destinationDiversity }.average().coerceIn(0.0, 1.0)
+        val noveltyBaseline = recentWindows.map { it.noveltyScore }.average().coerceIn(0.0, 1.0)
+        val oldest = recentWindows.last()
+        val burstStreak = recentWindows.takeWhile { previous ->
+            previous.flowCountDeviation >= 0.40 || previous.byteRateDeviation >= 0.40
+        }.size.toDouble()
+        return window.copy(
+            flowCountDeviation = (kotlin.math.abs(window.flowCount.toDouble() - flowBaseline) / (kotlin.math.abs(flowBaseline) + 1.0)).coerceIn(0.0, 10.0),
+            byteRateDeviation = (kotlin.math.abs(window.byteRate - byteRateBaseline) / (kotlin.math.abs(byteRateBaseline) + 1.0)).coerceIn(0.0, 10.0),
+            destinationDiversityShift = kotlin.math.abs(window.destinationDiversity - destinationDiversityBaseline).coerceIn(0.0, 1.0),
+            noveltyShift = kotlin.math.abs(window.noveltyScore - noveltyBaseline).coerceIn(0.0, 1.0),
+            recentFlowCountMean = flowBaseline,
+            recentByteRateMean = byteRateBaseline,
+            recentNoveltyMean = noveltyBaseline,
+            flowCountTrend = ((window.flowCount.toDouble() - oldest.flowCount.toDouble()) / (kotlin.math.abs(oldest.flowCount.toDouble()) + 1.0)).coerceIn(-10.0, 10.0),
+            byteRateTrend = ((window.byteRate - oldest.byteRate) / (kotlin.math.abs(oldest.byteRate) + 1.0)).coerceIn(-10.0, 10.0),
+            noveltyTrend = (window.noveltyScore - oldest.noveltyScore).coerceIn(-1.0, 1.0),
+            destinationDiversityTrend = (window.destinationDiversity - oldest.destinationDiversity).coerceIn(-1.0, 1.0),
+            consecutiveBurstWindows = burstStreak.coerceIn(0.0, 5.0)
+        )
+    }
+
+    private fun adaptiveWindowMillis(appId: String, recent60Count: Int): Long {
+        val family = deriveRuntimeAppFamily(appId)
+        return when {
+            family in setOf("service", "system", "background") || recent60Count < 10 -> LONG_WINDOW_MILLIS
+            recent60Count > 100 -> SHORT_WINDOW_MILLIS
+            else -> WINDOW_MILLIS
+        }
+    }
+
+    private fun deriveRuntimeAppFamily(appId: String): String {
+        val normalized = appId.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+        return when {
+            normalized.startsWith("service_") -> "service"
+            normalized.startsWith("uid_") -> "system"
+            listOf("chrome", "firefox", "browser", "opera", "edge", "safari", "duckduckgo", "brave").any { it in normalized } -> "browser"
+            listOf("analytics", "telemetry", "doubleclick", "googleads", "scorecardresearch", "tracking").any { it in normalized } -> "telemetry"
+            listOf("vpn", "ssh", "rdp", "teamviewer", "anydesk", "openvpn", "ipsec", "l2tp").any { it in normalized } -> "remote_access"
+            listOf("gmail", "outlook", "telegram", "whatsapp", "fbmessenger", "facebook", "instagram", "snapchat", "twitter", "tiktok", "spotify", "netflix", "youtube").any { it in normalized } -> "consumer_app"
+            listOf("android", "systemui", "gms", "play_services", "packageinstaller").any { it in normalized } -> "system"
+            listOf("background", "daemon", "worker", "sensor", "watersensor", "temp_humidity").any { it in normalized } -> "background"
+            listOf("spy", "rat", "mal", "phish", "attack", "anomaly", "bot").any { it in normalized } -> "malware"
+            else -> "other_app"
+        }
     }
 
     private fun adjustedThresholdProfile(base: ThresholdProfile, profile: AppProfile, testModeEnabled: Boolean): ThresholdProfile {

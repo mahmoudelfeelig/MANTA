@@ -16,6 +16,7 @@ import com.manta.app.service.FlowVpnService
 import com.manta.app.ui.MainScreen
 import com.manta.app.ui.MainViewModel
 import com.manta.app.ui.MainViewModelFactory
+import com.manta.app.ui.PublicDemoScreen
 import com.manta.app.ui.theme.MantaTheme
 
 class MainActivity : ComponentActivity() {
@@ -35,6 +36,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (intent.getBooleanExtra(EXTRA_PUBLIC_DEMO, false)) {
+            val page = when (intent.getStringExtra(EXTRA_DEMO_SCREEN)?.lowercase()) {
+                "alert" -> 1
+                "privacy" -> 2
+                else -> 0
+            }
+            val autoAdvance = intent.getBooleanExtra(EXTRA_DEMO_AUTO_ADVANCE, false)
+            setContent {
+                MantaTheme {
+                    PublicDemoScreen(initialPage = page, autoAdvance = autoAdvance)
+                }
+            }
+            return
+        }
 
         setContent {
             val config by viewModel.config.collectAsStateWithLifecycle()
@@ -120,5 +136,11 @@ class MainActivity : ComponentActivity() {
     private fun stopCaptureService() {
         viewModel.setCaptureEnabled(false)
         startService(FlowVpnService.stopIntent(this))
+    }
+
+    companion object {
+        private const val EXTRA_PUBLIC_DEMO = "public_demo"
+        private const val EXTRA_DEMO_SCREEN = "demo_screen"
+        private const val EXTRA_DEMO_AUTO_ADVANCE = "demo_auto_advance"
     }
 }

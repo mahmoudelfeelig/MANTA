@@ -7,7 +7,7 @@
 - App attribution resolver (`ConnectivityManager#getConnectionOwnerUid` where available).
 - Room storage for flows, feature windows, anomaly scores, and export queue.
 - Retention cleanup and export queue workers via WorkManager.
-- Statistical, multivariate, and sequence anomaly detectors, plus bundled linear ML scoring and optional one-class TFLite scoring.
+- Statistical, multivariate, and sequence anomaly detectors, plus bundled local ML scoring and optional one-class TFLite scoring.
 - Compose UI for consent, backend config, export toggle, capture control, alert view, local purge, and dataset snapshot export.
 
 ## Implemented P1 and P2 components
@@ -41,7 +41,7 @@ Minimum configuration:
 - Privacy modes include off, low, medium, strict, and custom field-level export controls.
 - An exported automation receiver is available for adb-driven test orchestration.
 - Managed app restrictions are supported for Android Enterprise / EMM deployment via `mdm/managed-configurations.json`.
-- A bundled linear model is loaded from `app/src/main/assets/models/anomaly-linear.json`.
-- If no TFLite model exists in `app/src/main/assets/models/anomaly.tflite`, scoring uses linear + statistical paths.
+- A bundled local model is loaded from `app/src/main/assets/models/anomaly-local.json`.
+- If no TFLite model exists in `app/src/main/assets/models/anomaly.tflite`, scoring uses local + statistical paths.
 - Dataset snapshots are written to app external files under `exports/` as privacy-mode-aware CSV.
 - Policy sync expects backend endpoint `GET /api/v1/policy/device/{device_id_pseudo}`.

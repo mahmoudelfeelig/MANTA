@@ -36,7 +36,8 @@ private const val KEY_PRIVACY_MODE = "privacy_mode"
 private const val KEY_FUSION_STATISTICAL_WEIGHT = "fusion_statistical_weight"
 private const val KEY_FUSION_MULTIVARIATE_WEIGHT = "fusion_multivariate_weight"
 private const val KEY_FUSION_SEQUENCE_WEIGHT = "fusion_sequence_weight"
-private const val KEY_FUSION_LINEAR_WEIGHT = "fusion_linear_weight"
+private const val KEY_FUSION_LOCAL_WEIGHT = "fusion_local_weight"
+private const val KEY_FUSION_LEGACY_LINEAR_WEIGHT = "fusion_linear_weight"
 private const val KEY_FUSION_TFLITE_WEIGHT = "fusion_tflite_weight"
 private const val KEY_FUSION_REMOTE_WEIGHT = "fusion_remote_weight"
 private const val KEY_FUSION_BEACON_WEIGHT = "fusion_beacon_weight"
@@ -94,9 +95,20 @@ private val SUPPORTED_DETECTION_MODELS = setOf(
     "statistical",
     "multivariate",
     "sequence",
-    "linear",
+    "local",
+    "local_sensitive",
+    "local_quiet",
+    "local_balanced",
+    "local_privacy",
     "tflite",
     "remote_assisted"
+)
+
+private val LEGACY_DETECTION_MODEL_ALIASES = mapOf(
+    "linear" to "local",
+    "linear_v13_recall" to "local_sensitive",
+    "linear_v14_quiet" to "local_quiet",
+    "hybrid_v15" to "local_balanced"
 )
 
 enum class ThemeMode {
@@ -162,7 +174,7 @@ data class FusionWeights(
     val statistical: Double,
     val multivariate: Double,
     val sequence: Double,
-    val linear: Double,
+    val local: Double,
     val tflite: Double,
     val remote: Double,
     val beacon: Double,
@@ -176,10 +188,10 @@ data class FusionWeights(
         val safeStat = statistical.coerceIn(0.0, 1.0)
         val safeMultivariate = multivariate.coerceIn(0.0, 1.0)
         val safeSequence = sequence.coerceIn(0.0, 1.0)
-        val safeLinear = linear.coerceIn(0.0, 1.0)
+        val safeLocal = local.coerceIn(0.0, 1.0)
         val safeTflite = tflite.coerceIn(0.0, 1.0)
         val safeRemote = remote.coerceIn(0.0, 1.0)
-        val total = safeStat + safeMultivariate + safeSequence + safeLinear + safeTflite + safeRemote
+        val total = safeStat + safeMultivariate + safeSequence + safeLocal + safeTflite + safeRemote
         val normalizedModelWeights = if (total <= 1e-6) {
             doubleArrayOf(0.28, 0.20, 0.12, 0.16, 0.12, 0.12)
         } else {
@@ -187,7 +199,7 @@ data class FusionWeights(
                 safeStat / total,
                 safeMultivariate / total,
                 safeSequence / total,
-                safeLinear / total,
+                safeLocal / total,
                 safeTflite / total,
                 safeRemote / total
             )
@@ -207,7 +219,7 @@ data class FusionWeights(
             statistical = normalizedModelWeights[0],
             multivariate = normalizedModelWeights[1],
             sequence = normalizedModelWeights[2],
-            linear = normalizedModelWeights[3],
+            local = normalizedModelWeights[3],
             tflite = normalizedModelWeights[4],
             remote = normalizedModelWeights[5],
             beacon = beacon.coerceIn(0.0, 1.0),
@@ -344,8 +356,8 @@ class SecureSettingsStore(context: Context) {
         if (!prefs.contains(KEY_FUSION_SEQUENCE_WEIGHT)) {
             prefs.edit().putString(KEY_FUSION_SEQUENCE_WEIGHT, "0.12").apply()
         }
-        if (!prefs.contains(KEY_FUSION_LINEAR_WEIGHT)) {
-            prefs.edit().putString(KEY_FUSION_LINEAR_WEIGHT, "0.16").apply()
+        if (!prefs.contains(KEY_FUSION_LOCAL_WEIGHT) && !prefs.contains(KEY_FUSION_LEGACY_LINEAR_WEIGHT)) {
+            prefs.edit().putString(KEY_FUSION_LOCAL_WEIGHT, "0.16").apply()
         }
         if (!prefs.contains(KEY_FUSION_TFLITE_WEIGHT)) {
             prefs.edit().putString(KEY_FUSION_TFLITE_WEIGHT, "0.12").apply()
@@ -422,7 +434,10 @@ class SecureSettingsStore(context: Context) {
                 statistical = prefs.getString(KEY_FUSION_STATISTICAL_WEIGHT, "0.28")?.toDoubleOrNull() ?: 0.28,
                 multivariate = prefs.getString(KEY_FUSION_MULTIVARIATE_WEIGHT, "0.20")?.toDoubleOrNull() ?: 0.20,
                 sequence = prefs.getString(KEY_FUSION_SEQUENCE_WEIGHT, "0.12")?.toDoubleOrNull() ?: 0.12,
-                linear = prefs.getString(KEY_FUSION_LINEAR_WEIGHT, "0.16")?.toDoubleOrNull() ?: 0.16,
+                local = (
+                    prefs.getString(KEY_FUSION_LOCAL_WEIGHT, null)
+                        ?: prefs.getString(KEY_FUSION_LEGACY_LINEAR_WEIGHT, "0.16")
+                    )?.toDoubleOrNull() ?: 0.16,
                 tflite = prefs.getString(KEY_FUSION_TFLITE_WEIGHT, "0.12")?.toDoubleOrNull() ?: 0.12,
                 remote = prefs.getString(KEY_FUSION_REMOTE_WEIGHT, "0.12")?.toDoubleOrNull() ?: 0.12,
                 beacon = prefs.getString(KEY_FUSION_BEACON_WEIGHT, "0.15")?.toDoubleOrNull() ?: 0.15,
@@ -557,7 +572,7 @@ class SecureSettingsStore(context: Context) {
             .putString(KEY_FUSION_STATISTICAL_WEIGHT, roundWeight(normalized.statistical))
             .putString(KEY_FUSION_MULTIVARIATE_WEIGHT, roundWeight(normalized.multivariate))
             .putString(KEY_FUSION_SEQUENCE_WEIGHT, roundWeight(normalized.sequence))
-            .putString(KEY_FUSION_LINEAR_WEIGHT, roundWeight(normalized.linear))
+            .putString(KEY_FUSION_LOCAL_WEIGHT, roundWeight(normalized.local))
             .putString(KEY_FUSION_TFLITE_WEIGHT, roundWeight(normalized.tflite))
             .putString(KEY_FUSION_REMOTE_WEIGHT, roundWeight(normalized.remote))
             .putString(KEY_FUSION_BEACON_WEIGHT, roundWeight(normalized.beacon))
@@ -689,7 +704,7 @@ class SecureSettingsStore(context: Context) {
             statistical = policy.fusionWeights.statistical,
             multivariate = policy.fusionWeights.multivariate,
             sequence = policy.fusionWeights.sequence,
-            linear = policy.fusionWeights.linear,
+            local = policy.fusionWeights.local,
             tflite = policy.fusionWeights.tflite,
             remote = policy.fusionWeights.remote,
             beacon = policy.fusionWeights.beacon,
@@ -718,7 +733,7 @@ class SecureSettingsStore(context: Context) {
             .putString(KEY_FUSION_STATISTICAL_WEIGHT, roundWeight(fusion.statistical))
             .putString(KEY_FUSION_MULTIVARIATE_WEIGHT, roundWeight(fusion.multivariate))
             .putString(KEY_FUSION_SEQUENCE_WEIGHT, roundWeight(fusion.sequence))
-            .putString(KEY_FUSION_LINEAR_WEIGHT, roundWeight(fusion.linear))
+            .putString(KEY_FUSION_LOCAL_WEIGHT, roundWeight(fusion.local))
             .putString(KEY_FUSION_TFLITE_WEIGHT, roundWeight(fusion.tflite))
             .putString(KEY_FUSION_REMOTE_WEIGHT, roundWeight(fusion.remote))
             .putString(KEY_FUSION_BEACON_WEIGHT, roundWeight(fusion.beacon))
@@ -828,7 +843,7 @@ class SecureSettingsStore(context: Context) {
     }
 
     private fun sanitizeDetectionModel(value: String?): String {
-        val candidate = value?.trim().orEmpty()
+        val candidate = LEGACY_DETECTION_MODEL_ALIASES[value?.trim().orEmpty()] ?: value?.trim().orEmpty()
         return if (candidate in SUPPORTED_DETECTION_MODELS) {
             candidate
         } else {
@@ -837,7 +852,7 @@ class SecureSettingsStore(context: Context) {
     }
 
     private fun sanitizeShadowModel(value: String?): String? {
-        val candidate = value?.trim().orEmpty()
+        val candidate = LEGACY_DETECTION_MODEL_ALIASES[value?.trim().orEmpty()] ?: value?.trim().orEmpty()
         if (candidate.isBlank()) {
             return null
         }

@@ -17,7 +17,7 @@ data class RemoteFusionWeights(
     val statistical: Double = 0.28,
     val multivariate: Double = 0.20,
     val sequence: Double = 0.12,
-    val linear: Double = 0.16,
+    val local: Double = 0.16,
     val tflite: Double = 0.12,
     val remote: Double = 0.12,
     val beacon: Double = 0.15,

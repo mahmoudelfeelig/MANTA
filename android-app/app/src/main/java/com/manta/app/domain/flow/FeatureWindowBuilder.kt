@@ -3,7 +3,7 @@ package com.manta.app.domain.flow
 import com.manta.app.core.model.FeatureWindow
 import com.manta.app.core.model.FlowRecord
 import java.time.Instant
-import java.time.ZoneId
+import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.ln
@@ -46,7 +46,20 @@ class FeatureWindowBuilder {
         var totalPacketsIn = 0
         var smallFlowCount = 0
         var highPortCount = 0
+        var dnsFlowCount = 0
+        var webFlowCount = 0
+        var privateDestinationCount = 0
+        var multicastDestinationCount = 0
+        var destinationRiskSum = 0.0
+        var lookalikeScoreSum = 0.0
+        var suspiciousDestinationCount = 0
+        var knownIdentityCount = 0
+        var mitreTechniqueCount = 0
+        var threatTagCount = 0
+        var destinationSwitchCount = 0
+        var previousDestination: String? = null
         val destinations = HashSet<String>()
+        val destinationCounts = mutableMapOf<String, Int>()
         val ports = HashSet<Int>()
         val protocols = HashSet<String>()
 
@@ -75,10 +88,38 @@ class FeatureWindowBuilder {
             loadMeanSum += flow.loadMean
             transportMetricsPresentSum += flow.transportMetricsPresent
             destinations += flow.destinationHash
+            destinationCounts[flow.destinationHash] = (destinationCounts[flow.destinationHash] ?: 0) + 1
+            previousDestination?.let { previous ->
+                if (previous != flow.destinationHash) destinationSwitchCount += 1
+            }
+            previousDestination = flow.destinationHash
             ports += flow.dstPort
             protocols += flow.protocol.name
             if (flowBytes <= 256L) smallFlowCount += 1
             if (flow.dstPort >= 1024) highPortCount += 1
+            if (flow.dstPort == 53 || flow.dstPort == 853) dnsFlowCount += 1
+            if (flow.dstPort in setOf(80, 443, 8080, 8000, 8443)) webFlowCount += 1
+            if (isPrivateDestination(flow.dstIp)) privateDestinationCount += 1
+            if (isMulticastDestination(flow.dstIp)) multicastDestinationCount += 1
+            val insight = flow.destinationInsight
+            val suspiciousDestination = insight.lookalikeScore >= 0.55 ||
+                insight.punycodePresent ||
+                insight.digitSubstitutionPresent ||
+                insight.suspiciousTld ||
+                insight.threatTags.isNotEmpty()
+            val destinationRisk = listOf(
+                insight.lookalikeScore,
+                if (insight.threatTags.isNotEmpty()) 0.85 else 0.0,
+                if (insight.suspiciousTld) 0.65 else 0.0,
+                if (insight.punycodePresent || insight.digitSubstitutionPresent) 0.55 else 0.0,
+                insight.confidence * 0.35
+            ).maxOrNull() ?: 0.0
+            destinationRiskSum += destinationRisk.coerceIn(0.0, 1.0)
+            lookalikeScoreSum += insight.lookalikeScore.coerceIn(0.0, 1.0)
+            if (suspiciousDestination) suspiciousDestinationCount += 1
+            if (!insight.normalizedHost.isNullOrBlank() || !insight.registrableDomain.isNullOrBlank()) knownIdentityCount += 1
+            if (insight.mitreTechniques.isNotEmpty()) mitreTechniqueCount += 1
+            if (insight.threatTags.isNotEmpty()) threatTagCount += 1
         }
 
         val packetCount = packetCountRaw.coerceAtLeast(1)
@@ -118,6 +159,22 @@ class FeatureWindowBuilder {
         val packetImbalance = (abs(totalPacketsOut - totalPacketsIn).toDouble() / (packetCount.toDouble() + 1.0)).coerceIn(0.0, 1.0)
         val smallFlowRatio = (smallFlowCount.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
         val highPortRatio = (highPortCount.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
+        val destinationConcentration = (destinationCounts.values.maxOrNull()?.toDouble() ?: 0.0) / flowCount.toDouble()
+        val destinationTransitionRate = if (flowCount > 1) {
+            destinationSwitchCount.toDouble() / (flowCount - 1).toDouble()
+        } else {
+            0.0
+        }
+        val dnsFlowRatio = (dnsFlowCount.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
+        val webFlowRatio = (webFlowCount.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
+        val privateDestinationRatio = (privateDestinationCount.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
+        val multicastDestinationRatio = (multicastDestinationCount.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
+        val destinationRiskScore = (destinationRiskSum / flowCount.toDouble()).coerceIn(0.0, 1.0)
+        val lookalikeScore = (lookalikeScoreSum / flowCount.toDouble()).coerceIn(0.0, 1.0)
+        val suspiciousDestinationRatio = (suspiciousDestinationCount.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
+        val knownIdentityRatio = (knownIdentityCount.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
+        val mitreTechniqueRatio = (mitreTechniqueCount.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
+        val threatTagRatio = (threatTagCount.toDouble() / flowCount.toDouble()).coerceIn(0.0, 1.0)
         val ttlGap = ttlGapSum / flowCount.toDouble()
         val ttlMetricsPresent = ttlMetricsPresentSum / flowCount.toDouble()
         val synRateTotal = synRateTotalSum / flowCount.toDouble()
@@ -132,7 +189,7 @@ class FeatureWindowBuilder {
         val payloadMean = payloadMeanSum / flowCount.toDouble()
         val loadMean = loadMeanSum / flowCount.toDouble()
         val transportMetricsPresent = transportMetricsPresentSum / flowCount.toDouble()
-        val zoned = Instant.ofEpochMilli(windowEndMillis).atZone(ZoneId.systemDefault())
+        val zoned = Instant.ofEpochMilli(windowEndMillis).atZone(ZoneOffset.UTC)
         val hourOfDay = zoned.hour
         val dayOfWeek = zoned.dayOfWeek.value
         val isWeekend = dayOfWeek >= 6
@@ -182,8 +239,36 @@ class FeatureWindowBuilder {
             payloadMean = payloadMean.coerceAtLeast(0.0),
             loadMean = loadMean.coerceAtLeast(0.0),
             transportMetricsPresent = transportMetricsPresent.coerceIn(0.0, 1.0),
+            destinationConcentration = destinationConcentration.coerceIn(0.0, 1.0),
+            destinationTransitionRate = destinationTransitionRate.coerceIn(0.0, 1.0),
+            dnsFlowRatio = dnsFlowRatio,
+            webFlowRatio = webFlowRatio,
+            privateDestinationRatio = privateDestinationRatio,
+            multicastDestinationRatio = multicastDestinationRatio,
+            lowVolumePeriodicScore = if (byteRate <= 128.0) periodicBeaconScore.coerceIn(0.0, 1.0) else 0.0,
+            destinationRiskScore = destinationRiskScore,
+            lookalikeScore = lookalikeScore,
+            suspiciousDestinationRatio = suspiciousDestinationRatio,
+            knownIdentityRatio = knownIdentityRatio,
+            mitreTechniqueRatio = mitreTechniqueRatio,
+            threatTagRatio = threatTagRatio,
             sampledByGuardrail = sampledByGuardrail,
             processingCostMillis = processingCostMillis.coerceAtLeast(0.0)
         )
+    }
+
+    private fun isPrivateDestination(ip: String): Boolean {
+        return ip.startsWith("10.") ||
+            ip.startsWith("192.168.") ||
+            Regex("""^172\.(1[6-9]|2\d|3[0-1])\.""").containsMatchIn(ip) ||
+            ip == "127.0.0.1" ||
+            ip == "::1" ||
+            ip.lowercase().startsWith("fc") ||
+            ip.lowercase().startsWith("fd")
+    }
+
+    private fun isMulticastDestination(ip: String): Boolean {
+        val firstOctet = ip.substringBefore(".").toIntOrNull() ?: return ip.lowercase().startsWith("ff")
+        return firstOctet in 224..239
     }
 }

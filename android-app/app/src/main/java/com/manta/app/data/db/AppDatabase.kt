@@ -10,9 +10,10 @@ import androidx.room.RoomDatabase
         RawFlowEntity::class,
         FeatureWindowEntity::class,
         AnomalyScoreEntity::class,
+        PendingAlertEntity::class,
         ExportQueueEntity::class
     ],
-    version = 13,
+    version = 15,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

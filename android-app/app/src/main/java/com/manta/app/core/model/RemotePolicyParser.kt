@@ -52,7 +52,11 @@ object RemotePolicyParser {
                 statistical = fusionNode.optDouble("statistical", 0.28),
                 multivariate = fusionNode.optDouble("multivariate", 0.20),
                 sequence = fusionNode.optDouble("sequence", 0.12),
-                linear = fusionNode.optDouble("linear", 0.16),
+                local = if (fusionNode.has("local")) {
+                    fusionNode.optDouble("local", 0.16)
+                } else {
+                    fusionNode.optDouble("linear", 0.16)
+                },
                 tflite = fusionNode.optDouble("tflite", 0.12),
                 remote = fusionNode.optDouble("remote", 0.12),
                 beacon = fusionNode.optDouble("beacon", 0.15),

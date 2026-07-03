@@ -100,6 +100,31 @@ data class FeatureWindowEntity(
     val payloadMean: Double = 0.0,
     val loadMean: Double = 0.0,
     val transportMetricsPresent: Double = 0.0,
+    val destinationConcentration: Double = 0.0,
+    val destinationTransitionRate: Double = 0.0,
+    val dnsFlowRatio: Double = 0.0,
+    val webFlowRatio: Double = 0.0,
+    val privateDestinationRatio: Double = 0.0,
+    val multicastDestinationRatio: Double = 0.0,
+    val flowCountDeviation: Double = 0.0,
+    val byteRateDeviation: Double = 0.0,
+    val destinationDiversityShift: Double = 0.0,
+    val noveltyShift: Double = 0.0,
+    val recentFlowCountMean: Double = 0.0,
+    val recentByteRateMean: Double = 0.0,
+    val recentNoveltyMean: Double = 0.0,
+    val flowCountTrend: Double = 0.0,
+    val byteRateTrend: Double = 0.0,
+    val noveltyTrend: Double = 0.0,
+    val destinationDiversityTrend: Double = 0.0,
+    val consecutiveBurstWindows: Double = 0.0,
+    val lowVolumePeriodicScore: Double = 0.0,
+    val destinationRiskScore: Double = 0.0,
+    val lookalikeScore: Double = 0.0,
+    val suspiciousDestinationRatio: Double = 0.0,
+    val knownIdentityRatio: Double = 0.0,
+    val mitreTechniqueRatio: Double = 0.0,
+    val threatTagRatio: Double = 0.0,
     val sampledByGuardrail: Boolean = false,
     val processingCostMillis: Double = 0.0
 )
@@ -148,6 +173,39 @@ data class AnomalyScoreEntity(
     val destinationHash: String? = null,
     val siteHint: String? = null,
     val mitreTechniquesCsv: String = "",
+    val destinationIdentity: String? = null,
+    val lookalikeScore: Double = 0.0
+)
+
+@Entity(
+    tableName = "pending_alert_candidates",
+    indices = [
+        Index(value = ["appId", "correlationKey"], unique = true),
+        Index(value = ["lastSeenMillis"]),
+        Index(value = ["appId", "lastSeenMillis"])
+    ]
+)
+data class PendingAlertEntity(
+    @PrimaryKey val id: String,
+    val featureWindowId: String,
+    val appId: String,
+    val correlationKey: String,
+    val score: Double,
+    val severity: String,
+    val topFeaturesCsv: String,
+    val featureContributionsJson: String = "{}",
+    val sourceModel: String,
+    val firstSeenMillis: Long,
+    val lastSeenMillis: Long,
+    val occurrenceCount: Int,
+    val evidenceStrength: Double,
+    val maxEvidenceStrength: Double,
+    val scoreTrend: Double,
+    val suppressionReason: String? = null,
+    val destinationIp: String? = null,
+    val destinationPort: Int? = null,
+    val destinationHash: String? = null,
+    val siteHint: String? = null,
     val destinationIdentity: String? = null,
     val lookalikeScore: Double = 0.0
 )

@@ -7,6 +7,7 @@ import com.manta.app.core.net.OkHttpEventClient
 import com.manta.app.core.settings.SecureSettingsStore
 import com.manta.app.data.FlowRepository
 import com.manta.app.domain.detection.AnomalyEngine
+import com.manta.app.domain.detection.AlertEvidencePolicy
 import com.manta.app.domain.detection.ConceptDriftMonitor
 import com.manta.app.domain.detection.DataQualityMonitor
 import com.manta.app.domain.detection.ExportedModelAnomalyScorer
@@ -36,6 +37,9 @@ class AppContainer(context: Context) {
     private val multivariateDetector = MultivariateAnomalyDetector()
     private val sequenceDetector = SequenceAnomalyDetector()
     private val exportedModelScorer = ExportedModelAnomalyScorer(context)
+    private val sensitiveLocalScorer = ExportedModelAnomalyScorer(context, "models/anomaly-v13-recall.json")
+    private val quietLocalScorer = ExportedModelAnomalyScorer(context, "models/anomaly-v14-quiet.json")
+    private val privacyLocalScorer = ExportedModelAnomalyScorer(context, "models/anomaly-privacy-local.json")
     private val tfliteScorer = TfliteAnomalyScorer(context)
     private val remoteScorer = RemoteAssistedAnomalyScorer(settingsStore)
     private val anomalyEngine = AnomalyEngine(
@@ -44,9 +48,13 @@ class AppContainer(context: Context) {
         sequenceDetector,
         exportedModelScorer,
         tfliteScorer,
-        remoteScorer
+        remoteScorer,
+        sensitiveLocalScorer,
+        quietLocalScorer,
+        privacyLocalScorer
     )
     private val severityStabilityGate = SeverityStabilityGate(requiredConsecutiveHigh = 3)
+    private val alertEvidencePolicy = AlertEvidencePolicy()
     private val conceptDriftMonitor = ConceptDriftMonitor()
     private val periodicBeaconDetector = PeriodicBeaconDetector()
     private val dataQualityMonitor = DataQualityMonitor()
@@ -61,6 +69,7 @@ class AppContainer(context: Context) {
         featureWindowBuilder = featureWindowBuilder,
         anomalyEngine = anomalyEngine,
         severityStabilityGate = severityStabilityGate,
+        alertEvidencePolicy = alertEvidencePolicy,
         conceptDriftMonitor = conceptDriftMonitor,
         periodicBeaconDetector = periodicBeaconDetector,
         dataQualityMonitor = dataQualityMonitor,
@@ -74,7 +83,10 @@ class AppContainer(context: Context) {
         val config = settingsStore.readConfig()
         val snapshot = packetPipelineStats.snapshot()
         return RuntimeHealth(
-            linearAvailable = exportedModelScorer.isModelAvailable(),
+            localModelAvailable = exportedModelScorer.isModelAvailable() ||
+                sensitiveLocalScorer.isModelAvailable() ||
+                quietLocalScorer.isModelAvailable() ||
+                privacyLocalScorer.isModelAvailable(),
             tfliteAvailable = tfliteScorer.isModelAvailable(),
             remoteConfigured = config.isConfigured(),
             activeDetectionModel = config.detectionModel,

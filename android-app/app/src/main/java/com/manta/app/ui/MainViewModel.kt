@@ -170,7 +170,7 @@ class MainViewModel(
         container.settingsStore.setFusionWeights(weights)
         val updated = container.settingsStore.readConfig().fusionWeights
         _statusMessage.value =
-            "Fusion weights saved: stat ${"%.3f".format(updated.statistical)}, multi ${"%.3f".format(updated.multivariate)}, seq ${"%.3f".format(updated.sequence)}, linear ${"%.3f".format(updated.linear)}, TFLite ${"%.3f".format(updated.tflite)}, remote ${"%.3f".format(updated.remote)}."
+            "Fusion weights saved: stat ${"%.3f".format(updated.statistical)}, multi ${"%.3f".format(updated.multivariate)}, seq ${"%.3f".format(updated.sequence)}, local ${"%.3f".format(updated.local)}, TFLite ${"%.3f".format(updated.tflite)}, remote ${"%.3f".format(updated.remote)}."
     }
 
     fun setFalsePositiveBudgetPerAppDay(value: Int) {

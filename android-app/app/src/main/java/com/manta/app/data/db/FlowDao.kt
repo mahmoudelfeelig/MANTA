@@ -17,6 +17,9 @@ interface FlowDao {
     suspend fun insertAnomalyScore(score: AnomalyScoreEntity): Long
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPendingAlert(candidate: PendingAlertEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun enqueueExport(entity: ExportQueueEntity): Long
 
     @Query("SELECT * FROM raw_flow_records WHERE appId = :appId AND timestampStartMillis >= :sinceMillis ORDER BY timestampStartMillis DESC LIMIT :limit")
@@ -36,6 +39,56 @@ interface FlowDao {
 
     @Query("SELECT * FROM anomaly_scores WHERE appId = :appId AND correlationKey = :correlationKey AND lastSeenMillis >= :sinceMillis ORDER BY lastSeenMillis DESC LIMIT 1")
     suspend fun findCorrelatedAlert(appId: String, correlationKey: String, sinceMillis: Long): AnomalyScoreEntity?
+
+    @Query("SELECT * FROM pending_alert_candidates WHERE appId = :appId AND correlationKey = :correlationKey LIMIT 1")
+    suspend fun findPendingAlert(appId: String, correlationKey: String): PendingAlertEntity?
+
+    @Query(
+        "UPDATE pending_alert_candidates SET " +
+            "featureWindowId = :featureWindowId, " +
+            "score = :score, " +
+            "severity = :severity, " +
+            "topFeaturesCsv = :topFeaturesCsv, " +
+            "featureContributionsJson = :featureContributionsJson, " +
+            "sourceModel = :sourceModel, " +
+            "lastSeenMillis = :lastSeenMillis, " +
+            "occurrenceCount = :occurrenceCount, " +
+            "evidenceStrength = :evidenceStrength, " +
+            "maxEvidenceStrength = :maxEvidenceStrength, " +
+            "scoreTrend = :scoreTrend, " +
+            "suppressionReason = :suppressionReason, " +
+            "destinationIp = :destinationIp, " +
+            "destinationPort = :destinationPort, " +
+            "destinationHash = :destinationHash, " +
+            "siteHint = :siteHint, " +
+            "destinationIdentity = :destinationIdentity, " +
+            "lookalikeScore = :lookalikeScore " +
+            "WHERE id = :candidateId"
+    )
+    suspend fun updatePendingAlert(
+        candidateId: String,
+        featureWindowId: String,
+        score: Double,
+        severity: String,
+        topFeaturesCsv: String,
+        featureContributionsJson: String,
+        sourceModel: String,
+        lastSeenMillis: Long,
+        occurrenceCount: Int,
+        evidenceStrength: Double,
+        maxEvidenceStrength: Double,
+        scoreTrend: Double,
+        suppressionReason: String?,
+        destinationIp: String?,
+        destinationPort: Int?,
+        destinationHash: String?,
+        siteHint: String?,
+        destinationIdentity: String?,
+        lookalikeScore: Double
+    ): Int
+
+    @Query("DELETE FROM pending_alert_candidates WHERE appId = :appId AND correlationKey = :correlationKey")
+    suspend fun deletePendingAlert(appId: String, correlationKey: String): Int
 
     @Query(
         "UPDATE anomaly_scores SET " +
@@ -112,6 +165,9 @@ interface FlowDao {
     @Query("SELECT * FROM feature_windows WHERE id = :windowId LIMIT 1")
     suspend fun getFeatureWindowById(windowId: String): FeatureWindowEntity?
 
+    @Query("SELECT * FROM feature_windows WHERE appId = :appId AND windowEndMillis < :beforeMillis ORDER BY windowEndMillis DESC LIMIT :limit")
+    suspend fun getRecentFeatureWindowsByApp(appId: String, beforeMillis: Long, limit: Int): List<FeatureWindowEntity>
+
     @Query("UPDATE anomaly_scores SET triageStatus = :triageStatus, triageNote = :triageNote, triageUpdatedAtMillis = :updatedAtMillis WHERE id = :alertId")
     suspend fun updateAlertTriage(alertId: String, triageStatus: String, triageNote: String, updatedAtMillis: Long): Int
 
@@ -139,6 +195,9 @@ interface FlowDao {
     @Query("DELETE FROM anomaly_scores WHERE createdAtMillis < :cutoffMillis")
     suspend fun deleteOldScores(cutoffMillis: Long): Int
 
+    @Query("DELETE FROM pending_alert_candidates WHERE lastSeenMillis < :cutoffMillis")
+    suspend fun deleteOldPendingAlerts(cutoffMillis: Long): Int
+
     @Query("DELETE FROM export_queue WHERE exported = 1 AND lastAttemptMillis < :cutoffMillis")
     suspend fun deleteOldExported(cutoffMillis: Long): Int
 
@@ -150,6 +209,9 @@ interface FlowDao {
 
     @Query("DELETE FROM anomaly_scores")
     suspend fun purgeScores(): Int
+
+    @Query("DELETE FROM pending_alert_candidates")
+    suspend fun purgePendingAlerts(): Int
 
     @Query("DELETE FROM export_queue")
     suspend fun purgeExportQueue(): Int

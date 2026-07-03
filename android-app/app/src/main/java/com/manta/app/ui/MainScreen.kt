@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -31,6 +32,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
@@ -47,8 +49,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -97,7 +97,9 @@ import com.manta.app.domain.detection.AnomalyEngine
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 private const val ALL_MODELS_KEY = "__all_models__"
 
@@ -106,10 +108,32 @@ private val KNOWN_MODEL_FILTERS = listOf(
     AnomalyEngine.MODE_STATISTICAL,
     AnomalyEngine.MODE_MULTIVARIATE,
     AnomalyEngine.MODE_SEQUENCE,
-    AnomalyEngine.MODE_LINEAR,
+    AnomalyEngine.MODE_LOCAL,
+    AnomalyEngine.MODE_LOCAL_SENSITIVE,
+    AnomalyEngine.MODE_LOCAL_QUIET,
+    AnomalyEngine.MODE_LOCAL_BALANCED,
+    AnomalyEngine.MODE_LOCAL_PRIVACY,
     AnomalyEngine.MODE_TFLITE,
     AnomalyEngine.MODE_REMOTE
 )
+
+private val PRIMARY_DETECTION_MODELS = listOf(
+    AnomalyEngine.MODE_ENSEMBLE,
+    AnomalyEngine.MODE_LOCAL_BALANCED,
+    AnomalyEngine.MODE_LOCAL_SENSITIVE,
+    AnomalyEngine.MODE_LOCAL_QUIET,
+    AnomalyEngine.MODE_LOCAL_PRIVACY,
+    AnomalyEngine.MODE_LOCAL
+)
+
+private val ADVANCED_DETECTION_MODELS = listOf(
+    AnomalyEngine.MODE_STATISTICAL,
+    AnomalyEngine.MODE_MULTIVARIATE,
+    AnomalyEngine.MODE_SEQUENCE,
+    AnomalyEngine.MODE_TFLITE
+)
+
+private val SHADOW_MODEL_FILTERS = PRIMARY_DETECTION_MODELS + ADVANCED_DETECTION_MODELS + AnomalyEngine.MODE_REMOTE
 
 private val BROWSER_APP_IDS = setOf(
     "com.android.chrome",
@@ -138,6 +162,27 @@ private enum class SeverityFilter(val label: String) {
     HIGH("High"),
     MEDIUM("Medium"),
     LOW("Low")
+}
+
+private enum class AppTypeFilter(val label: String) {
+    USER("User"),
+    ALL("All"),
+    SYSTEM("System")
+}
+
+private enum class AppStatusFilter(val label: String) {
+    ALL("All"),
+    OPEN_ALERTS("Needs review"),
+    HAS_ALERTS("Has alerts"),
+    HIGH_RISK("High risk"),
+    QUIET("Quiet")
+}
+
+private enum class AppSortOption(val label: String) {
+    SMART("Smart"),
+    RECENT("Recent"),
+    ALERTS("Alerts"),
+    NAME("Name")
 }
 
 private const val ALL_SHADOWS_KEY = "__all_shadows__"
@@ -228,7 +273,7 @@ fun MainScreen(
     var fusionStatisticalWeight by rememberSaveable(config.fusionWeights.statistical) { mutableStateOf(formatDecimal(config.fusionWeights.statistical)) }
     var fusionMultivariateWeight by rememberSaveable(config.fusionWeights.multivariate) { mutableStateOf(formatDecimal(config.fusionWeights.multivariate)) }
     var fusionSequenceWeight by rememberSaveable(config.fusionWeights.sequence) { mutableStateOf(formatDecimal(config.fusionWeights.sequence)) }
-    var fusionLinearWeight by rememberSaveable(config.fusionWeights.linear) { mutableStateOf(formatDecimal(config.fusionWeights.linear)) }
+    var fusionLocalWeight by rememberSaveable(config.fusionWeights.local) { mutableStateOf(formatDecimal(config.fusionWeights.local)) }
     var fusionTfliteWeight by rememberSaveable(config.fusionWeights.tflite) { mutableStateOf(formatDecimal(config.fusionWeights.tflite)) }
     var fusionRemoteWeight by rememberSaveable(config.fusionWeights.remote) { mutableStateOf(formatDecimal(config.fusionWeights.remote)) }
     var fusionBeaconWeight by rememberSaveable(config.fusionWeights.beacon) { mutableStateOf(formatDecimal(config.fusionWeights.beacon)) }
@@ -249,8 +294,12 @@ fun MainScreen(
     var alertsPage by rememberSaveable { mutableStateOf(1) }
     var pendingUndo by rememberSaveable { mutableStateOf<PendingUndoAction?>(null) }
     var appsSearchQuery by rememberSaveable { mutableStateOf("") }
-    var showSystemApps by rememberSaveable { mutableStateOf(false) }
-    var appRescanNonce by rememberSaveable { mutableStateOf(0) }
+    var appTypeFilter by rememberSaveable { mutableStateOf(AppTypeFilter.USER) }
+    var appStatusFilter by rememberSaveable { mutableStateOf(AppStatusFilter.ALL) }
+    var appSortOption by rememberSaveable { mutableStateOf(AppSortOption.SMART) }
+    var appScanNonce by rememberSaveable { mutableStateOf(0) }
+    var scannedInstalledApps by remember { mutableStateOf<List<InstalledAppCatalogEntry>?>(null) }
+    var appsScanInProgress by remember { mutableStateOf(false) }
     var selectedAppId by rememberSaveable { mutableStateOf<String?>(null) }
     var appAlertsSearchQuery by rememberSaveable { mutableStateOf("") }
     var appAlertsSeverityFilter by rememberSaveable { mutableStateOf(SeverityFilter.ALL) }
@@ -269,7 +318,7 @@ fun MainScreen(
         config.fusionWeights.statistical,
         config.fusionWeights.multivariate,
         config.fusionWeights.sequence,
-        config.fusionWeights.linear,
+        config.fusionWeights.local,
         config.fusionWeights.tflite,
         config.fusionWeights.remote,
         config.fusionWeights.beacon,
@@ -304,7 +353,7 @@ fun MainScreen(
         fusionStatisticalWeight = formatDecimal(config.fusionWeights.statistical)
         fusionMultivariateWeight = formatDecimal(config.fusionWeights.multivariate)
         fusionSequenceWeight = formatDecimal(config.fusionWeights.sequence)
-        fusionLinearWeight = formatDecimal(config.fusionWeights.linear)
+        fusionLocalWeight = formatDecimal(config.fusionWeights.local)
         fusionTfliteWeight = formatDecimal(config.fusionWeights.tflite)
         fusionRemoteWeight = formatDecimal(config.fusionWeights.remote)
         fusionBeaconWeight = formatDecimal(config.fusionWeights.beacon)
@@ -409,19 +458,29 @@ fun MainScreen(
     } else {
         emptyMap()
     }
-    val installedApps = remember(packageManager, appRescanNonce, selectedTab) {
-        if (selectedTab == MainTab.APPS) {
-            loadInstalledApps(packageManager)
-        } else {
-            emptyList()
+    LaunchedEffect(appScanNonce, packageManager) {
+        if (appScanNonce <= 0) {
+            return@LaunchedEffect
         }
+        appsScanInProgress = true
+        scannedInstalledApps = withContext(Dispatchers.IO) {
+            loadInstalledApps(packageManager)
+        }
+        appsScanInProgress = false
+    }
+    val installedApps = if (selectedTab == MainTab.APPS) {
+        scannedInstalledApps.orEmpty()
+    } else {
+        emptyList()
     }
     val appInventory = remember(
         selectedTab,
         installedApps,
         alerts,
         appsSearchQuery,
-        showSystemApps,
+        appTypeFilter,
+        appStatusFilter,
+        appSortOption,
         baseThresholdProfile,
         appThresholdOverrides,
         appProfileOverrides
@@ -431,7 +490,9 @@ fun MainScreen(
                 installedApps = installedApps,
                 alerts = alerts,
                 searchQuery = appsSearchQuery,
-                includeSystemApps = showSystemApps,
+                typeFilter = appTypeFilter,
+                statusFilter = appStatusFilter,
+                sortOption = appSortOption,
                 baseThresholdProfile = baseThresholdProfile,
                 thresholdOverrides = appThresholdOverrides,
                 appProfileOverrides = appProfileOverrides
@@ -542,6 +603,14 @@ fun MainScreen(
         }
     }
 
+    BackHandler(enabled = selectedTab != MainTab.HOME || selectedAppId != null) {
+        if (selectedAppId != null) {
+            selectedAppId = null
+        } else {
+            selectedTab = MainTab.HOME
+        }
+    }
+
     LaunchedEffect(alerts) {
         val currentIds = alerts.map { it.id }.toSet()
         if (pendingUndo != null && pendingUndo?.alertId !in currentIds) {
@@ -585,7 +654,25 @@ fun MainScreen(
 
     Scaffold(
         topBar = {
+            val screenTitle = if (selectedTab == MainTab.HOME) "Resistine" else selectedTab.label
+            val screenSubtitle = when (selectedTab) {
+                MainTab.HOME -> if (config.captureEnabled) "Protection active" else "Protection paused"
+                MainTab.APPS -> if (scannedInstalledApps == null) "Scan when you need the installed app list" else "${appInventory.size} apps in view"
+                MainTab.ALERTS -> "${filteredAlerts.size} matching alerts"
+                MainTab.SETTINGS -> modelDisplayName(config.detectionModel)
+            }
             TopAppBar(
+                navigationIcon = {
+                    if (selectedTab != MainTab.HOME) {
+                        IconButton(
+                            onClick = {
+                                if (selectedAppId != null) selectedAppId = null else selectedTab = MainTab.HOME
+                            }
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    }
+                },
                 title = {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -597,9 +684,9 @@ fun MainScreen(
                             modifier = Modifier.size(36.dp)
                         )
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("MANTA Endpoint", style = MaterialTheme.typography.titleLarge)
+                            Text(screenTitle, style = MaterialTheme.typography.titleLarge)
                             Text(
-                                "Policy v${config.policyVersion} • Retention ${config.retentionDays} days",
+                                screenSubtitle,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -610,26 +697,6 @@ fun MainScreen(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
-        },
-        bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                MainTab.values().forEach { tab ->
-                    NavigationBarItem(
-                        selected = selectedTab == tab,
-                        onClick = { selectedTab = tab },
-                        icon = {
-                            val icon = when (tab) {
-                                MainTab.HOME -> Icons.Filled.Home
-                                MainTab.APPS -> Icons.Filled.Palette
-                                MainTab.ALERTS -> Icons.Filled.Notifications
-                                MainTab.SETTINGS -> Icons.Filled.Settings
-                            }
-                            Icon(imageVector = icon, contentDescription = tab.label)
-                        },
-                        label = { Text(tab.label) }
-                    )
-                }
-            }
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { contentPadding ->
@@ -646,7 +713,8 @@ fun MainScreen(
                     runtimeHealth = runtimeHealth,
                     onAcceptConsent = onAcceptConsent,
                     onStartCapture = onStartCapture,
-                    onStopCapture = onStopCapture
+                    onStopCapture = onStopCapture,
+                    onNavigate = { selectedTab = it }
                 )
 
                 MainTab.APPS -> AppsView(
@@ -655,11 +723,17 @@ fun MainScreen(
                     selectedAppAlerts = selectedAppPagedAlerts,
                     selectedAppAllFilteredAlerts = selectedAppFilteredAlerts,
                     statusMessage = statusMessage,
-                    showSystemApps = showSystemApps,
-                    onShowSystemAppsChange = { showSystemApps = it },
+                    hasScannedApps = scannedInstalledApps != null,
+                    isScanningApps = appsScanInProgress,
+                    appTypeFilter = appTypeFilter,
+                    onAppTypeFilterChange = { appTypeFilter = it },
+                    appStatusFilter = appStatusFilter,
+                    onAppStatusFilterChange = { appStatusFilter = it },
+                    appSortOption = appSortOption,
+                    onAppSortOptionChange = { appSortOption = it },
                     searchQuery = appsSearchQuery,
                     onSearchQueryChange = { appsSearchQuery = it },
-                    onRescanApps = { appRescanNonce++ },
+                    onScanApps = { appScanNonce++ },
                     onOpenApp = { selectedAppId = it },
                     onBackToApps = { selectedAppId = null },
                     appAlertsSearchQuery = appAlertsSearchQuery,
@@ -777,8 +851,8 @@ fun MainScreen(
                     onFusionMultivariateWeightChange = { fusionMultivariateWeight = it },
                     fusionSequenceWeight = fusionSequenceWeight,
                     onFusionSequenceWeightChange = { fusionSequenceWeight = it },
-                    fusionLinearWeight = fusionLinearWeight,
-                    onFusionLinearWeightChange = { fusionLinearWeight = it },
+                    fusionLocalWeight = fusionLocalWeight,
+                    onFusionLocalWeightChange = { fusionLocalWeight = it },
                     fusionTfliteWeight = fusionTfliteWeight,
                     onFusionTfliteWeightChange = { fusionTfliteWeight = it },
                     fusionRemoteWeight = fusionRemoteWeight,
@@ -807,7 +881,7 @@ fun MainScreen(
                                 statistical = fusionStatisticalWeight.toDoubleOrNull() ?: config.fusionWeights.statistical,
                                 multivariate = fusionMultivariateWeight.toDoubleOrNull() ?: config.fusionWeights.multivariate,
                                 sequence = fusionSequenceWeight.toDoubleOrNull() ?: config.fusionWeights.sequence,
-                                linear = fusionLinearWeight.toDoubleOrNull() ?: config.fusionWeights.linear,
+                                local = fusionLocalWeight.toDoubleOrNull() ?: config.fusionWeights.local,
                                 tflite = fusionTfliteWeight.toDoubleOrNull() ?: config.fusionWeights.tflite,
                                 remote = fusionRemoteWeight.toDoubleOrNull() ?: config.fusionWeights.remote,
                                 beacon = fusionBeaconWeight.toDoubleOrNull() ?: config.fusionWeights.beacon,
@@ -867,7 +941,8 @@ private fun HomeView(
     runtimeHealth: RuntimeHealth,
     onAcceptConsent: () -> Unit,
     onStartCapture: () -> Unit,
-    onStopCapture: () -> Unit
+    onStopCapture: () -> Unit,
+    onNavigate: (MainTab) -> Unit
 ) {
     val highCount = remember(alerts) { alerts.count { it.severity == AlertSeverity.HIGH } }
     val mediumCount = remember(alerts) { alerts.count { it.severity == AlertSeverity.MEDIUM } }
@@ -888,10 +963,10 @@ private fun HomeView(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Capture", style = MaterialTheme.typography.titleMedium)
+                Text("Protection", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    if (config.captureEnabled) "Capture is currently active."
-                    else "Capture is currently stopped.",
+                    if (config.captureEnabled) "Network protection is active."
+                    else "Network protection is paused.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -935,18 +1010,45 @@ private fun HomeView(
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text("Alert overview", style = MaterialTheme.typography.titleMedium)
-                Text("Total alerts: ${alerts.size}")
-                Text("Open triage: $openCount")
-                Text("High severity: $highCount")
-                Text("Medium severity: $mediumCount")
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    "Export: ${if (config.isEffectiveExportEnabled()) "Enabled" else "Disabled"}",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
+                Text("Today", style = MaterialTheme.typography.titleMedium)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    InventoryChip("${alerts.size} alerts")
+                    InventoryChip("$openCount open")
+                    InventoryChip("$highCount high")
+                    InventoryChip("$mediumCount medium")
+                    InventoryChip(if (config.isEffectiveExportEnabled()) "Cloud sync on" else "Cloud sync off")
+                }
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("Open", style = MaterialTheme.typography.titleMedium)
+                HomeDestinationRow(
+                    title = "Apps",
+                    subtitle = "Review app activity, alerts, and per-app tuning.",
+                    icon = Icons.Filled.Palette,
+                    onClick = { onNavigate(MainTab.APPS) }
+                )
+                HomeDestinationRow(
+                    title = "Alerts",
+                    subtitle = "Triage detections and inspect evidence.",
+                    icon = Icons.Filled.Notifications,
+                    onClick = { onNavigate(MainTab.ALERTS) }
+                )
+                HomeDestinationRow(
+                    title = "Settings",
+                    subtitle = "Detection, privacy, cloud, and appearance.",
+                    icon = Icons.Filled.Settings,
+                    onClick = { onNavigate(MainTab.SETTINGS) }
                 )
             }
         }
@@ -956,14 +1058,13 @@ private fun HomeView(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Runtime health", style = MaterialTheme.typography.titleMedium)
+                Text("Health", style = MaterialTheme.typography.titleMedium)
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    RuntimeHealthChip("Linear", runtimeHealth.linearAvailable)
-                    RuntimeHealthChip("TFLite", runtimeHealth.tfliteAvailable)
-                    RuntimeHealthChip("Remote", runtimeHealth.remoteConfigured)
+                    RuntimeHealthChip("On-device", runtimeHealth.localModelAvailable)
+                    RuntimeHealthChip("Cloud", runtimeHealth.remoteConfigured)
                 }
                 Text(
                     "Active ${modelDisplayName(runtimeHealth.activeDetectionModel)}" +
@@ -1002,6 +1103,41 @@ private fun HomeView(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
+private fun HomeDestinationRow(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .combinedClickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        shape = RoundedCornerShape(18.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text("Open", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+@Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun AppsView(
     entries: List<AppInventoryEntry>,
@@ -1009,11 +1145,17 @@ private fun AppsView(
     selectedAppAlerts: List<AnomalyAlert>,
     selectedAppAllFilteredAlerts: List<AnomalyAlert>,
     statusMessage: String?,
-    showSystemApps: Boolean,
-    onShowSystemAppsChange: (Boolean) -> Unit,
+    hasScannedApps: Boolean,
+    isScanningApps: Boolean,
+    appTypeFilter: AppTypeFilter,
+    onAppTypeFilterChange: (AppTypeFilter) -> Unit,
+    appStatusFilter: AppStatusFilter,
+    onAppStatusFilterChange: (AppStatusFilter) -> Unit,
+    appSortOption: AppSortOption,
+    onAppSortOptionChange: (AppSortOption) -> Unit,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
-    onRescanApps: () -> Unit,
+    onScanApps: () -> Unit,
     onOpenApp: (String) -> Unit,
     onBackToApps: () -> Unit,
     appAlertsSearchQuery: String,
@@ -1059,7 +1201,7 @@ private fun AppsView(
                     ) {
                         Text("Apps", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Scan installed apps, keep existing alerts intact, and drill into one app at a time for alert review and threshold/profile tuning.",
+                            "Known alert history loads instantly. Scan only when you want to merge in the installed app list.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1069,29 +1211,45 @@ private fun AppsView(
                             modifier = Modifier.fillMaxWidth(),
                             label = { Text("Search app name or package") }
                         )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Show system apps")
-                                Text(
-                                    "Hide or include preinstalled/system packages in the scanned app list.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Text("Type", style = MaterialTheme.typography.labelLarge)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(AppTypeFilter.values().toList()) { filter ->
+                                FilterChip(
+                                    selected = filter == appTypeFilter,
+                                    onClick = { onAppTypeFilterChange(filter) },
+                                    label = { Text(filter.label) }
                                 )
                             }
-                            Switch(
-                                checked = showSystemApps,
-                                onCheckedChange = onShowSystemAppsChange
-                            )
                         }
-                        OutlinedButton(onClick = onRescanApps, modifier = Modifier.fillMaxWidth()) {
-                            Text("Rescan installed apps")
+                        Text("Status", style = MaterialTheme.typography.labelLarge)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(AppStatusFilter.values().toList()) { filter ->
+                                FilterChip(
+                                    selected = filter == appStatusFilter,
+                                    onClick = { onAppStatusFilterChange(filter) },
+                                    label = { Text(filter.label) }
+                                )
+                            }
+                        }
+                        Text("Sort", style = MaterialTheme.typography.labelLarge)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(AppSortOption.values().toList()) { option ->
+                                FilterChip(
+                                    selected = option == appSortOption,
+                                    onClick = { onAppSortOptionChange(option) },
+                                    label = { Text(option.label) }
+                                )
+                            }
+                        }
+                        Button(
+                            onClick = onScanApps,
+                            enabled = !isScanningApps,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (isScanningApps) "Scanning..." else if (hasScannedApps) "Scan again" else "Scan installed apps")
                         }
                         Text(
-                            "Showing ${entries.size} app entries",
+                            if (hasScannedApps) "${entries.size} apps match your filters" else "${entries.size} known apps from alerts",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1117,9 +1275,10 @@ private fun AppsView(
                             modifier = Modifier.padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("No apps match the current filters.")
+                            Text(if (hasScannedApps) "No apps match the current filters." else "No app scan yet.")
                             Text(
-                                "Try clearing the search term or enabling system apps.",
+                                if (hasScannedApps) "Try clearing search or broadening the type/status filters."
+                                else "Tap Scan installed apps when you want the full device app list.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1671,8 +1830,8 @@ private fun SettingsView(
     onFusionMultivariateWeightChange: (String) -> Unit,
     fusionSequenceWeight: String,
     onFusionSequenceWeightChange: (String) -> Unit,
-    fusionLinearWeight: String,
-    onFusionLinearWeightChange: (String) -> Unit,
+    fusionLocalWeight: String,
+    onFusionLocalWeightChange: (String) -> Unit,
     fusionTfliteWeight: String,
     onFusionTfliteWeightChange: (String) -> Unit,
     fusionRemoteWeight: String,
@@ -1746,9 +1905,9 @@ private fun SettingsView(
                     modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("Backend connection", style = MaterialTheme.typography.titleMedium)
+                    Text("Cloud connection", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "Set the server URL and token here. Server reachability, device presence, and policy sync all use these credentials.",
+                        "Connect the app to your dashboard for cloud analysis, policy updates, and alert sync.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1756,7 +1915,7 @@ private fun SettingsView(
                         value = backendUrl,
                         onValueChange = onBackendUrlChange,
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Backend Base URL (HTTPS or local HTTP)") }
+                        label = { Text("Server address") }
                     )
                     OutlinedTextField(
                         value = apiToken,
@@ -1771,11 +1930,11 @@ private fun SettingsView(
                                 )
                             }
                         },
-                        label = { Text("API token") }
+                        label = { Text("Access token") }
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = onSaveBackendUrl, modifier = Modifier.weight(1f)) {
-                            Text("Save URL")
+                            Text("Save server")
                         }
                         Button(onClick = onSaveApiToken, modifier = Modifier.weight(1f)) {
                             Text("Save token")
@@ -1791,18 +1950,13 @@ private fun SettingsView(
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Text(
-                                if (config.isConfigured()) "Backend config looks complete."
-                                else "Backend URL and token are both required.",
+                                if (config.isConfigured()) "Cloud connection is configured."
+                                else "Add a server address and access token to enable cloud features.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                "Device policy ID: $deviceIdPseudo",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                "Use this ID when setting or debugging remote policy on the backend.",
+                                "Device ID: $deviceIdPseudo",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1812,28 +1966,18 @@ private fun SettingsView(
                                 color = if (serverOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                "Server detail: ${config.lastServerPingDetail ?: "none"}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
                                 "Device presence: $devicePresenceLabel • ${formatOptionalTimestamp(config.lastDeviceHeartbeatEpoch)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                "Device detail: ${config.lastDeviceHeartbeatDetail ?: "none"}",
+                                "Last cloud update: ${formatOptionalTimestamp(config.lastPolicySyncEpoch)} • ${config.lastPolicySyncStatus ?: "never"}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Text(
-                                "Last policy sync: ${formatOptionalTimestamp(config.lastPolicySyncEpoch)} • ${config.lastPolicySyncStatus ?: "never"}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            if (!config.lastPolicyDiffSummary.isNullOrBlank()) {
+                            if (config.debugModeEnabled && !config.lastPolicyDiffSummary.isNullOrBlank()) {
                                 Text(
-                                    "Last applied policy diff: ${config.lastPolicyDiffSummary}",
+                                    "Policy changes: ${config.lastPolicyDiffSummary}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -1842,10 +1986,10 @@ private fun SettingsView(
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = onPingBackend, modifier = Modifier.weight(1f)) {
-                            Text("Ping ${serverStatusLabel}")
+                            Text("Check")
                         }
                         OutlinedButton(onClick = onSyncPolicy, modifier = Modifier.weight(1f)) {
-                            Text("Sync policy")
+                            Text("Update")
                         }
                     }
                 }
@@ -1894,8 +2038,13 @@ private fun SettingsView(
                 ) {
                     Text("Detection settings", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "Active model",
+                        "Detection style",
                         style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Choose the on-device scoring behavior. Cloud assistance is controlled separately below and uses the selected privacy mode when sending feature windows.",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
@@ -1903,7 +2052,7 @@ private fun SettingsView(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        items(KNOWN_MODEL_FILTERS) { model ->
+                        items(PRIMARY_DETECTION_MODELS) { model ->
                             ModelInfoChip(
                                 label = modelDisplayName(model),
                                 selected = config.detectionModel == model,
@@ -1913,10 +2062,65 @@ private fun SettingsView(
                         }
                     }
                     Text(
-                        "Long-press a model chip to see how it behaves and when to use it.",
+                        "Long-press a style to see how it behaves and when to use it.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Backend analysis")
+                                Text(
+                                    if (config.detectionModel == AnomalyEngine.MODE_REMOTE) {
+                                        "Backend scoring is active. The backend payload follows the privacy level selected below."
+                                    } else {
+                                        "Keep detection local, or enable backend scoring when you want the server-side model."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = config.detectionModel == AnomalyEngine.MODE_REMOTE,
+                                onCheckedChange = { enabled ->
+                                    onSetDetectionModel(
+                                        if (enabled) AnomalyEngine.MODE_REMOTE else AnomalyEngine.MODE_ENSEMBLE
+                                    )
+                                },
+                                enabled = runtimeHealth.remoteConfigured || config.detectionModel == AnomalyEngine.MODE_REMOTE
+                            )
+                        }
+                    }
+
+                    if (config.debugModeEnabled) {
+                        Text(
+                            "Advanced local detectors",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            items(ADVANCED_DETECTION_MODELS) { model ->
+                                ModelInfoChip(
+                                    label = modelDisplayName(model),
+                                    selected = config.detectionModel == model,
+                                    onClick = { onSetDetectionModel(model) },
+                                    onLongPress = { onShowModelInfo(model) }
+                                )
+                            }
+                        }
+                    }
 
                     Text(
                         "Shadow model",
@@ -1940,7 +2144,7 @@ private fun SettingsView(
                                 onLongPress = { }
                             )
                         }
-                        items(KNOWN_MODEL_FILTERS) { model ->
+                        items(SHADOW_MODEL_FILTERS) { model ->
                             ModelInfoChip(
                                 label = modelDisplayName(model),
                                 selected = config.shadowModel == model,
@@ -1950,7 +2154,7 @@ private fun SettingsView(
                         }
                     }
                     Text(
-                        "Backend retraining changes Remote assisted directly and the Remote contribution inside Fusion ensemble. Statistical, Multivariate, Sequence, Linear, and TFLite are not live-retrained here; they only react indirectly through thresholds and policy.",
+                        "Backend retraining updates the backend scorer and the backend contribution inside Fusion. Local RF models update when a new app build ships with refreshed assets.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1968,135 +2172,28 @@ private fun SettingsView(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                RuntimeHealthChip("Linear", runtimeHealth.linearAvailable)
-                                RuntimeHealthChip("TFLite", runtimeHealth.tfliteAvailable)
-                                RuntimeHealthChip("Remote", runtimeHealth.remoteConfigured)
+                                RuntimeHealthChip("On-device", runtimeHealth.localModelAvailable)
+                                RuntimeHealthChip("Experimental", runtimeHealth.tfliteAvailable)
+                                RuntimeHealthChip("Cloud", runtimeHealth.remoteConfigured)
                             }
-                            Text(
-                                "Packets ${runtimeHealth.packetPipeline.packetsRead} • Active flows ${runtimeHealth.packetPipeline.activeFlows} • Parser failures ${runtimeHealth.packetPipeline.parserFailure}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                "Queue drops: forward ${runtimeHealth.packetPipeline.forwardQueueDropped}, ingress ${runtimeHealth.packetPipeline.analysisIngressDropped}, shard ${runtimeHealth.packetPipeline.analysisShardDropped}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                "Latency avg (ms): read→parse ${formatLatency(runtimeHealth.packetPipeline.readToParseAvgMs)}, parse→shard ${formatLatency(runtimeHealth.packetPipeline.parseToShardAvgMs)}, shard→flush ${formatLatency(runtimeHealth.packetPipeline.shardToFlushAvgMs)}, flush→persist ${formatLatency(runtimeHealth.packetPipeline.flushToPersistAvgMs)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            if (config.debugModeEnabled) {
+                                Text(
+                                    "Packets ${runtimeHealth.packetPipeline.packetsRead} • Active flows ${runtimeHealth.packetPipeline.activeFlows} • Parser failures ${runtimeHealth.packetPipeline.parserFailure}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    "Queue drops: forward ${runtimeHealth.packetPipeline.forwardQueueDropped}, ingress ${runtimeHealth.packetPipeline.analysisIngressDropped}, shard ${runtimeHealth.packetPipeline.analysisShardDropped}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    "Latency avg (ms): read to parse ${formatLatency(runtimeHealth.packetPipeline.readToParseAvgMs)}, parse to shard ${formatLatency(runtimeHealth.packetPipeline.parseToShardAvgMs)}, shard to flush ${formatLatency(runtimeHealth.packetPipeline.shardToFlushAvgMs)}, flush to persist ${formatLatency(runtimeHealth.packetPipeline.flushToPersistAvgMs)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
-                    }
-
-                    Text("Model blend weights", style = MaterialTheme.typography.labelLarge)
-                    Text(
-                        "These weights control how much each scorer contributes inside the fusion ensemble. The six model weights are normalized automatically as one group.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = fusionStatisticalWeight,
-                            onValueChange = onFusionStatisticalWeightChange,
-                            label = { Text("Stat") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = fusionMultivariateWeight,
-                            onValueChange = onFusionMultivariateWeightChange,
-                            label = { Text("Multi") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = fusionSequenceWeight,
-                            onValueChange = onFusionSequenceWeightChange,
-                            label = { Text("Seq") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = fusionLinearWeight,
-                            onValueChange = onFusionLinearWeightChange,
-                            label = { Text("Linear") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = fusionTfliteWeight,
-                            onValueChange = onFusionTfliteWeightChange,
-                            label = { Text("TFLite") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = fusionRemoteWeight,
-                            onValueChange = onFusionRemoteWeightChange,
-                            label = { Text("Remote") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    Text("Post-processing weights", style = MaterialTheme.typography.labelLarge)
-                    Text(
-                        "These weights adjust the fused score after the model outputs are combined. Beacon, drift, reputation, and data-quality operate before the final response blend. Response anomaly/context decide how much the anomaly and context channels matter in the final score.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        items(listOf("signal:beacon", "signal:drift", "signal:reputation", "signal:data_quality", "signal:response_anomaly", "signal:response_context")) { infoKey ->
-                            ModelInfoChip(
-                                label = infoDisplayName(infoKey),
-                                selected = false,
-                                onClick = {},
-                                onLongPress = { onShowModelInfo(infoKey) }
-                            )
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = fusionBeaconWeight,
-                            onValueChange = onFusionBeaconWeightChange,
-                            label = { Text("Beacon") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = fusionDriftWeight,
-                            onValueChange = onFusionDriftWeightChange,
-                            label = { Text("Drift") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = fusionReputationWeight,
-                            onValueChange = onFusionReputationWeightChange,
-                            label = { Text("Reputation") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = fusionDataQualityPenaltyWeight,
-                            onValueChange = onFusionDataQualityPenaltyWeightChange,
-                            label = { Text("DQ penalty") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = responseAnomalyBlendWeight,
-                            onValueChange = onResponseAnomalyBlendWeightChange,
-                            label = { Text("Resp anomaly") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = responseContextBlendWeight,
-                            onValueChange = onResponseContextBlendWeightChange,
-                            label = { Text("Resp context") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    OutlinedButton(onClick = onSaveFusionWeights, modifier = Modifier.fillMaxWidth()) {
-                        Text("Save all fusion weights")
                     }
                 }
             }
@@ -2134,71 +2231,15 @@ private fun SettingsView(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text("Thresholds and guardrails", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Low is the minimum score shown as an alert. Medium and High control severity bands. Guardrails reduce noisy alerting when the model is uncertain, drift is weak, or false positives pile up.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = lowThreshold,
-                            onValueChange = onLowThresholdChange,
-                            label = { Text("Low") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = mediumThreshold,
-                            onValueChange = onMediumThresholdChange,
-                            label = { Text("Medium") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = highThreshold,
-                            onValueChange = onHighThresholdChange,
-                            label = { Text("High") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    Button(onClick = onSaveThresholds, modifier = Modifier.fillMaxWidth()) {
-                        Text("Save thresholds")
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = falsePositiveBudget,
-                            onValueChange = onFalsePositiveBudgetChange,
-                            label = { Text("FP budget/day") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = driftHighThreshold,
-                            onValueChange = onDriftHighThresholdChange,
-                            label = { Text("Drift gate") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    OutlinedButton(onClick = onSaveGuardrails, modifier = Modifier.fillMaxWidth()) {
-                        Text("Save guardrails")
-                    }
-                }
-            }
-        }
-
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text("Data and export", style = MaterialTheme.typography.titleMedium)
-                    Text("Export to backend")
+                    Text("Cloud sync")
                     Text(
                         if (config.privacyModeEnabled) {
-                            "Privacy mode anonymizes backend export. Enabling export also backfills recent local flows and alerts so they appear in the dashboard."
+                            "Privacy mode anonymizes cloud sync. Enabling sync also sends recent local flows and alerts so they appear in the dashboard."
                         } else {
-                            "HTTPS recommended. Local HTTP is allowed for development backends. Enabling export also backfills recent local flows and alerts so they appear in the dashboard."
+                            "HTTPS is recommended. Local HTTP is only for development. Enabling sync also sends recent local flows and alerts so they appear in the dashboard."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -2258,11 +2299,11 @@ private fun SettingsView(
                     modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("Privacy and debug", style = MaterialTheme.typography.titleMedium)
+                    Text("Privacy and diagnostics", style = MaterialTheme.typography.titleMedium)
 
                     Text("Privacy mode", style = MaterialTheme.typography.labelLarge)
                     Text(
-                        "Choose how much destination and app detail is retained locally and exported to the backend.",
+                        "Choose how much destination and app detail is visible in synced data.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2361,9 +2402,9 @@ private fun SettingsView(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Debug mode")
+                            Text("Diagnostics mode")
                             Text(
-                                "Shows raw identifiers, destination details, model diagnostics, and debug actions.",
+                                "Shows raw identifiers, destination details, model diagnostics, and advanced actions.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -3170,7 +3211,9 @@ private fun buildAppInventory(
     installedApps: List<InstalledAppCatalogEntry>,
     alerts: List<AnomalyAlert>,
     searchQuery: String,
-    includeSystemApps: Boolean,
+    typeFilter: AppTypeFilter,
+    statusFilter: AppStatusFilter,
+    sortOption: AppSortOption,
     baseThresholdProfile: ThresholdProfile,
     thresholdOverrides: Map<String, ThresholdProfile>,
     appProfileOverrides: Map<String, AppProfile>
@@ -3184,7 +3227,12 @@ private fun buildAppInventory(
         val installed = installedById[appId]
         val appAlerts = alertsByApp[appId].orEmpty()
         val isSystem = installed?.isSystem ?: (appId.startsWith("com.android.") || appId.startsWith("android."))
-        if (!includeSystemApps && isSystem) {
+        val typeMatches = when (typeFilter) {
+            AppTypeFilter.ALL -> true
+            AppTypeFilter.USER -> !isSystem
+            AppTypeFilter.SYSTEM -> isSystem
+        }
+        if (!typeMatches) {
             return@mapNotNull null
         }
 
@@ -3196,6 +3244,19 @@ private fun buildAppInventory(
             return@mapNotNull null
         }
 
+        val highestSeverity = appAlerts.maxByOrNull { it.severity.rank() }?.severity
+        val openAlertCount = appAlerts.count { it.triageStatus == TriageStatus.OPEN }
+        val statusMatches = when (statusFilter) {
+            AppStatusFilter.ALL -> true
+            AppStatusFilter.OPEN_ALERTS -> openAlertCount > 0
+            AppStatusFilter.HAS_ALERTS -> appAlerts.isNotEmpty()
+            AppStatusFilter.HIGH_RISK -> highestSeverity == AlertSeverity.HIGH
+            AppStatusFilter.QUIET -> appAlerts.isEmpty()
+        }
+        if (!statusMatches) {
+            return@mapNotNull null
+        }
+
         val thresholdProfile = thresholdOverrides[appId] ?: baseThresholdProfile
         AppInventoryEntry(
             appId = appId,
@@ -3203,18 +3264,32 @@ private fun buildAppInventory(
             isInstalled = installed != null,
             isSystem = isSystem,
             alertCount = appAlerts.size,
-            openAlertCount = appAlerts.count { it.triageStatus == TriageStatus.OPEN },
-            highestSeverity = appAlerts.maxByOrNull { it.severity.rank() }?.severity,
+            openAlertCount = openAlertCount,
+            highestSeverity = highestSeverity,
             lastAlertMillis = appAlerts.maxOfOrNull { it.lastSeenMillis } ?: 0L,
             thresholdLow = thresholdProfile.low,
             thresholdMedium = thresholdProfile.medium,
             thresholdHigh = thresholdProfile.high,
             profile = appProfileOverrides[appId] ?: defaultProfileForAppId(appId)
         )
-    }.sortedWith(
-        compareByDescending<AppInventoryEntry> { it.alertCount > 0 }
+    }.sortedWith(appInventoryComparator(sortOption))
+}
+
+private fun appInventoryComparator(sortOption: AppSortOption): Comparator<AppInventoryEntry> {
+    return when (sortOption) {
+        AppSortOption.SMART -> compareByDescending<AppInventoryEntry> { it.highestSeverity?.rank() ?: 0 }
+            .thenByDescending { it.openAlertCount }
+            .thenByDescending { it.alertCount }
+            .thenByDescending { it.isInstalled }
             .thenBy { it.label.lowercase() }
-    )
+        AppSortOption.RECENT -> compareByDescending<AppInventoryEntry> { it.lastAlertMillis }
+            .thenBy { it.label.lowercase() }
+        AppSortOption.ALERTS -> compareByDescending<AppInventoryEntry> { it.alertCount }
+            .thenByDescending { it.openAlertCount }
+            .thenBy { it.label.lowercase() }
+        AppSortOption.NAME -> compareBy<AppInventoryEntry> { it.label.lowercase() }
+            .thenBy { it.appId }
+    }
 }
 
 private fun defaultProfileForAppId(appId: String): AppProfile {
@@ -3274,13 +3349,17 @@ private fun humanizePackageName(appId: String): String {
 }
 
 private fun modelDisplayName(model: String): String = when (model) {
-    AnomalyEngine.MODE_ENSEMBLE -> "Fusion ensemble"
+    AnomalyEngine.MODE_ENSEMBLE -> "Fusion"
     AnomalyEngine.MODE_STATISTICAL -> "Statistical"
-    AnomalyEngine.MODE_MULTIVARIATE -> "Multivariate"
-    AnomalyEngine.MODE_SEQUENCE -> "Sequence"
-    AnomalyEngine.MODE_LINEAR -> "Linear model"
-    AnomalyEngine.MODE_TFLITE -> "TFLite model"
-    AnomalyEngine.MODE_REMOTE -> "Remote assisted"
+    AnomalyEngine.MODE_MULTIVARIATE -> "Correlation"
+    AnomalyEngine.MODE_SEQUENCE -> "Temporal transition"
+    AnomalyEngine.MODE_LOCAL -> "Standard RF"
+    AnomalyEngine.MODE_LOCAL_SENSITIVE -> "High-recall RF"
+    AnomalyEngine.MODE_LOCAL_QUIET -> "Low-FPR RF"
+    AnomalyEngine.MODE_LOCAL_BALANCED -> "Adaptive hybrid RF"
+    AnomalyEngine.MODE_LOCAL_PRIVACY -> "Privacy RF"
+    AnomalyEngine.MODE_TFLITE -> "TFLite"
+    AnomalyEngine.MODE_REMOTE -> "Backend"
     else -> model
 }
 
@@ -3288,9 +3367,9 @@ private fun infoDisplayName(key: String): String = when (key) {
     "signal:beacon" -> "Beacon"
     "signal:drift" -> "Drift"
     "signal:reputation" -> "Reputation"
-    "signal:data_quality" -> "DQ penalty"
-    "signal:response_anomaly" -> "Resp anomaly"
-    "signal:response_context" -> "Resp context"
+    "signal:data_quality" -> "Quality"
+    "signal:response_anomaly" -> "Anomaly"
+    "signal:response_context" -> "Context"
     "disable:volume" -> "Volume"
     "disable:timing" -> "Timing"
     "disable:destination" -> "Destination"
@@ -3304,19 +3383,27 @@ private fun infoDisplayName(key: String): String = when (key) {
 
 private fun modelDescription(model: String): String = when (model) {
     AnomalyEngine.MODE_ENSEMBLE ->
-        "Combines the statistical, multivariate, sequence, linear, TFLite, and remote scorers when available. It is the most balanced default and smooths short-lived spikes."
+        "Combines the available statistical, correlation, temporal, RF, optional TFLite, backend, and context signals. It is the default because it smooths short-lived spikes and avoids relying on one detector."
     AnomalyEngine.MODE_STATISTICAL ->
-        "A lightweight baseline based on deviations in traffic features. Fastest and easiest to reason about, but usually less adaptive."
+        "A lightweight baseline based on traffic deviations. It is fast and transparent, but less adaptive than the trained local models."
     AnomalyEngine.MODE_MULTIVARIATE ->
-        "Uses a covariance-aware multivariate anomaly model with shrinkage, so correlated feature shifts are scored jointly instead of as independent spikes."
+        "Scores correlated feature shifts together, so related changes in volume, packet rate, and duration are treated as one pattern instead of separate spikes."
     AnomalyEngine.MODE_SEQUENCE ->
-        "Uses transition rarity and temporal state shifts between windows to detect unusual behavior orderings, not just unusual magnitudes."
-    AnomalyEngine.MODE_LINEAR ->
-        "Uses the bundled exported linear model. It is deterministic, efficient, and easier to interpret than the TFLite path."
+        "Looks for unusual order and timing between recent windows, not just unusual magnitude in a single window."
+    AnomalyEngine.MODE_LOCAL ->
+        "Uses the bundled full-feature on-device random forest. It is deterministic, efficient, and works without the backend."
+    AnomalyEngine.MODE_LOCAL_SENSITIVE ->
+        "Catches more suspicious behavior earlier. Use it when missing an alert is worse than seeing extra candidates."
+    AnomalyEngine.MODE_LOCAL_QUIET ->
+        "Raises fewer alerts by requiring stronger evidence. Use it when the app feels noisy."
+    AnomalyEngine.MODE_LOCAL_BALANCED ->
+        "Combines High-recall RF and Low-FPR RF. Malware-like traffic keeps sensitivity, while service and system traffic needs stronger agreement."
+    AnomalyEngine.MODE_LOCAL_PRIVACY ->
+        "Uses a dedicated random forest trained with the reduced privacy feature view, so privacy mode does not rely on a full-feature model seeing missing or coarsened inputs."
     AnomalyEngine.MODE_TFLITE ->
-        "Uses the bundled one-class reconstruction TFLite model when present, otherwise falls back to linear/statistical scoring. Best for richer learned behavior when the model is available."
+        "Uses the optional TensorFlow Lite inference asset when present, otherwise falls back to local scoring. Keep it in diagnostics unless the asset is available and validated."
     AnomalyEngine.MODE_REMOTE ->
-        "Sends a compact feature window to the backend for server-side inference. Best used when the phone is connected to the backend and you want heavier off-device analysis."
+        "Sends a compact feature window to the backend scorer. The Off, Low, Medium, Strict, or Custom privacy mode controls which identifiers and destination hints are included."
     else -> "No description available for this model."
 }
 

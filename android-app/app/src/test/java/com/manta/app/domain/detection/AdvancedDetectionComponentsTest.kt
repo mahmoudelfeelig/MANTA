@@ -78,6 +78,61 @@ class AdvancedDetectionComponentsTest {
         assertTrue(decision.suppressionReason?.contains("false_positive_budget_exceeded") == true)
     }
 
+    @Test
+    fun alertEvidencePolicySingleWindowModeEmitsFirstCandidate() {
+        val policy = AlertEvidencePolicy(defaultRequiredCount = 2)
+        val flow = buildFlow(timestamp = 1_700_000_000_000L)
+        val window = buildWindow(bytesOut = 12_000L, burstiness = 0.4).copy(noveltyScore = 0.45)
+
+        val pending = policy.evaluate(
+            flow = flow,
+            window = window,
+            score = 0.42,
+            severity = AlertSeverity.LOW,
+            topFeatures = listOf("novelty_score"),
+            hasCorrelatedAlert = false,
+            hasDangerFloor = false,
+            candidateThreshold = 0.10,
+            singleWindowMode = false
+        )
+        val emitted = policy.evaluate(
+            flow = flow.copy(id = "flow-single", timestampEndMillis = flow.timestampEndMillis + 1_000L),
+            window = window.copy(id = "window-single", windowEndMillis = window.windowEndMillis + 1_000L),
+            score = 0.42,
+            severity = AlertSeverity.LOW,
+            topFeatures = listOf("novelty_score"),
+            hasCorrelatedAlert = false,
+            hasDangerFloor = false,
+            candidateThreshold = 0.10,
+            singleWindowMode = true
+        )
+
+        assertTrue(!pending.emit)
+        assertTrue(emitted.emit)
+        assertEquals(1.0, emitted.diagnostics["alert_policy_single_window_mode"] ?: 0.0, 0.0)
+    }
+
+    @Test
+    fun alertEvidencePolicyKnownDangerBypassesCandidateThreshold() {
+        val policy = AlertEvidencePolicy(defaultRequiredCount = 2)
+        val flow = buildFlow(timestamp = 1_700_000_000_000L)
+        val window = buildWindow(bytesOut = 1_000L, burstiness = 0.1)
+
+        val emitted = policy.evaluate(
+            flow = flow,
+            window = window,
+            score = 0.0,
+            severity = AlertSeverity.MEDIUM,
+            topFeatures = emptyList(),
+            hasCorrelatedAlert = false,
+            hasDangerFloor = true,
+            candidateThreshold = 0.30,
+            singleWindowMode = false
+        )
+
+        assertTrue(emitted.emit)
+    }
+
     private fun buildFlow(timestamp: Long): FlowRecord {
         return FlowRecord(
             id = "flow-$timestamp",

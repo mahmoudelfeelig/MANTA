@@ -162,16 +162,23 @@ class StatisticalAnomalyDetector : AnomalyScorer {
             }
         val benignSimilarityPenalty = exemplarSimilarityPenalty(features, feedback.benignExemplar)
         val dangerousSimilarityBoost = exemplarSimilarityBoost(features, feedback.dangerousExemplar)
-        val bounded = (
+        val baselineScore = (
             (normalized * warmupFactor * maturityFactor * burstPenalty * startupPenalty * interactivePenalty * benignSimilarityPenalty) +
                 dangerousSimilarityBoost
             ).coerceIn(0.0, 1.0)
+        val androidFeatureRiskFloor = androidFeatureRiskFloor(window)
+        val bounded = max(baselineScore, androidFeatureRiskFloor).coerceIn(0.0, 1.0)
         val uncertainty = (1.0 - ((warmupFactor + maturityFactor) / 2.0)).coerceIn(0.0, 1.0)
         val confidence = (1.0 - uncertainty).coerceIn(0.0, 1.0)
-        val topFeatures = zScores.entries
+        val zScoreTopFeatures = zScores.entries
             .sortedByDescending { it.value }
             .take(3)
             .map { it.key }
+        val topFeatures = if (androidFeatureRiskFloor > baselineScore && androidFeatureRiskFloor > 0.0) {
+            (listOf("android_feature_risk_floor") + zScoreTopFeatures).distinct().take(3)
+        } else {
+            zScoreTopFeatures
+        }
 
         return AnomalyScoreResult(
             score = bounded,
@@ -190,9 +197,49 @@ class StatisticalAnomalyDetector : AnomalyScorer {
                 "feedback_benign_count" to feedback.benignCount.toDouble(),
                 "feedback_dangerous_count" to feedback.dangerousCount.toDouble(),
                 "feedback_benign_penalty" to benignSimilarityPenalty,
-                "feedback_dangerous_boost" to dangerousSimilarityBoost
+                "feedback_dangerous_boost" to dangerousSimilarityBoost,
+                "baseline_score" to baselineScore,
+                "android_feature_risk_floor" to androidFeatureRiskFloor
             )
         )
+    }
+
+    private fun androidFeatureRiskFloor(window: FeatureWindow): Double {
+        var floor = 0.0
+        if (window.destinationRiskScore >= 0.10) {
+            floor = max(floor, (0.04 + window.destinationRiskScore * 0.45).coerceAtMost(0.55))
+        }
+        if (window.lookalikeScore >= 0.35) {
+            floor = max(floor, (0.03 + window.lookalikeScore * 0.34).coerceAtMost(0.45))
+        }
+        if (window.suspiciousDestinationRatio >= 0.10) {
+            floor = max(floor, (0.02 + window.suspiciousDestinationRatio * 0.28).coerceAtMost(0.36))
+        }
+        if (window.threatTagRatio >= 0.05 || window.mitreTechniqueRatio >= 0.05) {
+            floor = max(floor, 0.20)
+        }
+        if (window.periodicBeaconScore >= 0.35 || window.lowVolumePeriodicScore >= 0.35) {
+            floor = max(floor, max(window.periodicBeaconScore, window.lowVolumePeriodicScore) * 0.22)
+        }
+        if (window.noveltyScore >= 0.20) {
+            floor = max(floor, (0.01 + window.noveltyScore * 0.12).coerceAtMost(0.18))
+        }
+        if (window.noveltyShift >= 0.12 || window.destinationDiversityShift >= 0.18) {
+            floor = max(floor, 0.035 + max(window.noveltyShift, window.destinationDiversityShift) * 0.18)
+        }
+        if (window.destinationTransitionRate >= 0.25 || window.destinationDiversity >= 0.45) {
+            floor = max(floor, 0.025 + max(window.destinationTransitionRate, window.destinationDiversity) * 0.08)
+        }
+        if (
+            window.transportMetricsPresent >= 0.5 &&
+            (window.synRateTotal >= 0.20 || window.rstRateTotal >= 0.20 || window.fragmentRateTotal >= 0.05)
+        ) {
+            floor = max(floor, 0.04)
+        }
+        if (window.highPortRatio >= 0.75 && window.webFlowRatio < 0.35) {
+            floor = max(floor, 0.025)
+        }
+        return floor.coerceIn(0.0, 0.60)
     }
 
     @Synchronized

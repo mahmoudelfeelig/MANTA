@@ -88,4 +88,33 @@ class StatisticalAnomalyDetectorTest {
 
         assertTrue(anomalous.score >= 0.6)
     }
+
+    @Test
+    fun `android risk floor prevents zero score during cold start`() {
+        val detector = StatisticalAnomalyDetector()
+
+        val riskyColdStart = detector.score(
+            FeatureWindow(
+                id = "cold-risk",
+                appId = "com.example.browser",
+                windowStartMillis = 0,
+                windowEndMillis = 60_000,
+                flowCount = 1,
+                totalBytesOut = 900,
+                totalBytesIn = 1_200,
+                meanPacketSize = 300.0,
+                outboundRatio = 0.5,
+                burstiness = 0.1,
+                noveltyScore = 0.42,
+                connectionFrequencyDelta = 0.0,
+                destinationRiskScore = 0.35,
+                suspiciousDestinationRatio = 1.0,
+                lookalikeScore = 0.40
+            )
+        )
+
+        assertTrue(riskyColdStart.score > 0.0)
+        assertTrue(riskyColdStart.topFeatures.contains("android_feature_risk_floor"))
+        assertTrue((riskyColdStart.diagnostics["android_feature_risk_floor"] ?: 0.0) > 0.0)
+    }
 }
