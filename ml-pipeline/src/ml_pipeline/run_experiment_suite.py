@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.metadata
+import importlib.util
 import json
 import os
 import platform
@@ -84,6 +85,73 @@ def _dependency_versions() -> dict[str, str]:
         except importlib.metadata.PackageNotFoundError:
             versions[package] = "not-installed"
     return versions
+
+
+def _tensorflow_available() -> bool:
+    return importlib.util.find_spec("tensorflow") is not None
+
+
+def _write_skipped_tflite_report(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "status": "skipped",
+                "reason": "TensorFlow is not installed; install the optional tflite dependencies to export the autoencoder.",
+                "precision": None,
+                "recall": None,
+                "f1": None,
+                "pr_auc": None,
+                "roc_auc": None,
+                "threshold": None,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_skipped_privacy_student_report(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "status": "skipped",
+                "reason": "TensorFlow is not installed; install the optional tflite dependencies to train the adversarial privacy student.",
+                "student_view": "medium",
+                "precision": None,
+                "recall": None,
+                "f1": None,
+                "pr_auc": None,
+                "roc_auc": None,
+                "threshold": None,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_skipped_federated_report(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "status": "skipped",
+                "reason": "Privacy-student training was skipped because TensorFlow is not installed.",
+                "view": "medium",
+                "representation": "privacy_student",
+                "precision": None,
+                "recall": None,
+                "f1": None,
+                "pr_auc": None,
+                "roc_auc": None,
+                "threshold": None,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
 
 def _has_labels(path: str) -> bool:
@@ -321,7 +389,7 @@ def main() -> None:
         "--input",
         args.input,
         "--output-model",
-        str(artifacts_dir / "android" / "anomaly-linear.json"),
+        str(artifacts_dir / "android" / "anomaly-local.json"),
         "--output-report",
         str(reports_dir / "android-model-evaluation.json"),
     ]
@@ -434,11 +502,11 @@ def main() -> None:
         "privacy gate report": [reports_dir / "privacy-gate.json"],
         "drift report": [reports_dir / "drift-report.json"],
         "policy simulation": [reports_dir / "policy-simulation.json"],
-        "android linear model": [reports_dir / "android-model-evaluation.json", artifacts_dir / "android" / "anomaly-linear.json"],
-        "tflite autoencoder": [reports_dir / "tflite-autoencoder-evaluation.json", artifacts_dir / "tflite" / "anomaly.tflite"],
+        "android local model": [reports_dir / "android-model-evaluation.json", artifacts_dir / "android" / "anomaly-local.json"],
+        "tflite autoencoder": [reports_dir / "tflite-autoencoder-evaluation.json"],
         "remote model": [reports_dir / "remote-assisted-model.json", artifacts_dir / "backend" / "remote-assisted-model.json"],
         "remote family comparison": [reports_dir / "model-family-matrix" / "comparison-summary.json"],
-        "privacy student": [reports_dir / "privacy-student-report.json", artifacts_dir / "privacy" / "privacy-student.json"],
+        "privacy student": [reports_dir / "privacy-student-report.json"],
         "federated simulation": [reports_dir / "federated-report.json"],
         "performance benchmark": [reports_dir / "performance-gates.json"],
         "full model matrix": [reports_dir / "full-model-matrix.json"],
@@ -494,14 +562,21 @@ def main() -> None:
 
     if labels_present:
         progress.update(66, "Model training group")
+        tensorflow_available = _tensorflow_available()
+        if not tensorflow_available and not (args.resume and _all_exist(step_outputs["tflite autoencoder"])):
+            _write_skipped_tflite_report(reports_dir / "tflite-autoencoder-evaluation.json")
+        if not tensorflow_available and not (args.resume and _all_exist(step_outputs["privacy student"])):
+            _write_skipped_privacy_student_report(reports_dir / "privacy-student-report.json")
+        if not tensorflow_available and not (args.resume and _all_exist(step_outputs["federated simulation"])):
+            _write_skipped_federated_report(reports_dir / "federated-report.json")
         model_group = [
             (label, command)
             for label, command in [
-                ("android linear model", android_model_cmd),
-                ("tflite autoencoder", tflite_cmd),
+                ("android local model", android_model_cmd),
+                *([] if not tensorflow_available else [("tflite autoencoder", tflite_cmd)]),
                 ("remote model", remote_cmd),
                 ("remote family comparison", compare_families_cmd),
-                ("privacy student", privacy_student_cmd),
+                *([] if not tensorflow_available else [("privacy student", privacy_student_cmd)]),
                 ("performance benchmark", performance_cmd),
             ]
             if not (args.resume and _all_exist(step_outputs[label]))
@@ -509,7 +584,7 @@ def main() -> None:
         if model_group:
             _run_parallel(model_group, env=subprocess_env, max_workers=args.parallel_jobs)
         progress.update(88, "Federated simulation")
-        if not (args.resume and _all_exist(step_outputs["federated simulation"])):
+        if tensorflow_available and not (args.resume and _all_exist(step_outputs["federated simulation"])):
             _run(federated_cmd, env=subprocess_env)
         progress.update(94, "Full model matrix")
         if not (args.resume and _all_exist(step_outputs["full model matrix"])):

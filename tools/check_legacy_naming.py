@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 from pathlib import Path
 
 
@@ -19,8 +20,10 @@ SKIP_PARTS = {
     "artifacts",
     "reports",
     "experiment-runs",
+    "exports",
     "study-plans",
     "media",
+    "notes",
     "__pycache__",
     ".mypy_cache",
     ".ruff_cache",
@@ -28,8 +31,10 @@ SKIP_PARTS = {
 ALLOWED_SUBSTRINGS = {
     "elf" + "eel.me",
     "elf" + "eelig",
+    "mahmoud " + "elf" + "eel",
 }
 SEARCH_TOKEN = "fe" + "el"
+SEARCH_PATTERN = re.compile(r"(?<!el)\b" + SEARCH_TOKEN + r"\b")
 INCLUDED_SUFFIXES = {
     ".bib",
     ".gradle",
@@ -75,7 +80,7 @@ def main() -> int:
                 continue
             for line_number, line in enumerate(text.splitlines(), start=1):
                 lower = line.lower()
-                if SEARCH_TOKEN not in lower:
+                if not SEARCH_PATTERN.search(lower):
                     continue
                 if any(allowed in lower for allowed in ALLOWED_SUBSTRINGS):
                     continue

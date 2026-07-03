@@ -84,5 +84,5 @@ def test_load_privacy_views_cached_rebuilds_stale_cache(tmp_path) -> None:
         explicit_cache_dir=cache_dir,
     )
 
-    assert "activity_level_bucket" in views["medium"].columns
+    assert "activity_dp_bucket" in views["medium"].columns
     assert "flow_count" in views["off"].columns

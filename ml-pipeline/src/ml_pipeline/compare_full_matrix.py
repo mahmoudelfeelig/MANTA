@@ -46,7 +46,8 @@ def _gate_verdict(category: str, row: dict[str, object]) -> dict[str, object]:
     for metric, minimum in thresholds.items():
         value = row.get(metric)
         checks[metric] = None if not isinstance(value, (int, float)) else float(value) >= float(minimum)
-    overall = all(value is True for value in checks.values() if value is not None) if checks else None
+    completed_checks = [value for value in checks.values() if value is not None]
+    overall = all(value is True for value in completed_checks) if completed_checks else None
     return {"thresholds": thresholds, "checks": checks, "pass": overall}
 
 

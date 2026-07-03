@@ -67,7 +67,28 @@ ml-pipeline/experiment-runs/
 
 # Env/Config files
 *.env
+*.env.*
+.env
+.env.*
 config.*
+!.env.example
+
+# Local deployment/server-only files
+Dockerfile
+Dockerfile.*
+.dockerignore
+docker-compose.yml
+docker-compose.yaml
+docker-compose.*.yml
+docker-compose.*.yaml
+compose.yml
+compose.yaml
+compose.*.yml
+compose.*.yaml
+.docker/
+deploy/
+Caddyfile
+Caddyfile.*
 
 # notes
 /notes.txt
@@ -89,6 +110,8 @@ config.*
 # Local assets
 /presentation/
 /media/
+/docs/designs/
+/website/public/manta-thesis.pdf
 
 # Local logos
 /Logo.png

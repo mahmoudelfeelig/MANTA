@@ -7,6 +7,7 @@ MANTA (Mobile Anomaly and Network Threat Analysis) is an anomaly-first hybrid ID
 ## Components
 - `android-app/` - MANTA Endpoint app for Android (`VpnService`, flow pipeline, local storage, privacy controls, on-device scoring, export queue, policy sync)
 - `backend-adapter/` - MANTA Backend Adapter (FastAPI ingest, queueing, triage, policy APIs, model control, optional SIEM forwarding)
+- `website/` - public thesis/demo website
 - `ml-pipeline/` - feature extraction, model training, evaluation, privacy/utility benchmarking, experiment orchestration, artifact export
 - `docs/` - scope, feature checklist, references, licenses, and architecture-facing project documentation
 - `thesis-paper/` - manuscript source and bibliography
@@ -28,6 +29,14 @@ source .venv/bin/activate
 pip install -e .[test]
 export ADAPTER_SHARED_TOKEN='replace-with-long-random-token'
 uvicorn app.main:app --host 0.0.0.0 --port 8080
+```
+
+### Website
+```bash
+cd website
+npm install
+cp ../main.pdf public/manta-thesis.pdf
+npm run dev
 ```
 
 ### ML pipeline
@@ -57,5 +66,4 @@ MANTA is framed around:
 - `android-app/README.md`
 - `backend-adapter/README.md`
 - `ml-pipeline/README.md`
-- `cloudflared/README.md`
 - `thesis-paper/README.md`
