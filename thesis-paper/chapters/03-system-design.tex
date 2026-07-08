@@ -7,7 +7,7 @@ The system consists of three modules:
 \end{itemize}
 The architectural goal is to maximize local autonomy while still supporting optional centralized
 analysis and reproducible experimentation. Detection must remain possible without backend
-connectivity, but the same feature and policy definitions must also support export, privacy-view
+connectivity. The same feature and policy definitions must also support export, privacy-view
 derivation, leakage benchmarking, and model retraining.
 
 \begin{figure}[htbp]
@@ -36,36 +36,36 @@ derivation, leakage benchmarking, and model retraining.
       \(\rightarrow\) archived thesis reports
     \end{minipage}%
   }
-  \caption{High-level MANTA artifact path from endpoint capture to thesis evidence.}
+  \caption{High-level MANTA data path from endpoint capture to evaluation evidence.}
   \label{fig:manta-architecture}
 \end{figure}
 
 \section{Data Flow}
 The runtime data path is:
 \begin{enumerate}[leftmargin=*]
-  \item Packet capture via \texttt{VpnService} TUN interface.
+  \item Packet capture via the \texttt{VpnService} TUN interface.
   \item Userspace forwarding to preserve normal network connectivity.
   \item Packet parsing and app attribution to flow records.
-  \item Per-app rolling window aggregation (60 s default, with adaptive 30 s and 300 s modes for
-  dense or sparse/service traffic).
-  \item Local anomaly scoring (statistical, multivariate, sequence, exported-tree, hybrid,
-  TFLite-compatible, remote-assisted, and fusion modes).
+  \item Per-app rolling window aggregation. The default conceptual window is 60 s, with adaptive
+  30 s and 300 s modes for dense or sparse/service traffic.
+  \item Local anomaly scoring through statistical, multivariate, sequence, exported-tree, hybrid,
+  TFLite-compatible, remote-assisted, and fusion modes.
   \item Response-score adjustment, severity resolution, stability guards, false-positive budget
   checks, and alert-evidence policy.
-  \item Local persistence of flows/windows/alerts in Room.
+  \item Local persistence of flows, windows, and alerts in Room.
   \item Optional export of selected flow and alert events to backend APIs.
 \end{enumerate}
 
-Policy synchronization is decoupled through background workers, allowing threshold updates and
-retention/export changes without requiring a new app build.
+Policy synchronization is decoupled through background workers. Threshold updates and
+retention/export changes can therefore be applied without requiring a new app build.
 
 \section{Threat Model and Assumptions}
-The primary defensive goal is detection of suspicious encrypted traffic behavior such as beaconing,
-unusual destination changes, remote-control style communication, data-exfiltration-like volume
-shifts, and malware-associated anomalies. In the security framing from Chapter 1, these behaviors
-matter because they may indicate compromise of confidentiality, integrity, availability, or
-security accountability. The design assumes that payloads remain encrypted and unavailable for
-inspection.
+The primary defensive goal is to detect suspicious encrypted traffic behavior. Examples include
+beaconing, unusual destination changes, remote-control style communication,
+data-exfiltration-like volume shifts, and malware-associated anomalies. In the security framing from
+Chapter 1, these behaviors matter because they may indicate compromise of confidentiality,
+integrity, availability, or security accountability. The design assumes that payloads remain
+encrypted and unavailable for inspection.
 
 The thesis considers three privacy-relevant adversaries:
 \begin{itemize}[leftmargin=*]
@@ -77,13 +77,14 @@ The thesis considers three privacy-relevant adversaries:
   reduced latent features rather than raw full-feature traffic.
 \end{itemize}
 
-The model does \emph{not} assume root compromise of the endpoint OS, payload decryption on the
-wire, or strong traffic-shaping defenses such as dummy-packet padding.
+The model does \emph{not} assume root compromise of the endpoint OS, payload decryption on the wire,
+or strong traffic-shaping defenses such as dummy-packet padding.
 
-Trust boundaries:
+Trust boundaries are defined as follows:
 \begin{itemize}[leftmargin=*]
   \item \textbf{Trusted}: endpoint app process, local encrypted settings, backend adapter process.
-  \item \textbf{Partially trusted}: network transport path (TLS-protected but exposed to outages).
+  \item \textbf{Partially trusted}: network transport path, which is TLS-protected but still exposed
+  to outages and passive observation.
   \item \textbf{Untrusted}: remote application peers and public network infrastructure.
 \end{itemize}
 
@@ -96,9 +97,9 @@ MANTA separates two privacy and leakage surfaces:
   encrypted traffic sequence itself.
 \end{itemize}
 
-This distinction drives the system design. Feature hashing, identifier suppression, bucketization,
-privacy-student training, and federated latent sharing act on the released representation. A
-passive observer sees the original encrypted sequence before those transformations occur.
+The distinction drives the design. Feature hashing, identifier suppression, bucketization,
+privacy-student training, and federated latent sharing act on the released feature representation.
+A passive observer sees the original encrypted sequence before those transformations occur.
 
 \begin{figure}[htbp]
   \centering
@@ -135,8 +136,8 @@ These mechanisms reduce the representation that MANTA releases, but they are not
 guarantees. The evaluation measures how much leakage remains after each transformation.
 
 \section{Deployment and Evaluation Boundaries}
-The design remains anomaly-first rather than anonymity-first. MANTA does not implement
-traffic-shaping defenses such as padding, dummy traffic, or timing obfuscation. Its privacy
-mechanisms operate on the representation released by the endpoint or backend pipeline, while the
-observer benchmark measures what remains visible on the network path. In other words, MANTA
-controls exported telemetry; it does not implement transport-level anonymity defenses.
+The design is anomaly-first rather than anonymity-first. MANTA does not implement traffic-shaping
+defenses such as padding, dummy traffic, or timing obfuscation. Its privacy mechanisms operate on
+the representation released by the endpoint or backend pipeline. The observer benchmark measures
+what remains visible on the network path. In other words, MANTA controls exported telemetry; it does
+not implement transport-level anonymity defenses.

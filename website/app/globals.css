@@ -892,6 +892,14 @@ footer {
   background: var(--lime);
 }
 
+.phone-runtime-row.runtime-warn > i {
+  background: var(--amber);
+}
+
+.phone-runtime-row.runtime-muted > i {
+  background: #60766e;
+}
+
 .phone-runtime-row > span {
   display: grid;
   gap: 2px;
@@ -909,6 +917,14 @@ footer {
 .phone-runtime-row b {
   color: var(--teal-bright);
   font-size: 0.58rem;
+}
+
+.phone-runtime-row.runtime-warn b {
+  color: var(--amber);
+}
+
+.phone-runtime-row.runtime-muted b {
+  color: #9aaba5;
 }
 
 .phone-intro {
@@ -952,6 +968,29 @@ footer {
   color: var(--teal-bright);
 }
 
+.scan-row,
+.back-row,
+.app-open-alerts {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid rgba(80, 220, 199, 0.22);
+  border-radius: 13px;
+  background: rgba(80, 220, 199, 0.07);
+  color: var(--teal-bright);
+  cursor: pointer;
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-align: left;
+}
+
+.scan-row b {
+  color: #8fa19b;
+  font-size: 0.56rem;
+}
+
 .phone-app-row {
   display: grid;
   grid-template-columns: 42px 1fr auto;
@@ -961,6 +1000,9 @@ footer {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 15px;
   background: var(--phone-panel);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
 }
 
 .app-monogram {
@@ -1045,6 +1087,14 @@ footer {
   font-size: 1rem;
 }
 
+.phone-alert-heading em {
+  max-width: 210px;
+  color: white;
+  font-size: 0.65rem;
+  font-style: normal;
+  line-height: 1.35;
+}
+
 .phone-alert-heading span {
   color: #ff8585;
   font-size: 0.6rem;
@@ -1058,6 +1108,27 @@ footer {
   font-size: 0.54rem;
   letter-spacing: 0.07em;
   text-transform: uppercase;
+}
+
+.alert-model-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.alert-model-row span,
+.compact-toggle-row,
+.app-detail-chips span {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #9eb0aa;
+  font-size: 0.54rem;
+}
+
+.alert-model-row span {
+  padding: 5px 7px;
 }
 
 .phone-alert-card > p {
@@ -1122,6 +1193,10 @@ footer {
   margin-top: 14px;
 }
 
+.phone-alert-actions.three-actions {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
 .phone-alert-actions button {
   padding: 9px 4px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -1160,6 +1235,144 @@ footer {
 .privacy-options {
   display: flex;
   gap: 6px;
+}
+
+.phone-warning {
+  margin-top: -8px;
+  color: var(--amber) !important;
+}
+
+.empty-phone-state {
+  padding: 14px;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border-radius: 15px;
+  color: #92a59e;
+  font-size: 0.66rem;
+  line-height: 1.5;
+}
+
+.compact-toggle-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+
+.compact-toggle-row b {
+  color: var(--teal-bright);
+}
+
+.app-detail-card {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: var(--phone-panel);
+}
+
+.app-detail-card h3 {
+  margin: 0 0 3px;
+  color: white;
+  font-size: 1rem;
+}
+
+.app-detail-card p {
+  margin: 0;
+  overflow: hidden;
+  color: #879991;
+  font-size: 0.56rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-detail-chips {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  gap: 6px;
+}
+
+.app-detail-chips span {
+  padding: 5px 7px;
+}
+
+.model-options {
+  display: grid;
+  gap: 7px;
+  margin: 8px 0 10px;
+}
+
+.model-options button,
+.settings-actions button {
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  background: transparent;
+  color: #9eb0aa;
+  cursor: pointer;
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-align: left;
+}
+
+.model-options button.selected {
+  border-color: rgba(80, 220, 199, 0.45);
+  background: rgba(80, 220, 199, 0.1);
+  color: var(--teal-bright);
+}
+
+.toggle-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 0;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: transparent;
+  color: white;
+  cursor: pointer;
+  text-align: left;
+}
+
+.toggle-row span {
+  display: grid;
+  gap: 2px;
+}
+
+.toggle-row strong {
+  font-size: 0.66rem;
+}
+
+.toggle-row small {
+  color: #8fa19b;
+  font-size: 0.56rem;
+}
+
+.toggle-row b {
+  align-self: center;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #9aaba5;
+  font-size: 0.54rem;
+}
+
+.toggle-row b.enabled {
+  background: rgba(80, 220, 199, 0.12);
+  color: var(--teal-bright);
+}
+
+.settings-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.settings-actions button {
+  text-align: center;
 }
 
 .phone-nav {
@@ -1282,6 +1495,41 @@ footer {
   max-width: 640px;
   margin: 6px 0 0;
   font-size: clamp(2rem, 4vw, 3.6rem);
+}
+
+.scenario-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  padding: 18px 0 2px;
+}
+
+.scenario-grid button {
+  display: grid;
+  gap: 8px;
+  min-height: 112px;
+  padding: 14px;
+  border: 1px solid var(--ink);
+  background: var(--paper-bright);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  transition: transform 140ms ease, background 140ms ease;
+}
+
+.scenario-grid button:hover {
+  background: #e8f5ef;
+  transform: translateY(-2px);
+}
+
+.scenario-grid strong {
+  font-size: 0.82rem;
+}
+
+.scenario-grid span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.45;
 }
 
 .trace-summary {
@@ -1492,6 +1740,10 @@ footer {
     grid-template-columns: 390px 1fr;
     gap: 24px;
   }
+
+  .scenario-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 840px) {
@@ -1658,6 +1910,14 @@ footer {
   .observer-heading {
     align-items: start;
     flex-direction: column;
+  }
+
+  .scenario-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .scenario-grid button {
+    min-height: 0;
   }
 
   .trace-row {

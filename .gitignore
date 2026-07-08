@@ -17,6 +17,10 @@ build/
 out/
 node_modules/
 .next/
+playwright-report/
+test-results/
+website/playwright-report/
+website/test-results/
 
 # Java/Kotlin
 *.class

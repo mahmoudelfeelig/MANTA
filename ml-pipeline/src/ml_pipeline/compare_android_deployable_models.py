@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from .error_analysis import score_android_model
+from .dataset_metadata import derive_app_family
 from .metrics import binary_classification_metrics, select_threshold_by_f1, threshold_sweep_metrics
 from .splits import source_aware_train_test_split
 from .window_builders import add_window_protocol_args, adaptive_cache_name, load_android_windows_for_protocol
@@ -85,10 +86,21 @@ def _sample_balanced(frame: pd.DataFrame, max_rows: int, random_seed: int) -> pd
 def _app_models() -> list[dict[str, str]]:
     root = REPO_ROOT / "android-app/app/src/main/assets/models"
     return [
-        {"name": "Current app: Balanced local", "path": str(root / "anomaly-local.json"), "group": "current_app"},
         {"name": "Current app: Sensitive local", "path": str(root / "anomaly-v13-recall.json"), "group": "current_app"},
         {"name": "Current app: Quiet local", "path": str(root / "anomaly-v14-quiet.json"), "group": "current_app"},
         {"name": "Current app: Privacy local", "path": str(root / "anomaly-privacy-local.json"), "group": "current_app"},
+    ]
+
+
+def _app_hybrid_models() -> list[dict[str, str]]:
+    root = REPO_ROOT / "android-app/app/src/main/assets/models"
+    return [
+        {
+            "name": "Current app: Adaptive hybrid RF",
+            "recall_path": str(root / "anomaly-v13-recall.json"),
+            "quiet_path": str(root / "anomaly-v14-quiet.json"),
+            "group": "current_app",
+        }
     ]
 
 
@@ -116,6 +128,78 @@ def _evaluate_one(name: str, group: str, path: str, payload: dict[str, Any], fra
     labels = frame["label"].fillna(0).astype(int).to_numpy()
     threshold = _threshold_from_model(payload)
     scores = score_android_model(payload, frame)
+    return _evaluate_scores(
+        name=name,
+        group=group,
+        view=view,
+        path=str(path),
+        payload=payload,
+        frame=frame,
+        scores=scores,
+        threshold=threshold,
+    )
+
+
+def _runtime_hybrid_scores(frame: pd.DataFrame, recall_scores: np.ndarray, quiet_scores: np.ndarray) -> np.ndarray:
+    families = frame["app_id"].astype(str).map(derive_app_family).to_numpy(dtype=str)
+    scores = (0.45 * recall_scores) + (0.55 * quiet_scores)
+
+    malware_mask = np.isin(families, ["malware", "remote_access"])
+    scores[malware_mask] = np.maximum(recall_scores[malware_mask], quiet_scores[malware_mask])
+
+    conservative_mask = np.isin(families, ["service", "system", "other_app"])
+    conservative_blend = (0.25 * recall_scores) + (0.75 * quiet_scores)
+    scores[conservative_mask] = np.minimum(
+        conservative_blend[conservative_mask],
+        quiet_scores[conservative_mask] + 0.12,
+    )
+    return np.clip(scores, 0.0, 1.0)
+
+
+def _evaluate_hybrid(name: str, group: str, recall_path: str, quiet_path: str, frame: pd.DataFrame, view: str) -> dict[str, Any]:
+    recall_payload = _load_model(recall_path)
+    quiet_payload = _load_model(quiet_path)
+    if recall_payload is None:
+        raise ValueError(f"not an Android-deployable scorer JSON: {recall_path}")
+    if quiet_payload is None:
+        raise ValueError(f"not an Android-deployable scorer JSON: {quiet_path}")
+
+    recall_scores = score_android_model(recall_payload, frame)
+    quiet_scores = score_android_model(quiet_payload, frame)
+    scores = _runtime_hybrid_scores(frame, recall_scores, quiet_scores)
+    threshold = _threshold_from_model(quiet_payload)
+    payload = {
+        "model_type": "runtime_hybrid",
+        "algorithm": "android_family_aware_v13_v14_blend",
+        "feature_order": sorted(
+            set(recall_payload.get("feature_order", [])) | set(quiet_payload.get("feature_order", []))
+        ),
+        "input_transform": "none",
+    }
+    return _evaluate_scores(
+        name=name,
+        group=group,
+        view=view,
+        path=f"{recall_path} + {quiet_path}",
+        payload=payload,
+        frame=frame,
+        scores=scores,
+        threshold=threshold,
+    )
+
+
+def _evaluate_scores(
+    *,
+    name: str,
+    group: str,
+    view: str,
+    path: str,
+    payload: dict[str, Any],
+    frame: pd.DataFrame,
+    scores: np.ndarray,
+    threshold: float,
+) -> dict[str, Any]:
+    labels = frame["label"].fillna(0).astype(int).to_numpy()
     metrics = binary_classification_metrics(labels, scores, threshold)
     best_threshold = select_threshold_by_f1(labels, scores)
     best_metrics = binary_classification_metrics(labels, scores, best_threshold)
@@ -125,7 +209,7 @@ def _evaluate_one(name: str, group: str, path: str, payload: dict[str, Any], fra
         "name": name,
         "group": group,
         "view": view,
-        "path": str(path),
+        "path": path,
         "model_type": payload.get("model_type"),
         "algorithm": payload.get("algorithm", payload.get("model_type")),
         "feature_count": len(payload.get("feature_order", [])),
@@ -249,6 +333,29 @@ def main() -> None:
                 rows.append(_evaluate_one(spec["name"], spec["group"], path, payload, frame, view_name))
             except Exception as exc:
                 skipped.append({"name": spec["name"], "path": path, "view": view_name, "reason": str(exc)})
+
+    for spec in _app_hybrid_models():
+        for view_name, frame in evaluation_views.items():
+            try:
+                rows.append(
+                    _evaluate_hybrid(
+                        spec["name"],
+                        spec["group"],
+                        spec["recall_path"],
+                        spec["quiet_path"],
+                        frame,
+                        view_name,
+                    )
+                )
+            except Exception as exc:
+                skipped.append(
+                    {
+                        "name": spec["name"],
+                        "path": f"{spec['recall_path']} + {spec['quiet_path']}",
+                        "view": view_name,
+                        "reason": str(exc),
+                    }
+                )
 
     if args.remote_model:
         for view_name, frame in evaluation_views.items():

@@ -1,43 +1,46 @@
 \section{Conclusion}
-I presented MANTA, an end-to-end framework for metadata-only anomaly detection over
-encrypted mobile and endpoint traffic. The project combines Android capture, backend-assisted
-triage, privacy-aware feature views, privacy-student and federated variants, and a reproducible
-public-corpus evaluation pipeline. The results identify a practical boundary: metadata coarsening
-can improve control over released detection telemetry, but it does not provide transport-level
-privacy against passive traffic-analysis attacks.
+MANTA is an end-to-end framework for metadata-only anomaly detection over encrypted mobile and
+endpoint traffic. It combines Android capture, backend-assisted triage, privacy-aware feature views,
+privacy-student and federated variants, and a reproducible public-corpus evaluation pipeline. The
+main result is a boundary result: metadata coarsening can improve control over released detection
+telemetry, but it does not provide transport-level privacy against passive traffic-analysis attacks.
 
-Answers to the research questions are:
+The answers to the research questions are as follows:
 \begin{itemize}[leftmargin=*]
   \item \textbf{RQ1 (metadata-only detection feasibility):} Metadata-only detection is feasible on
   a large public corpus, but evaluation protocol matters. Under the shared Android adaptive-window
-  comparison, High-recall RF reaches F1 \(0.961\), Privacy RF reaches F1 \(0.924\), and the
-  calibrated full-feature backend boosted-tree model reaches F1 \(0.890\). The backend model has
+  comparison, High-recall RF reaches F1 \(0.925\), Privacy RF reaches F1 \(0.910\), Adaptive hybrid
+  RF reaches F1 \(0.895\), and the calibrated full-feature backend boosted-tree model reaches F1
+  \(0.888\). The backend model has
   strong ranking quality, and threshold calibration reduces its false-positive rate from the earlier
   recall-heavy operating point.
   \item \textbf{RQ2 (variant comparison):} The deployment variants expose different operating
-  points. High-recall RF is best by balanced F1, Privacy RF is the strongest reduced-view-compatible
-  local path, the calibrated backend boosted tree is a centralized high-precision operating point,
-  and Low-FPR RF/Adaptive hybrid RF trade recall for fewer false positives. The privacy-preserving variants remain useful for
-  measurement, but not yet competitive as privacy-only collaborative detectors.
-  \item \textbf{RQ3 (release privacy):} The reduced privacy views lower exact app-ID leakage, but
-  the current bounded report shows a real utility trade-off: F1 falls from \(0.776\) in
-  \texttt{off}/\texttt{low} to \(0.685\) in \texttt{medium} and \(0.653\) in \texttt{strict}.
-  This supports a limited release-privacy result, not a free privacy improvement.
+  points. High-recall RF is best by balanced F1. Privacy RF is the strongest reduced-view-compatible
+  local path. The calibrated backend boosted tree is a centralized high-precision operating point.
+  Low-FPR RF trades recall for fewer false positives. Adaptive hybrid RF quantifies the runtime
+  compromise between those two local models, improving recall over Low-FPR RF while keeping much of
+  its false-positive reduction. The privacy-oriented variants remain useful for measurement, but
+  they are not yet competitive as privacy-only collaborative detectors.
+  \item \textbf{RQ3 (release privacy):} The reduced privacy views lower exact app re-identification, but
+  the reported evaluation shows a real utility trade-off. F1 falls from \(0.776\) in
+  \texttt{off}/\texttt{low} to \(0.685\) in \texttt{medium} and \(0.653\) in \texttt{strict}. This
+  supports a limited release-privacy result, not a free privacy improvement.
   \item \textbf{RQ4 (observer leakage):} The encrypted-flow sequence benchmark shows severe
   observer leakage. Release privacy and passive-observer protection are therefore not
-  interchangeable, and feature-level coarsening alone is insufficient for strong traffic-analysis
+  interchangeable. Feature-level coarsening alone is insufficient for strong traffic-analysis
   privacy.
 \end{itemize}
 
-I claim that MANTA is a reproducible encrypted-traffic IDS framework that separates controllable
-release privacy from passive-observer leakage, demonstrates the importance of deployability-aligned
-Android feature engineering, and shows that metadata-only coarsening can reduce exact app
+The thesis contribution is therefore not a claim that metadata-only monitoring solves privacy. The
+contribution is a reproducible encrypted-traffic IDS framework that separates controllable release
+privacy from passive-observer leakage. It demonstrates the importance of deployability-aligned
+Android feature engineering and shows that metadata-only coarsening can reduce exact app
 re-identification while remaining insufficient against stronger semantic and passive-observer
 inference.
 
-Practically, the project delivers an artifact package: Android app, backend adapter, ML pipeline,
-report bundle, manuscript, and reproducibility appendix. Its value is strongest as an empirical
-systems study and evaluation framework rather than as a finished privacy-preserving product.
+The project also delivers an Android app, backend adapter, ML pipeline, report bundle,
+manuscript, and reproducibility appendix. Its value is strongest as an empirical systems study and
+evaluation framework rather than as a finished privacy-preserving product.
 
 \section{Future Work}
 \begin{itemize}[leftmargin=*]

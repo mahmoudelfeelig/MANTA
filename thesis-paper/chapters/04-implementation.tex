@@ -1,30 +1,30 @@
 \section{Android Endpoint Implementation}
 \subsection{VPN Capture and Userspace Forwarding}
-The endpoint capture loop is implemented around \texttt{FlowVpnService}, which establishes a TUN
-interface and starts a foreground service session. A dedicated userspace forwarder relays packets
-to upstream sockets while protecting those sockets from tunnel recursion via
-\texttt{VpnService.protect(...)} \citep{android_vpnservice}. Parsed packets are aggregated into
-flow records keyed by app identity and network tuple attributes.
+The endpoint capture loop is implemented around \texttt{FlowVpnService}. It establishes a TUN
+interface and starts a foreground service session. A dedicated userspace forwarder relays packets to
+upstream sockets while protecting those sockets from tunnel recursion through
+\texttt{VpnService.protect(...)} \citep{android_vpnservice}. Parsed packets are aggregated into flow
+records keyed by app identity and network tuple attributes.
 
-App attribution uses Android connection-owner resolution where available, and flows are persisted to
-Room-backed storage \citep{android_room}. Background workers handle retention cleanup and export
-retries using WorkManager scheduling \citep{android_workmanager}.
+App attribution uses Android connection-owner resolution where available. Flow records are
+persisted to Room-backed storage \citep{android_room}. Background workers handle retention cleanup
+and export retries through WorkManager scheduling \citep{android_workmanager}.
 
 \subsection{Feature Windows and On-Device Detection}
 The feature window builder aggregates per-app behavior windows and computes a richer metadata-only
-feature set than the first prototype. The default conceptual window is 60 seconds, but the runtime
-now selects 30-second windows for very dense traffic and 300-second windows for sparse, service,
-system, or background traffic. This adaptive choice reduces the instability of low-volume service
+feature set than the first prototype. The default conceptual window is 60 seconds. At runtime, the
+app selects 30-second windows for very dense traffic and 300-second windows for sparse, service,
+system, or background traffic. This adaptive choice reduces instability in low-volume service
 windows while keeping high-volume interactive traffic responsive.
 
-In addition to core counters and ratios, the implemented pipeline derives timing, novelty,
-directional balance, destination diversity, port/protocol diversity, burstiness, transport-summary
-features, destination-role ratios, and graph-inspired contextual signals such as destination
-concentration and transition rate. A second pass compares the current window with recent windows
-from the same app to produce baseline-deviation features such as flow-count deviation,
-byte-rate deviation, novelty shift, destination-diversity shift, trend values, and consecutive
-burst-window count. These features are used internally for anomaly scoring, but only privacy-tier
-appropriate fields are exported in reduced views.
+In addition to core counters and ratios, the pipeline derives timing, novelty, directional balance,
+destination diversity, port/protocol diversity, burstiness, transport-summary features,
+destination-role ratios, and graph-inspired contextual signals such as destination concentration and
+transition rate. A second pass compares the current window with recent windows from the same app.
+This produces baseline-deviation features such as flow-count deviation, byte-rate deviation,
+novelty shift, destination-diversity shift, trend values, and consecutive burst-window count. These
+features are used internally for anomaly scoring. Only fields allowed by the selected privacy tier
+are exported in reduced views.
 
 On-device inference supports several runtime modes:
 \begin{itemize}[leftmargin=*]
@@ -33,42 +33,42 @@ On-device inference supports several runtime modes:
   \item \textbf{Multivariate}: a shrinkage-covariance Mahalanobis-distance detector for correlated
   feature shifts.
   \item \textbf{Sequence}: a lightweight transition-rarity detector over bucketed behavior states.
-  \item \textbf{Exported tree}: JSON random-forest/boosted-tree artifacts with fixed feature order,
-  app-family thresholds, and optional specialists.
+  \item \textbf{Exported tree}: JSON random-forest or boosted-tree model files with fixed feature
+  order, app-family thresholds, and optional specialists.
   \item \textbf{TFLite-compatible}: a TensorFlow Lite inference path for a scalar anomaly-score
-  model deployed as \texttt{models/anomaly.tflite} \citep{tensorflow_lite_guide}.
-  \item \textbf{Backend}: an optional backend inference call over a privacy-filtered
-  feature window.
+  model deployed as \texttt{models/anomaly.tflite}.\footnote{Google now surfaces TensorFlow Lite as
+  LiteRT in the Google AI Edge documentation; the \texttt{.tflite} file format remains supported
+  \citep{tensorflow_lite_litert_2024}.}
+  \item \textbf{Backend}: an optional backend inference call over a privacy-filtered feature
+  window.
   \item \textbf{Fusion}: a weighted and smoothed combination of available scorers.
 \end{itemize}
 
-The TFLite path is intentionally treated as a deployable inference interface rather than as a
-specific algorithmic claim. The Android scorer memory-maps \texttt{models/anomaly.tflite}, builds a
-float tensor in \texttt{FeatureWindow.portableFeatureOrder}, and expects one scalar score in
-\([0,1]\). If a reconstruction-style or one-class neural model is used, the export must expose the
-reconstruction error or anomaly score as that scalar output; the Android scorer does not itself
-compare an input vector with a reconstructed vector. If TFLite loading or inference is unavailable,
-the selected TFLite mode falls back to the exported local model and then to the statistical
-detector.
+The TFLite path is treated as a deployable inference interface rather than as a specific
+algorithmic claim. The Android scorer memory-maps \texttt{models/anomaly.tflite}, builds a float
+tensor in \texttt{FeatureWindow.portableFeatureOrder}, and expects one scalar score in \([0,1]\). If
+a reconstruction-style or one-class neural model is used, the export must expose the reconstruction
+error or anomaly score as that scalar output. The Android scorer does not itself compare an input
+vector with a reconstructed vector. If TFLite loading or inference is unavailable, the selected
+TFLite mode falls back to the exported local model and then to the statistical detector.
 
-Later Android experiments ship separate recall-oriented and precision-oriented tree artifacts and
-expose them with user-facing names. ``High-recall RF'' maps to the v13 recall-oriented random
-forest, ``Low-FPR RF'' maps to the v14 precision-oriented random forest, and ``Adaptive hybrid RF''
-maps to a runtime hybrid of both. The hybrid mode scores both artifacts: malware-like and
-remote-access traffic keeps the larger score, service/system/other-app traffic is damped toward
-the quieter score, and other families use a moderate blend. This keeps the runtime deployable
-because it reuses the same metadata feature window and JSON tree evaluator rather than requiring a
-server model.
+The Android implementation includes separate recall-oriented and precision-oriented tree models
+with user-facing names. ``High-recall RF'' is the recall-oriented local model. ``Low-FPR RF'' is the
+precision-oriented local model. ``Adaptive hybrid RF'' combines both at runtime. The hybrid mode
+scores both models. Malware-like and remote-access traffic
+keeps the larger score; service/system/other-app traffic is damped toward the quieter score; other
+families use a moderate blend. This remains deployable because it reuses the same metadata feature
+window and JSON tree evaluator rather than requiring a server model.
 
 Alert generation is a separate stage after model scoring. The response score is adjusted by
-periodic-beacon evidence, concept drift, destination reputation/context, and data-quality
-penalties. Severity then passes through threshold profiles, app-profile adjustments, high-severity
-stability, false-positive budget enforcement, and an alert-evidence policy. The evidence policy can
-store weak pending candidates and promote them only when evidence persists, when a correlated alert
-already exists, when known-danger destination evidence is present, or when an explicit
-single-window validation mode is selected. This separation prevents high-recall model windows from
-automatically becoming user-visible alerts while still allowing known-danger or validation traffic
-to surface promptly.
+periodic-beacon evidence, concept drift, destination reputation/context, and data-quality penalties.
+Severity then passes through threshold profiles, app-profile adjustments, high-severity stability,
+false-positive budget enforcement, and an alert-evidence policy. The evidence policy can store weak
+pending candidates and promote them only when evidence persists, when a correlated alert already
+exists, when known-danger destination evidence is present, or when an explicit single-window
+validation mode is selected. This separation prevents high-recall model windows from automatically
+becoming user-visible alerts while still allowing known-danger or validation traffic to surface
+promptly.
 
 \subsection{UI and Triage Workflow}
 The Compose UI exposes:
@@ -83,8 +83,8 @@ This supports both standalone local operation and analyst-assisted workflows.
 
 \section{Backend Adapter Implementation}
 The backend adapter is a FastAPI service with token authentication, strict request validation, and
-defense-in-depth response headers. Incoming events are enqueued in SQLite and forwarded with bounded
-retry/backoff; exhausted items move to a dead-letter queue for replay.
+defense-in-depth response headers. Incoming events are enqueued in SQLite and forwarded with
+limited retry/backoff. Exhausted items move to a dead-letter queue for replay.
 
 Beyond ingest, the adapter implements:
 \begin{itemize}[leftmargin=*]
@@ -97,15 +97,15 @@ Beyond ingest, the adapter implements:
 This architecture isolates endpoint concerns from SIEM-specific integration complexity.
 
 \section{ML Pipeline Implementation}
-The ML pipeline is organized as reproducible command-line stages that now operate over a merged
-public corpus rather than only over a controlled synthetic trace:
+The ML pipeline is organized as reproducible command-line stages that operate over a merged public
+corpus rather than only over a controlled synthetic trace:
 \begin{itemize}[leftmargin=*]
   \item public-dataset normalization and merged-corpus manifest generation,
   \item grouped split audits and evaluation-protocol reports,
   \item Android feature-contract audits and Android-style window generation,
   \item on-device exported-tree and TFLite-compatible export,
-  \item hard-example mining, label-conflict auditing, source/family balancing, and threshold
-  policy sweeps,
+  \item hard-example mining, label-conflict auditing, source/family balancing, and threshold policy
+  sweeps,
   \item episode-level alert evaluation in addition to per-window classification,
   \item remote backend training across multiple model families,
   \item privacy ablation and metadata leakage attack benchmarking,
@@ -116,11 +116,11 @@ public corpus rather than only over a controlled synthetic trace:
 
 \subsection{Privacy Views}
 The privacy mechanism is implemented as explicit feature views rather than as an afterthought.
-\texttt{off} and \texttt{low} retain the full feature set, while \texttt{medium} and \texttt{strict}
-replace many exact values with coarse or distribution-aware buckets. For example, activity,
-volume, duration, rate, burstiness, stability, and shape are represented through a small number of
-bucketized values, while direct host hints and several stronger destination/timing cues are removed
-from the exported representation.
+\texttt{off} and \texttt{low} retain the full feature set. \texttt{medium} and \texttt{strict}
+replace many exact values with coarse or distribution-aware buckets. For example, activity, volume,
+duration, rate, burstiness, stability, and shape are represented through a small number of bucketed
+values. Direct host hints and several stronger destination/timing cues are removed from the
+exported representation.
 
 This is not packet padding or transport obfuscation. The system does not add dummy traffic. The
 privacy transformation happens at the feature-representation level.
@@ -133,13 +133,13 @@ representation. The objective is to preserve anomaly utility while reducing leak
 traffic attributes.
 
 The federated simulator then trains over the privacy-student latent representation using a
-FedProx-style objective \citep{fedprox_2020} rather than over raw full-feature windows. FedProx is
-a federated optimization method that adds a proximal term to reduce client-drift problems under
+FedProx-style objective \citep{fedprox_2020} rather than over raw full-feature windows. FedProx is a
+federated optimization method that adds a proximal term to reduce client-drift problems under
 heterogeneous local data. In MANTA, this is used only as a measurable collaborative-learning
 prototype; it does not prove secure deployment by itself.
 
 \subsection{Reproducibility Support}
 The \texttt{run\_experiment\_suite} path, cached privacy-view derivation, manifest reports, and
-comparison reports are all designed to support reproducibility. The current manuscript uses the
-bounded backend/privacy reruns and Android adaptive-window reports documented in the evidence bundle
-described in the appendix.
+comparison reports support reproducibility. The manuscript uses public-corpus backend/privacy
+reruns and Android adaptive-window reports documented in the evidence bundle described in the
+appendix.
