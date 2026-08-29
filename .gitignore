@@ -124,3 +124,9 @@ Caddyfile.*
 /Logo.ico
 /logo.png
 /logo.ico
+
+# Source-owned production image definitions
+!deploy/
+deploy/*
+!deploy/Dockerfile.backend
+!deploy/Dockerfile.website

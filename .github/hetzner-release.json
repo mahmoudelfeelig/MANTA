@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "id": "manta",
+  "source": {
+    "repository": "mahmoudelfeelig/MANTA",
+    "default_branch": "main",
+    "required_workflows": ["MANTA CI Android", "MANTA CI Python"]
+  },
+  "registry": {
+    "host": "registry.elfeel.me",
+    "image_namespace": "apps/manta",
+    "release_repository": "releases/manta"
+  },
+  "release": {
+    "strategy": "source-build",
+    "components": [
+      {
+        "name": "web",
+        "context": ".",
+        "dockerfile": "deploy/Dockerfile.website"
+      },
+      {
+        "name": "backend",
+        "context": ".",
+        "dockerfile": "deploy/Dockerfile.backend"
+      }
+    ]
+  }
+}
