@@ -2,7 +2,9 @@ name: Deploy MANTA Production
 
 on:
   workflow_run:
-    workflows: ["MANTA CI Android", "MANTA CI Python"]
+    # Android is the slower gate. Trigger once from it; the release gateway
+    # still requires both Android and Python CI to succeed for this exact SHA.
+    workflows: ["MANTA CI Android"]
     types: [completed]
     branches: [main]
 
