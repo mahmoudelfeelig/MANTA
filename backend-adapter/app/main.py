@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from html import escape
 from pathlib import Path
 from typing import Annotated
 
@@ -33,7 +34,7 @@ from .models import (
 )
 from .remote_modeling import default_remote_model, score_remote_model, train_remote_model
 from .resistine_client import ResistineClient, ResistineConfig
-from .security import require_auth, verify_token
+from .security import require_any_auth, require_auth, verify_token
 from .storage import AdapterStorage, QueueItem
 from .wazuh_client import WazuhClient, WazuhConfig
 
@@ -1256,7 +1257,7 @@ async def security_headers_middleware(request: Request, call_next):
 
 @app.get("/dashboard/login", response_class=HTMLResponse)
 def dashboard_login_page(error: str | None = None) -> str:
-    error_html = f'<div class="error">{error}</div>' if error else ""
+    error_html = f'<div class="error">{escape(error)}</div>' if error else ""
     return _DASHBOARD_LOGIN_HTML.replace("__ERROR_HTML__", error_html)
 
 
@@ -1267,7 +1268,7 @@ async def dashboard_login(
     payload = await request.json()
     token = str(payload.get("token") or "").strip()
     try:
-        verify_token(settings.shared_token, token)
+        verify_token(settings.operator_token, token)
     except HTTPException:
         return Response(status_code=401)
 
@@ -1293,7 +1294,7 @@ def dashboard_logout():
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(dashboard_session: str | None = Cookie(default=None)):
     try:
-        verify_token(settings.shared_token, dashboard_session or "")
+        verify_token(settings.operator_token, dashboard_session or "")
     except HTTPException:
         return RedirectResponse(url="/dashboard/login", status_code=303)
     return _load_dashboard_html()
@@ -1305,7 +1306,32 @@ def auth_dependency(
     dashboard_session: str | None = Cookie(default=None),
 ) -> None:
     require_auth(
+        expected_token=settings.operator_token,
+        authorization=authorization,
+        x_endpoint_token=x_endpoint_token,
+        dashboard_session=dashboard_session,
+    )
+
+
+def device_auth_dependency(
+    authorization: str | None = Header(default=None),
+    x_endpoint_token: str | None = Header(default=None),
+) -> None:
+    require_auth(
         expected_token=settings.shared_token,
+        authorization=authorization,
+        x_endpoint_token=x_endpoint_token,
+        dashboard_session=None,
+    )
+
+
+def device_or_operator_auth_dependency(
+    authorization: str | None = Header(default=None),
+    x_endpoint_token: str | None = Header(default=None),
+    dashboard_session: str | None = Cookie(default=None),
+) -> None:
+    require_any_auth(
+        expected_tokens=(settings.shared_token, settings.operator_token),
         authorization=authorization,
         x_endpoint_token=x_endpoint_token,
         dashboard_session=dashboard_session,
@@ -1355,6 +1381,8 @@ def health() -> dict:
     config_warnings: list[str] = []
     if len(settings.shared_token) < 16:
         config_warnings.append("ADAPTER_SHARED_TOKEN is shorter than recommended minimum length (16)")
+    if len(settings.operator_token) < 16:
+        config_warnings.append("ADAPTER_OPERATOR_TOKEN is shorter than recommended minimum length (16)")
 
     return {
         "status": "ok",
@@ -1369,7 +1397,7 @@ def health() -> dict:
 async def ingest_mobile_flow(
     request: Request,
     event: MobileFlowEvent,
-    _: None = Depends(auth_dependency),
+    _: None = Depends(device_auth_dependency),
 ):
     _validate_payload_size(request)
 
@@ -1384,7 +1412,7 @@ async def ingest_mobile_flow(
 async def ingest_mobile_alert(
     request: Request,
     event: MobileAlertEvent,
-    _: None = Depends(auth_dependency),
+    _: None = Depends(device_auth_dependency),
 ):
     _validate_payload_size(request)
 
@@ -1401,7 +1429,7 @@ async def ingest_mobile_alert(
 @app.post("/api/v1/device/heartbeat")
 def device_heartbeat(
     payload: DeviceHeartbeatPayload,
-    _: None = Depends(auth_dependency),
+    _: None = Depends(device_auth_dependency),
 ):
     storage.note_device_heartbeat(
         payload.device_id_pseudo,
@@ -1421,7 +1449,7 @@ def device_heartbeat(
 @app.post("/api/v1/inference/window")
 def infer_remote_window(
     payload: RemoteInferenceRequest,
-    _: None = Depends(auth_dependency),
+    _: None = Depends(device_auth_dependency),
 ):
     storage.note_device_seen(payload.device_id_pseudo)
     result = _remote_inference(payload)
@@ -1434,7 +1462,7 @@ def infer_remote_window(
 @app.get("/api/v1/model/device/{device_id_pseudo}")
 def get_remote_model(
     device_id_pseudo: str,
-    _: None = Depends(auth_dependency),
+    _: None = Depends(device_or_operator_auth_dependency),
 ):
     model = _active_remote_model(device_id_pseudo)
     versions = storage.list_remote_model_versions(device_id_pseudo=device_id_pseudo, limit=20)
@@ -1948,7 +1976,7 @@ _GLOBAL_POLICY_ID = "__global__"
 @app.get("/api/v1/policy/device/{device_id_pseudo}")
 def get_device_policy(
     device_id_pseudo: str,
-    _: None = Depends(auth_dependency),
+    _: None = Depends(device_or_operator_auth_dependency),
 ):
     policy = storage.get_policy(device_id_pseudo) or storage.get_policy(_GLOBAL_POLICY_ID) or _DEFAULT_POLICY
     return {

@@ -27,6 +27,20 @@ def verify_token(expected: str, provided: str) -> None:
         )
 
 
+def verify_any_token(expected_tokens: tuple[str, ...], provided: str) -> None:
+    configured = tuple(token for token in expected_tokens if token)
+    if not configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Adapter token not configured",
+        )
+    if not provided or not any(hmac.compare_digest(expected, provided) for expected in configured):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+        )
+
+
 def require_auth(
     expected_token: str,
     authorization: str | None = Header(default=None),
@@ -35,3 +49,13 @@ def require_auth(
 ) -> None:
     token = extract_token(authorization, x_endpoint_token, dashboard_session)
     verify_token(expected_token, token)
+
+
+def require_any_auth(
+    expected_tokens: tuple[str, ...],
+    authorization: str | None = Header(default=None),
+    x_endpoint_token: str | None = Header(default=None),
+    dashboard_session: str | None = Cookie(default=None),
+) -> None:
+    token = extract_token(authorization, x_endpoint_token, dashboard_session)
+    verify_any_token(expected_tokens, token)

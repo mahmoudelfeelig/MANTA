@@ -28,6 +28,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e .[test]
 export ADAPTER_SHARED_TOKEN='replace-with-long-random-token'
+export ADAPTER_OPERATOR_TOKEN='replace-with-a-different-long-random-token'
 uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 

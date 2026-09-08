@@ -22,6 +22,7 @@ source .venv/bin/activate
 pip install -e .[test]
 # Required
 export ADAPTER_SHARED_TOKEN='replace-with-long-random-token'
+export ADAPTER_OPERATOR_TOKEN='replace-with-a-different-long-random-token'
 # Optional
 export WAZUH_INGEST_URL=''
 export WAZUH_API_TOKEN=''
@@ -58,6 +59,8 @@ Note: environment variables are read from process env (`os.getenv`) at startup; 
 - `POST /api/v1/policy/simulate/{device_id_pseudo}`
 - `GET /api/v1/retraining/samples/{device_id_pseudo}`
 - `GET /api/v1/forensics/device/{device_id_pseudo}/bundle`
+
+Android endpoints use `ADAPTER_SHARED_TOKEN`. The dashboard and administrative APIs use the distinct `ADAPTER_OPERATOR_TOKEN`; do not reuse the device token for operator access.
 
 Auth header options:
 - `Authorization: Bearer <token>`

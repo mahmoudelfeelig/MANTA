@@ -13,6 +13,7 @@ if DB_PATH.exists():
     DB_PATH.unlink()
 
 os.environ["ADAPTER_SHARED_TOKEN"] = "test-token"
+os.environ["ADAPTER_OPERATOR_TOKEN"] = "test-operator-token"
 os.environ["SQLITE_PATH"] = str(DB_PATH)
 os.environ["WAZUH_INGEST_URL"] = ""
 

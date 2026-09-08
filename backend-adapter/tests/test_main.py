@@ -16,6 +16,7 @@ if DB_PATH.exists():
     DB_PATH.unlink()
 
 os.environ["ADAPTER_SHARED_TOKEN"] = "test-token"
+os.environ["ADAPTER_OPERATOR_TOKEN"] = "test-operator-token"
 os.environ["SQLITE_PATH"] = str(DB_PATH)
 os.environ["WAZUH_INGEST_URL"] = ""
 os.environ["MAX_RETRIES"] = "3"
@@ -24,6 +25,7 @@ os.environ["RETRY_BASE_SECONDS"] = "1"
 from app.main import (  # noqa: E402
     auto_tune_policy_from_feedback,
     device_heartbeat,
+    dashboard_login_page,
     export_forensics_bundle,
     export_retraining_samples,
     get_device_policy,
@@ -61,6 +63,13 @@ from app.models import (  # noqa: E402
 
 def _fake_request() -> SimpleNamespace:
     return SimpleNamespace(headers={"content-length": "1024"})
+
+
+def test_dashboard_login_error_is_html_escaped() -> None:
+    payload = '<script>alert("x")</script>'
+    rendered = dashboard_login_page(payload)
+    assert payload not in rendered
+    assert "&lt;script&gt;" in rendered
 
 
 def _flow_payload() -> MobileFlowEvent:
