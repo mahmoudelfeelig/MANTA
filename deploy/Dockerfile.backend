@@ -6,8 +6,11 @@ WORKDIR /app
 COPY backend-adapter ./backend-adapter
 WORKDIR /app/backend-adapter
 RUN pip install --no-cache-dir .
-RUN addgroup --system manta && adduser --system --ingroup manta manta \
-    && chown -R manta:manta /app
+RUN groupadd --gid 10001 manta \
+    && useradd --uid 10001 --gid 10001 --no-create-home \
+        --home-dir /nonexistent --shell /usr/sbin/nologin manta \
+    && mkdir -p /data \
+    && chown -R manta:manta /app /data
 USER manta
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
