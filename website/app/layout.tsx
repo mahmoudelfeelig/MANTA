@@ -8,6 +8,11 @@ export const metadata: Metadata = {
   title: "MANTA — Metadata-only mobile threat detection",
   description:
     "Bachelor thesis and working prototype for privacy-aware anomaly detection on encrypted Android traffic.",
+  icons: {
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico",
+    apple: "/elephant-logo.png",
+  },
 };
 
 const repoUrl = "https://github.com/Resistine/feel-bachelor";
